@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1c1c22"/>
+      <stop offset="1" stop-color="#08080a"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#ff3b46" stop-opacity=".55"/>
+      <stop offset=".45" stop-color="#ff3b46" stop-opacity=".12"/>
+      <stop offset="1" stop-color="#ff3b46" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="core" cx="40%" cy="35%" r="70%">
+      <stop offset="0" stop-color="#ffd0d3"/>
+      <stop offset=".35" stop-color="#ff3b46"/>
+      <stop offset="1" stop-color="#8a0d16"/>
+    </radialGradient>
+    <clipPath id="sq"><rect x="64" y="64" width="896" height="896" rx="200"/></clipPath>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="200" fill="url(#bg)"/>
+  <g clip-path="url(#sq)">
+    <circle cx="512" cy="512" r="430" fill="url(#glow)"/>
+    <path d="M512 512 L512 120 A392 392 0 0 1 820 270 Z" fill="#ffffff" fill-opacity=".06"/>
+  </g>
+  <rect x="64" y="64" width="896" height="896" rx="200" fill="none" stroke="#ffffff" stroke-opacity=".07" stroke-width="6"/>
+  <g fill="none" stroke-width="10">
+    <circle cx="512" cy="512" r="360" stroke="#c8ff3d" stroke-opacity=".35"/>
+    <circle cx="512" cy="512" r="285" stroke="#45c8ff" stroke-opacity=".35"/>
+    <circle cx="512" cy="512" r="210" stroke="#ff9a3c" stroke-opacity=".4"/>
+  </g>
+  <!-- steps -->
+  <g>
+    <circle cx="512" cy="152" r="30" fill="#c8ff3d"/>
+    <circle cx="872" cy="512" r="22" fill="#c8ff3d" fill-opacity=".85"/>
+    <circle cx="257" cy="767" r="22" fill="#c8ff3d" fill-opacity=".85"/>
+    <circle cx="713" cy="311" r="24" fill="#45c8ff"/>
+    <circle cx="311" cy="713" r="24" fill="#45c8ff"/>
+    <circle cx="227" cy="512" r="18" fill="#45c8ff" fill-opacity=".7"/>
+    <circle cx="512" cy="302" r="26" fill="#ff9a3c"/>
+    <circle cx="722" cy="512" r="26" fill="#ff9a3c"/>
+    <circle cx="512" cy="722" r="26" fill="#ff9a3c"/>
+    <circle cx="302" cy="512" r="26" fill="#ff9a3c"/>
+  </g>
+  <line x1="512" y1="512" x2="512" y2="132" stroke="#ffffff" stroke-opacity=".5" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="512" cy="512" r="118" fill="url(#core)"/>
+  <circle cx="512" cy="512" r="118" fill="none" stroke="#ffffff" stroke-opacity=".25" stroke-width="6"/>
+</svg>

@@ -1,0 +1,90 @@
+# When a version tag is pushed (e.g. v0.1.0): build the Mac app and the Windows
+# version and attach them to the GitHub release. The description comes from
+# .github/release-notes/<tag>.md, otherwise GitHub generates it.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build, e.g. v0.1.0"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  macos:
+    name: Build for macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Build Bunker.app (universal) and zip it
+        run: ./scripts/build-mac.sh --zip
+      - uses: actions/upload-artifact@v5
+        with:
+          name: macos
+          path: dist/Bunker-macos-universal.zip
+          if-no-files-found: error
+
+  windows:
+    name: Build for Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build bunker.exe
+        run: cargo build --release
+      - name: Zip Bunker.exe
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target/release/bunker.exe dist/Bunker.exe
+          Compress-Archive -Path dist/Bunker.exe -DestinationPath dist/Bunker-windows-x64.zip
+      - uses: actions/upload-artifact@v5
+        with:
+          name: windows
+          path: dist/Bunker-windows-x64.zip
+          if-no-files-found: error
+
+  publish:
+    name: Publish the release
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/download-artifact@v5
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create the release or update its files
+        run: |
+          cd dist
+          sha256sum *.zip > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          notes="../.github/release-notes/$TAG.md"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" *.zip SHA256SUMS.txt --clobber
+          elif [ -f "$notes" ]; then
+            gh release create "$TAG" *.zip SHA256SUMS.txt --title "Bunker ${TAG#v}" --notes-file "$notes"
+          else
+            gh release create "$TAG" *.zip SHA256SUMS.txt --title "Bunker ${TAG#v}" --generate-notes
+          fi

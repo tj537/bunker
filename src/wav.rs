@@ -1,0 +1,76 @@
+//! WAV export: 16-bit stereo PCM, written by hand (the format is tiny).
+
+use std::io::{self, Write};
+use std::path::Path;
+
+pub fn encode(samples: &[f32], sr: u32) -> Vec<u8> {
+    let data_len = (samples.len() * 2) as u32;
+    let mut out = Vec::with_capacity(44 + data_len as usize);
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(36 + data_len).to_le_bytes());
+    out.extend_from_slice(b"WAVEfmt ");
+    out.extend_from_slice(&16u32.to_le_bytes()); // chunk size
+    out.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    out.extend_from_slice(&2u16.to_le_bytes()); // stereo
+    out.extend_from_slice(&sr.to_le_bytes());
+    out.extend_from_slice(&(sr * 4).to_le_bytes()); // bytes per second
+    out.extend_from_slice(&4u16.to_le_bytes()); // block align
+    out.extend_from_slice(&16u16.to_le_bytes()); // bits
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&data_len.to_le_bytes());
+    for &s in samples {
+        let v = (s.clamp(-1.0, 1.0) * 32767.0).round() as i16;
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    out
+}
+
+pub fn write(path: &Path, samples: &[f32], sr: u32) -> io::Result<()> {
+    let mut f = std::fs::File::create(path)?;
+    f.write_all(&encode(samples, sr))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn header_is_valid() {
+        let bytes = encode(&[0.0, 0.5, -1.0, 1.0], 44_100);
+        assert_eq!(&bytes[0..4], b"RIFF");
+        assert_eq!(&bytes[8..12], b"WAVE");
+        assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), 36 + 8);
+        assert_eq!(u32::from_le_bytes(bytes[24..28].try_into().unwrap()), 44_100);
+        assert_eq!(bytes.len(), 44 + 8);
+        assert_eq!(i16::from_le_bytes([bytes[46], bytes[47]]), 16384);
+        assert_eq!(i16::from_le_bytes([bytes[48], bytes[49]]), -32767);
+    }
+
+    /// Writes one demo loop per vibe to target/snapshots/sounds/ – listen to them
+    /// after changing the synth: `cargo test --release render_ -- --ignored`
+    #[test]
+    #[ignore]
+    fn render_demo_loops() {
+        use crate::song::Vibe;
+        let dir = Path::new("target/snapshots/sounds");
+        std::fs::create_dir_all(dir).unwrap();
+        for (i, vibe) in Vibe::ALL.into_iter().enumerate() {
+            let mut song = crate::gen::generate(vibe, &Default::default(), &mut crate::rng::Rng::new(100 + i as u64));
+            if vibe == Vibe::Acid {
+                song.track_mut(crate::song::Voice::Acid).mute = false;
+            }
+            let buf = crate::engine::render_offline(&song, 8, 44_100, 7);
+            write(
+                &dir.join(format!("{}.wav", vibe.name().to_lowercase().replace(' ', "-"))),
+                &buf,
+                44_100,
+            )
+            .unwrap();
+        }
+        // Auto mode over a whole 32-bar cycle: breakdown, build-up, drop
+        let mut song = crate::gen::generate(Vibe::Peak, &Default::default(), &mut crate::rng::Rng::new(5));
+        song.auto = true;
+        let buf = crate::engine::render_offline(&song, 36, 44_100, 3);
+        write(&dir.join("auto-36-bars.wav"), &buf, 44_100).unwrap();
+    }
+}
