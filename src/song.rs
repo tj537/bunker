@@ -273,6 +273,31 @@ impl Song {
         &mut self.tracks[v.index()]
     }
 
+    /// Repair values that would break the app (old or hand-edited saved state)
+    pub fn sanitize(&mut self) {
+        for t in &mut self.tracks {
+            t.len = t.len.clamp(1, STEPS as u8);
+            t.volume = if t.volume.is_finite() { t.volume.clamp(0.0, 1.0) } else { 0.8 };
+            for s in &mut t.steps {
+                s.chance = s.chance.min(100);
+                s.note = s.note.clamp(-24, 36);
+            }
+        }
+        let fix = |v: f32, lo: f32, hi: f32, def: f32| if v.is_finite() { v.clamp(lo, hi) } else { def };
+        self.bpm = fix(self.bpm, 90.0, 180.0, 130.0);
+        self.swing = fix(self.swing, 0.0, 1.0, 0.0);
+        self.master = fix(self.master, 0.0, 1.0, 0.8);
+        let m = &mut self.macros;
+        m.energy = fix(m.energy, 0.0, 1.0, 0.6);
+        m.dark = fix(m.dark, 0.0, 1.0, 0.45);
+        m.acid = fix(m.acid, 0.0, 1.0, 0.5);
+        m.space = fix(m.space, 0.0, 1.0, 0.35);
+        self.root = self.root.clamp(36, 47);
+        if ![4, 8, 16].contains(&self.auto_bars) {
+            self.auto_bars = 8;
+        }
+    }
+
     pub fn root_name(&self) -> String {
         const NAMES: [&str; 12] = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"];
         let scale = match self.scale {
@@ -302,6 +327,26 @@ mod tests {
                 assert!(s.intervals().contains(&r), "{n} {d} → {r}");
             }
         }
+    }
+
+    #[test]
+    fn sanitize_repairs_broken_values() {
+        let mut s = Song::default();
+        s.tracks[2].len = 0;
+        s.tracks[3].volume = f32::NAN;
+        s.bpm = 9999.0;
+        s.root = 3;
+        s.auto_bars = 0;
+        s.sanitize();
+        assert_eq!(s.tracks[2].len, 1);
+        assert_eq!(s.tracks[3].volume, 0.8);
+        assert_eq!(s.bpm, 180.0);
+        assert_eq!(s.root, 36);
+        assert_eq!(s.auto_bars, 8);
+        let mut ok = Song::default();
+        let before = ok;
+        ok.sanitize();
+        assert_eq!(ok, before);
     }
 
     #[test]

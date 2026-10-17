@@ -38,6 +38,16 @@ pub struct Paint {
     pub track: usize,
     pub on: bool,
     pub active: bool,
+    /// Scroll collected over frames: trackpads send many tiny deltas
+    pub scroll: f32,
+}
+
+/// Collect scrolling and return whole notches (±1 per `step` points)
+pub fn scroll_notches(acc: &mut f32, delta: f32, step: f32) -> i32 {
+    *acc += delta;
+    let n = (*acc / step).trunc();
+    *acc -= n * step;
+    n as i32
 }
 
 pub struct Geometry {
@@ -86,7 +96,7 @@ impl Geometry {
             return None;
         }
         let track = (((dist - self.r_in) / self.spacing()) as usize).min(TRACKS - 1);
-        let len = song.tracks[track].len as usize;
+        let len = (song.tracks[track].len as usize).max(1);
         let a = (d.y.atan2(d.x) + PI / 2.0).rem_euclid(TAU);
         let step = ((a / TAU * len as f32).round() as usize) % len;
         let dot = self.dot(track, step, len);
@@ -133,6 +143,7 @@ pub fn orbit(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mut 
                     track: t,
                     on: !step.on,
                     active: true,
+                    scroll: 0.0,
                 };
                 step.on = paint.on;
             }
@@ -164,12 +175,15 @@ pub fn orbit(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mut 
     }
     if let Some((t, s)) = hovered {
         let scroll = ui.input(|i| i.raw_scroll_delta.y);
-        if Voice::ALL[t].is_synth() && scroll.abs() > 0.5 {
+        let notches = scroll_notches(&mut paint.scroll, scroll, 24.0);
+        if Voice::ALL[t].is_synth() && notches != 0 {
             let scale = song.scale;
             let step = &mut song.tracks[t].steps[s];
             step.on = true;
-            step.note = scale.shift(step.note, if scroll > 0.0 { 1 } else { -1 });
+            step.note = scale.shift(step.note, notches.signum());
         }
+    } else {
+        paint.scroll = 0.0;
     }
     if on_center || hovered.is_some() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);

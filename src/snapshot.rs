@@ -44,6 +44,12 @@ mod tests {
         render("orbit_stopped", 1360.0, 860.0, |_| {});
         render("orbit_playing", 1360.0, 860.0, |app| {
             app.song.auto = true;
+            app.slots[0] = Some(app.song);
+            app.slots[1] = Some(crate::gen::generate(
+                crate::song::Vibe::Acid,
+                &Default::default(),
+                &mut crate::rng::Rng::new(4),
+            ));
             app.fake_live = Some(playing(36.3, &[0, 3, 6]));
         });
         render("orbit_build", 1360.0, 860.0, |app| {
@@ -61,6 +67,9 @@ mod tests {
         });
         render("pads_small", 1100.0, 700.0, |app| {
             app.view = View::Pads;
+        });
+        render("help_small", 1100.0, 700.0, |app| {
+            app.help = true;
         });
     }
 }

@@ -22,7 +22,11 @@ For **macOS** (Apple Silicon & Intel) and **Windows**. Written in Rust, every so
 - **Four macros** instead of a hundred knobs: **Energy** (busier, harder), **Darkness** (longer kick, rumble, darker sound), **Acid** (the squelch), **Space** (reverb & echo).
 - **Live** – a filter that springs back when you let go, **Echo** and **Stutter** to hold, and the **DROP** button: a build-up with a clap roll and a noise riser, then everything hits on the next bar.
 - **Bass & acid** – a punchy rolling bass and a 303-style acid line with accents and slides, both in the song's key. Scroll on a dot to change its note.
+- **Grooves A–D** – like what you hear? Click an empty slot to keep it, click it again later to bring it back. Right-click to overwrite or clear.
+- **Undo everything** – <kbd>⌘</kbd>/<kbd>Ctrl</kbd> + <kbd>Z</kbd> takes back any change, a shuffle too.
+- **Solo & clear** – click a track name to hear only that sound; right-click its dice to clear it.
 - **Export WAV** – 4 to 64 bars, 44.1 kHz stereo, auto mode included.
+- **Plug and play** – switch to headphones or plug in a MIDI keyboard while it runs; Bunker follows within a few seconds.
 - **MIDI keyboard** – just plug it in (see below).
 
 ![Pads and step grid](docs/images/pads.jpg)
@@ -53,6 +57,8 @@ Bunker connects to every MIDI keyboard it finds, also when you plug one in later
 | <kbd>R</kbd> | Record on / off |
 | <kbd>Tab</kbd> | Orbit ↔ pads |
 | <kbd>↑</kbd> / <kbd>↓</kbd> | Tempo |
+| <kbd>⌘</kbd>/<kbd>Ctrl</kbd> + <kbd>Z</kbd> | Undo (with <kbd>Shift</kbd>: redo) |
+| <kbd>Esc</kbd> | Close a window |
 
 In the orbit: **click** a dot to switch it, **drag** to paint, **right-click** for an accent (on the acid ring the next right-click adds a slide), **shift-click** makes a step play only sometimes (75 → 50 → 25 %), **scroll** on bass and acid dots changes the note.
 

@@ -148,6 +148,7 @@ pub fn pads(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mut P
                     track: t,
                     on: !song.tracks[t].steps[s].on,
                     active: true,
+                    scroll: 0.0,
                 };
                 song.tracks[t].steps[s].on = paint.on;
             }

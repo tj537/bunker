@@ -88,6 +88,8 @@ pub struct Engine {
     sr: f32,
     pub song: Song,
     playing: bool,
+    /// Kick and bass were muted by the auto mode's breakdown
+    breakdown: bool,
     phase: f64,
     last_fired: Option<u64>,
     half_fired: Option<u64>,
@@ -135,6 +137,7 @@ impl Engine {
             sr,
             song,
             playing: false,
+            breakdown: false,
             phase: 0.0,
             last_fired: None,
             half_fired: None,
@@ -176,7 +179,14 @@ impl Engine {
 
     pub fn handle(&mut self, cmd: Cmd) {
         match cmd {
-            Cmd::Song(s) => self.song = *s,
+            Cmd::Song(s) => {
+                self.song = *s;
+                self.song.sanitize();
+                // Auto mode switched off in the middle of a breakdown: bring the beat back
+                if self.breakdown && !self.song.auto {
+                    self.end_breakdown();
+                }
+            }
             Cmd::Play => {
                 if !self.playing {
                     self.playing = true;
@@ -187,6 +197,9 @@ impl Engine {
             }
             Cmd::Stop => {
                 self.playing = false;
+                if self.breakdown {
+                    self.end_breakdown();
+                }
                 self.build = None;
                 self.stutter = None;
                 self.shared.build.store(0, Ordering::Relaxed);
@@ -263,8 +276,16 @@ impl Engine {
             .map(|b| ((idx - b.start as f64) / b.len as f64).clamp(0.0, 1.0) as f32)
     }
 
+    fn end_breakdown(&mut self) {
+        self.breakdown = false;
+        self.song.track_mut(Voice::Kick).mute = false;
+        self.song.track_mut(Voice::Bass).mute = false;
+        self.send_song(None);
+    }
+
     fn drop_now(&mut self) {
         self.build = None;
+        self.breakdown = false;
         self.shared.build.store(0, Ordering::Relaxed);
         self.song.track_mut(Voice::Kick).mute = false;
         self.song.track_mut(Voice::Bass).mute = false;
@@ -291,6 +312,7 @@ impl Engine {
         // 32-bar cycle: 24 bars groove (changing every few bars), 6 bars breakdown, 2 bars build-up, drop
         let b = bar % 32;
         if b == 24 {
+            self.breakdown = true;
             self.song.track_mut(Voice::Kick).mute = true;
             self.song.track_mut(Voice::Bass).mute = true;
             self.send_song(Some(Change::Breakdown));
@@ -616,6 +638,30 @@ mod tests {
         assert_eq!(changes.last(), Some(&Change::Drop));
         // Changes every 4 bars before the breakdown
         assert!(changes.len() >= 5 + 3, "{changes:?}");
+        assert!(!e.song.track(Voice::Kick).mute);
+    }
+
+    #[test]
+    fn breakdown_ends_when_auto_mode_stops() {
+        let mut song = gen::generate(Vibe::Peak, &Default::default(), &mut Rng::new(5));
+        song.auto = true;
+        song.bpm = 200.0;
+        let mut e = Engine::new(22_050.0, song, Shared::new(), None, 9);
+        e.handle(Cmd::Play);
+        let bar = (e.step_len() * STEPS as f64) as usize;
+        let mut buf = vec![0.0; 2 * bar * 25 + 200];
+        e.render(&mut buf); // into bar 24: breakdown
+        assert!(e.song.track(Voice::Kick).mute);
+        let mut off = e.song;
+        off.auto = false;
+        e.handle(Cmd::Song(Box::new(off)));
+        assert!(!e.song.track(Voice::Kick).mute && !e.song.track(Voice::Bass).mute);
+
+        // Same when the music stops
+        let mut e = Engine::new(22_050.0, song, Shared::new(), None, 9);
+        e.handle(Cmd::Play);
+        e.render(&mut buf);
+        e.handle(Cmd::Stop);
         assert!(!e.song.track(Voice::Kick).mute);
     }
 

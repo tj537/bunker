@@ -4,6 +4,7 @@ use crate::engine::{Cmd, Engine, Event, Shared};
 use crate::song::Song;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, Stream};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 
@@ -13,9 +14,15 @@ pub struct Audio {
     pub device: String,
 }
 
+/// Name of the system's current default output (to notice headphones being plugged in)
+pub fn default_device_name() -> Option<String> {
+    cpal::default_host().default_output_device().and_then(|d| d.name().ok())
+}
+
 /// Open the default output and start the engine. Commands come in on `rx`,
-/// song changes made by the engine go out on `events`.
-pub fn start(song: Song, rx: Receiver<Cmd>, events: Sender<Event>, shared: Arc<Shared>) -> Result<Audio, String> {
+/// song changes made by the engine go out on `events`. `failed` is set when
+/// the device goes away (unplugged headphones …) so the UI can reconnect.
+pub fn start(song: Song, rx: Receiver<Cmd>, events: Sender<Event>, shared: Arc<Shared>, failed: Arc<AtomicBool>) -> Result<Audio, String> {
     let host = cpal::default_host();
     let device = host.default_output_device().ok_or("No audio output found")?;
     let name = device.name().unwrap_or_else(|_| "Audio output".into());
@@ -24,12 +31,15 @@ pub fn start(song: Song, rx: Receiver<Cmd>, events: Sender<Event>, shared: Arc<S
     let channels = config.channels() as usize;
     let format = config.sample_format();
     let mut stream_config: cpal::StreamConfig = config.into();
-    // Small buffer for snappy pads, but not so small that it crackles
+    // The device's default buffer: low latency without crackles on most systems
     stream_config.buffer_size = cpal::BufferSize::Default;
 
     let mut engine = Engine::new(sr as f32, song, shared, Some(events), seed());
     let mut scratch: Vec<f32> = Vec::new();
-    let err = |e| eprintln!("audio error: {e}");
+    let err = move |e| {
+        eprintln!("audio error: {e}");
+        failed.store(true, Ordering::Relaxed);
+    };
 
     // Render stereo into `scratch`, then spread it over the device's channels
     macro_rules! build {

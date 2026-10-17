@@ -17,6 +17,19 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 
+pub const SLOTS: usize = 4;
+const UNDO_LIMIT: usize = 60;
+const SLOT_NAMES: [&str; SLOTS] = ["A", "B", "C", "D"];
+
+/// A stored song (undo step, saved slot) with the current volume and auto-mode settings –
+/// those belong to the moment, not to the groove
+fn keep_live_settings(mut song: Song, now: &Song) -> Song {
+    song.master = now.master;
+    song.auto = now.auto;
+    song.auto_bars = now.auto_bars;
+    song
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum View {
     Orbit,
@@ -58,7 +71,23 @@ pub struct BunkerApp {
     stutter_mouse: bool,
     key_down: [bool; TRACKS],
     export: Export,
-    help: bool,
+    pub help: bool,
+    audio_failed: Arc<AtomicBool>,
+    audio_device: Option<String>,
+    /// False in tests: never touch the sound card or MIDI there
+    with_devices: bool,
+    bpm_scroll: f32,
+    /// Undo history: songs before each edit (grouped when edits come quickly)
+    undo: Vec<Song>,
+    redo: Vec<Song>,
+    last_edit: f64,
+    /// Set by undo/redo so the restored song doesn't count as a new edit
+    restoring: bool,
+    /// Four saved grooves
+    pub slots: [Option<Song>; SLOTS],
+    slot_now: Option<usize>,
+    /// Solo: the soloed track and everyone's mute state before
+    solo: Option<(usize, [bool; TRACKS])>,
     /// For screenshots: pretend to play at this position
     pub fake_live: Option<Live>,
 }
@@ -66,9 +95,19 @@ pub struct BunkerApp {
 impl BunkerApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         install(&cc.egui_ctx);
-        let song: Song = cc.storage.and_then(|s| eframe::get_value(s, "song")).unwrap_or_default();
+        let mut song: Song = cc.storage.and_then(|s| eframe::get_value(s, "song")).unwrap_or_default();
+        song.sanitize();
         let view = cc.storage.and_then(|s| eframe::get_value(s, "view")).unwrap_or(View::Orbit);
         let mut app = Self::headless(song, view, true);
+        if let Some(mut slots) = cc.storage.and_then(|s| eframe::get_value::<[Option<Song>; SLOTS]>(s, "slots")) {
+            for s in slots.iter_mut().flatten() {
+                s.sanitize();
+            }
+            app.slots = slots;
+        }
+        // First start: show how it works
+        let seen: bool = cc.storage.and_then(|s| eframe::get_value(s, "seen_help")).unwrap_or(false);
+        app.help = !seen;
         let ctx = cc.egui_ctx.clone();
         app.connect_midi(move || ctx.request_repaint());
         app
@@ -80,8 +119,9 @@ impl BunkerApp {
         let (ev_tx, events) = channel();
         let (midi_tx, midi_rx) = channel();
         let shared = Shared::new();
+        let audio_failed = Arc::new(AtomicBool::new(false));
         let audio = if with_audio {
-            audio::start(song, rx, ev_tx, shared.clone())
+            audio::start(song, rx, ev_tx, shared.clone(), audio_failed.clone())
         } else {
             drop((rx, ev_tx));
             Err("Sound is off".into())
@@ -115,6 +155,17 @@ impl BunkerApp {
             key_down: [false; TRACKS],
             export: Export::Closed,
             help: false,
+            audio_device: if with_audio { audio::default_device_name() } else { None },
+            audio_failed,
+            with_devices: with_audio,
+            bpm_scroll: 0.0,
+            undo: Vec::new(),
+            redo: Vec::new(),
+            last_edit: -10.0,
+            restoring: false,
+            slots: [None; SLOTS],
+            slot_now: None,
+            solo: None,
             fake_live: None,
         }
     }
@@ -129,6 +180,89 @@ impl BunkerApp {
             self.say(format!("{} connected", m.names.join(", ")), 0.0);
         }
         self.midi = Some(m);
+    }
+
+    /// Start (or restart) the audio output – after the device changed or failed
+    fn restart_audio(&mut self, ctx: &egui::Context, now: f64) {
+        let was_playing = self.playing();
+        let (tx, rx) = channel();
+        let (ev_tx, events) = channel();
+        self.audio_failed.store(false, Ordering::Relaxed);
+        self.audio = Err("Reconnecting…".into()); // close the old stream first
+        self.audio = audio::start(self.song, rx, ev_tx, self.shared.clone(), self.audio_failed.clone());
+        self.tx = tx;
+        self.events = events;
+        self.sent = self.song;
+        self.audio_device = audio::default_device_name();
+        if was_playing {
+            self.send(Cmd::Play);
+        }
+        if self.filter != 0.0 {
+            self.send(Cmd::Filter(self.filter));
+        }
+        // MIDI talks to the engine directly – reconnect it to the new one
+        let c = ctx.clone();
+        self.connect_midi(move || c.request_repaint());
+        match &self.audio {
+            Ok(a) => {
+                let name = a.device.clone();
+                self.say(format!("Sound now on {name}"), now);
+            }
+            Err(e) => {
+                let e = e.clone();
+                self.say(format!("No sound: {e}"), now);
+            }
+        }
+    }
+
+    fn undo(&mut self, now: f64) {
+        if let Some(prev) = self.undo.pop() {
+            self.redo.push(self.song);
+            self.song = keep_live_settings(prev, &self.song);
+            self.restoring = true;
+            self.say("Undo", now);
+        }
+    }
+
+    fn redo(&mut self, now: f64) {
+        if let Some(next) = self.redo.pop() {
+            self.undo.push(self.song);
+            self.song = keep_live_settings(next, &self.song);
+            self.restoring = true;
+            self.say("Redo", now);
+        }
+    }
+
+    fn slot_clicked(&mut self, i: usize, save: bool, now: f64) {
+        if save || self.slots[i].is_none() {
+            self.slots[i] = Some(self.song);
+            self.slot_now = Some(i);
+            self.say(format!("Groove saved in slot {}", SLOT_NAMES[i]), now);
+        } else if let Some(s) = self.slots[i] {
+            self.song = keep_live_settings(s, &self.song);
+            self.slot_now = Some(i);
+            self.say(format!("Slot {} loaded", SLOT_NAMES[i]), now);
+        }
+    }
+
+    fn toggle_solo(&mut self, i: usize, now: f64) {
+        match self.solo {
+            Some((t, before)) if t == i => {
+                for (tr, m) in self.song.tracks.iter_mut().zip(before) {
+                    tr.mute = m;
+                }
+                self.solo = None;
+                self.say("Solo off", now);
+            }
+            other => {
+                let before = other.map_or_else(|| self.song.tracks.map(|t| t.mute), |(_, b)| b);
+                for (j, tr) in self.song.tracks.iter_mut().enumerate() {
+                    tr.mute = j != i;
+                }
+                self.solo = Some((i, before));
+                self.say(format!("Solo: {}", Voice::ALL[i].name()), now);
+            }
+        }
     }
 
     fn send(&self, cmd: Cmd) {
@@ -270,7 +404,23 @@ impl BunkerApp {
             else {
                 continue;
             };
+            if pressed && (modifiers.command || modifiers.ctrl) {
+                match key {
+                    Key::Z if modifiers.shift => self.redo(now),
+                    Key::Z => self.undo(now),
+                    Key::Y => self.redo(now),
+                    _ => {}
+                }
+                continue;
+            }
             if modifiers.command || modifiers.ctrl {
+                continue;
+            }
+            if pressed && key == Key::Escape {
+                self.help = false;
+                if matches!(self.export, Export::Open { .. }) {
+                    self.export = Export::Closed;
+                }
                 continue;
             }
             if let Some(i) = pad_keys.iter().position(|&k| k == key) {
@@ -359,13 +509,24 @@ impl BunkerApp {
                 {
                     self.help = !self.help;
                 }
-                if ui
-                    .add(egui::Button::new(
-                        egui::RichText::new(format!("{}  Export", ph::DOWNLOAD_SIMPLE)).font(bold(13.0)),
-                    ))
-                    .on_hover_text("Save the beat as a WAV file")
-                    .clicked()
-                {
+                let export_btn = ui.add(egui::Button::new(
+                    egui::RichText::new(format!("{}  Export", ph::DOWNLOAD_SIMPLE)).font(bold(13.0)),
+                ));
+                for (icon, tip, is_redo) in [
+                    (ph::ARROW_CLOCKWISE, "Redo (⌘/Ctrl + Shift + Z)", true),
+                    (ph::ARROW_COUNTER_CLOCKWISE, "Undo (⌘/Ctrl + Z)", false),
+                ] {
+                    let enabled = if is_redo { !self.redo.is_empty() } else { !self.undo.is_empty() };
+                    let b = egui::Button::new(egui::RichText::new(icon).size(18.0)).frame(false);
+                    if ui.add_enabled(enabled, b).on_hover_text(tip).clicked() {
+                        if is_redo {
+                            self.redo(now);
+                        } else {
+                            self.undo(now);
+                        }
+                    }
+                }
+                if export_btn.on_hover_text("Save the beat as a WAV file").clicked() {
                     self.export = Export::Open { bars: 16 };
                 }
                 let midi_on = self.midi.as_ref().is_some_and(|m| m.is_connected());
@@ -405,8 +566,9 @@ impl BunkerApp {
         }
         if resp.hovered() {
             let s = ui.input(|i| i.raw_scroll_delta.y);
-            if s.abs() > 0.5 {
-                self.song.bpm = (self.song.bpm + s.signum()).clamp(90.0, 180.0);
+            let n = orbit::scroll_notches(&mut self.bpm_scroll, s, 24.0);
+            if n != 0 {
+                self.song.bpm = (self.song.bpm.round() + n as f32).clamp(90.0, 180.0);
             }
         }
         if !resp.dragged() {
@@ -436,7 +598,12 @@ impl BunkerApp {
         ui.add_space(2.0);
         for (i, voice) in Voice::ALL.into_iter().enumerate() {
             let color = track_color(voice);
-            let (row, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 50.0), Sense::hover());
+            let (row, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 50.0), Sense::click());
+            let soloed = self.solo.is_some_and(|(t, _)| t == i);
+            let resp = resp.on_hover_text("Click: solo – hear only this track");
+            if resp.clicked() {
+                self.toggle_solo(i, now);
+            }
             let flash = live.flash(i);
             let muted = self.song.tracks[i].mute;
             let p = ui.painter().clone();
@@ -446,13 +613,28 @@ impl BunkerApp {
             let dot = row.left_center() + vec2(14.0, -8.0);
             glow(&p, dot, 5.0, color, if muted { 0.0 } else { 0.3 + flash });
             p.circle_filled(dot, 5.0, if muted { FAINT } else { color });
-            p.text(
+            let name_rect = p.text(
                 row.left_top() + vec2(28.0, 6.0),
                 Align2::LEFT_TOP,
                 voice.name(),
                 bold(14.0),
-                if muted { FAINT } else { TEXT },
+                if soloed {
+                    ACID
+                } else if muted {
+                    FAINT
+                } else {
+                    TEXT
+                },
             );
+            if soloed {
+                p.text(
+                    name_rect.right_center() + vec2(6.0, 0.0),
+                    Align2::LEFT_CENTER,
+                    "SOLO",
+                    bold(9.5),
+                    ACID,
+                );
+            }
             let t = &self.song.tracks[i];
             p.text(
                 row.left_top() + vec2(28.0, 25.0),
@@ -463,7 +645,7 @@ impl BunkerApp {
             );
             // Buttons on the right
             let mut x = row.right() - 6.0;
-            let mut icon_btn = |ui: &mut Ui, icon: &str, tip: &str, on: bool, col: Color32| -> bool {
+            let mut icon_btn = |ui: &mut Ui, icon: &str, tip: &str, on: bool, col: Color32| -> egui::Response {
                 let r = Rect::from_min_size(pos2(x - 28.0, row.top() + 4.0), vec2(28.0, 26.0));
                 x -= 30.0;
                 let resp = ui.allocate_rect(r, Sense::click()).on_hover_text(tip);
@@ -484,9 +666,17 @@ impl BunkerApp {
                         DIM
                     },
                 );
-                resp.clicked()
+                resp
             };
-            if icon_btn(ui, ph::DICE_FIVE, "New pattern for this track", false, ACID) {
+            let dice = icon_btn(ui, ph::DICE_FIVE, "New pattern for this track (right-click: clear)", false, ACID);
+            if dice.secondary_clicked() {
+                let t = &mut self.song.tracks[i];
+                for st in t.steps.iter_mut() {
+                    *st = crate::song::Step::default();
+                }
+                self.say(format!("{} cleared", voice.name()), now);
+            }
+            if dice.clicked() {
                 let fresh = gen::track_for(voice, self.song.vibe, self.song.macros.energy, &self.song, &mut self.rng);
                 let t = &mut self.song.tracks[i];
                 *t = crate::song::Track {
@@ -502,7 +692,9 @@ impl BunkerApp {
                 &format!("Mute ({})", i + 1),
                 muted,
                 RED,
-            ) {
+            )
+            .clicked()
+            {
                 self.song.tracks[i].mute = !muted;
             }
             // Length stepper
@@ -560,6 +752,11 @@ impl BunkerApp {
             if ui.small_button(ph::CARET_RIGHT).clicked() {
                 self.song.root = if self.song.root >= 47 { 36 } else { self.song.root + 1 };
             }
+            let tr = self.shared.transpose.load(Ordering::Relaxed);
+            if tr != 0 {
+                ui.label(egui::RichText::new(format!("{tr:+}")).font(bold(12.0)).color(ACID))
+                    .on_hover_text("Transposed by the MIDI keyboard");
+            }
         });
         let w = ui.available_width() - 70.0;
         for (label, which) in [("Swing", 0), ("Volume", 1)] {
@@ -589,7 +786,7 @@ impl BunkerApp {
         let w = ui.available_width();
         heading(ui, "MACROS");
         // Short window: four small knobs in a row instead of a 2 × 2 block
-        let compact = ui.available_height() < 760.0;
+        let compact = ui.available_height() < 715.0;
         let ks = if compact { (w - 24.0) / 4.0 } else { (w / 2.0 - 8.0).min(118.0) };
         let m = self.song.macros;
         let mut vals = [m.energy, m.dark, m.acid, m.space];
@@ -753,11 +950,96 @@ impl BunkerApp {
         }
     }
 
+    /// Four slots for grooves you like: click an empty one to save, a full one to load
+    fn slots_ui(&mut self, ui: &mut Ui, top_right: egui::Pos2, now: f64) {
+        let size = 36.0;
+        let gap = 6.0;
+        let left = top_right.x - SLOTS as f32 * (size + gap) + gap;
+        ui.painter().text(
+            pos2(left - 10.0, top_right.y + size / 2.0),
+            Align2::RIGHT_CENTER,
+            "GROOVES",
+            bold(10.5),
+            FAINT,
+        );
+        for (i, name) in SLOT_NAMES.into_iter().enumerate() {
+            let r = Rect::from_min_size(pos2(left + i as f32 * (size + gap), top_right.y), vec2(size, size));
+            let resp = ui.allocate_rect(r, Sense::click());
+            let filled = self.slots[i];
+            let current = self.slot_now == Some(i);
+            let hot = resp.hovered();
+            let p = ui.painter();
+            match filled {
+                Some(song) => {
+                    p.rect_filled(r, 9.0, if hot { PANEL_HI } else { mix(PANEL, PANEL_HI, 0.6) });
+                    p.rect_stroke(
+                        r,
+                        9.0,
+                        stroke(if current { 1.5 } else { 1.0 }, if current { ACID } else { LINE }),
+                        egui::StrokeKind::Inside,
+                    );
+                    p.text(
+                        r.center() - vec2(0.0, 4.0),
+                        Align2::CENTER_CENTER,
+                        name,
+                        display(16.0),
+                        if current { ACID } else { TEXT },
+                    );
+                    // Tiny dots: which tracks play in this groove
+                    for (t, v) in Voice::ALL.into_iter().enumerate() {
+                        let tr = song.tracks[t];
+                        let x = r.left() + 6.0 + t as f32 * (size - 12.0) / 7.0;
+                        let c = if tr.mute || tr.hits() == 0 {
+                            alpha(FAINT, 0.5)
+                        } else {
+                            track_color(v)
+                        };
+                        p.circle_filled(pos2(x, r.bottom() - 6.0), 1.6, c);
+                    }
+                }
+                None => {
+                    p.rect_stroke(r, 9.0, stroke(1.0, if hot { FAINT } else { LINE }), egui::StrokeKind::Inside);
+                    p.text(
+                        r.center(),
+                        Align2::CENTER_CENTER,
+                        if hot { ph::PLUS } else { name },
+                        body(14.0),
+                        if hot { TEXT } else { FAINT },
+                    );
+                }
+            }
+            let tip = if filled.is_some() {
+                format!("Load groove {} (right-click: save over it or clear)", name)
+            } else {
+                format!("Save this groove in slot {}", name)
+            };
+            let resp = resp.on_hover_text(tip).on_hover_cursor(egui::CursorIcon::PointingHand);
+            if resp.clicked() {
+                self.slot_clicked(i, false, now);
+            }
+            if filled.is_some() {
+                resp.context_menu(|ui| {
+                    if ui.button(format!("{}  Save current groove here", ph::FLOPPY_DISK)).clicked() {
+                        self.slot_clicked(i, true, now);
+                        ui.close_menu();
+                    }
+                    if ui.button(format!("{}  Clear slot", ph::TRASH)).clicked() {
+                        self.slots[i] = None;
+                        if self.slot_now == Some(i) {
+                            self.slot_now = None;
+                        }
+                        ui.close_menu();
+                    }
+                });
+            }
+        }
+    }
+
     fn hints(&self, ui: &mut Ui) {
         ui.horizontal_centered(|ui| {
             ui.add_space(8.0);
             let keys =
-                "Space play  ·  Enter shuffle  ·  A–K pads  ·  1–8 mute  ·  B drop  ·  Q stutter  ·  W echo  ·  R record  ·  Tab view";
+                "Space play  ·  Enter shuffle  ·  A–K pads  ·  1–8 mute  ·  B drop  ·  Q stutter  ·  W echo  ·  R record  ·  Tab view  ·  ⌘/Ctrl Z undo";
             ui.label(egui::RichText::new(keys).font(body(11.5)).color(FAINT));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(8.0);
@@ -882,12 +1164,17 @@ impl BunkerApp {
                     });
                     ui.add_space(4.0);
                 };
-                row(ui, ph::PLAY, "Press play", "Space or the button in the middle. Pick a vibe at the top to roll a fresh groove.");
-                row(ui, ph::CIRCLES_THREE, "The orbit", "Each ring is one sound, each dot one step. Click to switch a dot on or off, drag to paint. Right-click: accent (on acid: slide). Scroll on bass/acid dots to change the note. Shift-click: chance.");
-                row(ui, ph::GRID_FOUR, "Pads", "Tab switches to big pads and a classic grid. Hit RECORD and play along – your hits land on the beat.");
-                row(ui, ph::INFINITY, "Auto mode", "Bunker keeps changing the groove on its own and plays breakdowns and drops every 32 bars.");
-                row(ui, ph::SLIDERS, "Macros & live", "Four big knobs shape the sound. FILTER springs back when you let go. Hold ECHO or STUTTER. DROP builds up and hits on the next bar.");
-                row(ui, ph::PIANO_KEYS, "MIDI keyboard", "Keys below middle C play the sounds. Hold a key from middle C up to transpose bass and acid. Mod wheel = acid, pitch bend = filter, sustain = echo, knobs (CC 70–73) = macros.");
+                let max_h = ctx.screen_rect().height() - 180.0;
+                egui::ScrollArea::vertical().max_height(max_h).show(ui, |ui| {
+                    row(ui, ph::PLAY, "Press play", "Space or the button in the middle. Pick a vibe at the top to roll a fresh groove.");
+                    row(ui, ph::CIRCLES_THREE, "The orbit", "Each ring is one sound, each dot one step. Click to switch a dot on or off, drag to paint. Right-click: accent (on acid: slide). Scroll on bass/acid dots to change the note. Shift-click: chance.");
+                    row(ui, ph::GRID_FOUR, "Pads", "Tab switches to big pads and a classic grid. Hit RECORD and play along – your hits land on the beat.");
+                    row(ui, ph::FLOPPY_DISK, "Grooves A–D", "Like what you hear? Click an empty slot (top right) to keep it, click it again later to bring it back. Right-click a full slot to overwrite or clear it.");
+                    row(ui, ph::ARROW_COUNTER_CLOCKWISE, "Undo", "⌘/Ctrl + Z takes back any change – a shuffle too. ⌘/Ctrl + Shift + Z redoes it.");
+                    row(ui, ph::INFINITY, "Auto mode", "Bunker keeps changing the groove on its own and plays breakdowns and drops every 32 bars.");
+                    row(ui, ph::SLIDERS, "Macros & live", "Four big knobs shape the sound. FILTER springs back when you let go. Hold ECHO or STUTTER. DROP builds up and hits on the next bar. Click a track name to solo it, right-click its dice to clear it.");
+                    row(ui, ph::PIANO_KEYS, "MIDI keyboard", "Keys below middle C play the sounds. Hold a key from middle C up to transpose bass and acid. Mod wheel = acid, pitch bend = filter, sustain = echo, knobs (CC 70–73) = macros.");
+                });
             });
         self.help = open;
     }
@@ -901,6 +1188,8 @@ impl eframe::App for BunkerApp {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, "song", &self.song);
         eframe::set_value(storage, "view", &self.view);
+        eframe::set_value(storage, "slots", &self.slots);
+        eframe::set_value(storage, "seen_help", &true);
     }
 }
 
@@ -917,13 +1206,21 @@ impl BunkerApp {
             }
         }
 
-        // MIDI keyboard plugged in or out? Check every few seconds
-        if now > self.midi_scan_at {
+        // MIDI keyboard or headphones plugged in or out? Check every few seconds
+        if now > self.midi_scan_at && self.with_devices {
             self.midi_scan_at = now + 3.0;
-            if self.fake_live.is_none() && MidiIn::port_count() != self.midi_ports {
+            if MidiIn::port_count() != self.midi_ports {
                 let c = ctx.clone();
                 self.connect_midi(move || c.request_repaint());
             }
+            let device = audio::default_device_name();
+            if self.audio_failed.load(Ordering::Relaxed) || (device.is_some() && device != self.audio_device) {
+                self.restart_audio(ctx, now);
+            }
+        }
+        if self.with_devices {
+            // Keep the 3-second checks running even when nothing moves
+            ctx.request_repaint_after(std::time::Duration::from_secs(3));
         }
 
         let frame = |fill: Color32, margin: f32| egui::Frame::new().fill(fill).inner_margin(margin);
@@ -969,14 +1266,105 @@ impl BunkerApp {
                     }
                 }
             }
+            self.slots_ui(ui, inner.right_top(), now);
         });
 
         self.export_window(ctx, now);
         self.help_window(ctx);
 
         if self.song != self.sent {
+            if self.restoring {
+                self.restoring = false;
+            } else {
+                // Quick successive edits (a knob turn, painting dots) are one undo step
+                if now - self.last_edit > 0.8 {
+                    self.undo.push(self.sent);
+                    if self.undo.len() > UNDO_LIMIT {
+                        self.undo.remove(0);
+                    }
+                }
+                self.redo.clear();
+                self.last_edit = now;
+            }
             self.sent = self.song;
             self.send(Cmd::Song(Box::new(self.song)));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::offscreen::Offscreen;
+
+    fn frame(app: &mut BunkerApp, snap: &mut Offscreen, t: f64) {
+        snap.frame(t, |ctx| app.ui(ctx));
+    }
+
+    #[test]
+    fn undo_and_redo_a_shuffle() {
+        let mut snap = Offscreen::new(1360.0, 860.0);
+        install(&snap.ctx);
+        let mut app = BunkerApp::headless(Song::default(), View::Orbit, false);
+        frame(&mut app, &mut snap, 1.0);
+        let original = app.song;
+        app.shuffle(Vibe::Industrial, 2.0);
+        frame(&mut app, &mut snap, 2.0);
+        let shuffled = app.song;
+        assert_ne!(shuffled, original);
+
+        app.undo(3.0);
+        frame(&mut app, &mut snap, 3.0);
+        assert_eq!(app.song.tracks, original.tracks);
+        app.redo(4.0);
+        frame(&mut app, &mut snap, 4.0);
+        assert_eq!(app.song.tracks, shuffled.tracks);
+        // Redo history survives the restore itself, and a new edit clears it
+        app.undo(5.0);
+        frame(&mut app, &mut snap, 5.0);
+        assert_eq!(app.redo.len(), 1);
+        app.song.tracks[0].mute = true;
+        frame(&mut app, &mut snap, 7.0);
+        assert!(app.redo.is_empty());
+    }
+
+    #[test]
+    fn quick_edits_are_one_undo_step() {
+        let mut snap = Offscreen::new(1360.0, 860.0);
+        install(&snap.ctx);
+        let mut app = BunkerApp::headless(Song::default(), View::Orbit, false);
+        frame(&mut app, &mut snap, 1.0);
+        for (i, t) in [2.0, 2.1, 2.2, 2.3].into_iter().enumerate() {
+            app.song.macros.energy = 0.1 * i as f32;
+            frame(&mut app, &mut snap, t);
+        }
+        assert_eq!(app.undo.len(), 1);
+    }
+
+    #[test]
+    fn slots_save_and_load() {
+        let mut app = BunkerApp::headless(Song::default(), View::Orbit, false);
+        let first = app.song;
+        app.slot_clicked(0, false, 0.0); // empty → save
+        assert_eq!(app.slots[0], Some(first));
+        app.shuffle(Vibe::Acid, 0.0);
+        app.song.master = 0.3;
+        app.slot_clicked(0, false, 0.0); // full → load
+        assert_eq!(app.song.tracks, first.tracks);
+        assert_eq!(app.song.master, 0.3, "volume belongs to the moment");
+    }
+
+    #[test]
+    fn solo_and_back() {
+        let mut app = BunkerApp::headless(Song::default(), View::Orbit, false);
+        let before = app.song.tracks.map(|t| t.mute);
+        app.toggle_solo(2, 0.0);
+        for (i, t) in app.song.tracks.iter().enumerate() {
+            assert_eq!(t.mute, i != 2);
+        }
+        app.toggle_solo(5, 0.0); // switch solo to another track
+        assert!(!app.song.tracks[5].mute && app.song.tracks[2].mute);
+        app.toggle_solo(5, 0.0);
+        assert_eq!(app.song.tracks.map(|t| t.mute), before);
     }
 }

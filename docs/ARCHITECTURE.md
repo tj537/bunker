@@ -43,7 +43,7 @@ src/
 
 `Engine::render` fills an interleaved stereo buffer sample by sample:
 
-1. **Clock** – `phase` counts 16th steps; a step fires when the integer part changes (odd steps wait for the swing offset). Bar starts call `new_bar`: drops, and in auto mode the 32-bar arrangement (24 bars groove with `gen::evolve` every `auto_bars`, 6 bars breakdown, 2 bars build-up, drop).
+1. **Clock** – `phase` counts 16th steps; a step fires when the integer part changes (odd steps wait for the swing offset). Bar starts call `new_bar`: drops, and in auto mode the 32-bar arrangement (24 bars groove with `gen::evolve` every `auto_bars`, 6 bars breakdown, 2 bars build-up, drop). A breakdown also ends when the music stops or the auto mode is switched off, so kick and bass never stay muted.
 2. **Steps** – each track loops over its own length (`Track::step_at`), so lengths below 16 make polyrhythms. `chance` < 100 rolls the dice. Acid steps whose next step slides get a longer gate and glide.
 3. **Voices** → mixer (pan, delay send, reverb send per track) → rumble (kick through dark resonant delays, ducked by the kick) → drop boom / crash → build-up riser.
 4. **Master** – spring-back filter (low-pass/high-pass), build-up high-pass, darkness tone filter, saturation, a simple limiter, master volume.
@@ -51,6 +51,14 @@ src/
 `render_offline` runs the same engine without a device – for WAV export and tests.
 
 Macros act live (energy: hat/ride level, kick drive; dark: kick length, rumble, tone; acid: filter and resonance; space: sends) and the generator uses Energy for density.
+
+## App state around the song
+
+- **Undo/redo** – at the end of every frame the UI compares `song` with `sent` (the last song it gave the engine). A difference is a user edit: the previous song goes on the undo stack, unless the last edit was less than 0.8 s ago (a knob turn or a painted row is one step). Songs coming from the engine don't count; neither does the restore itself (`restoring`). Undo and slot loads keep the current master volume and auto-mode settings (`keep_live_settings`).
+- **Grooves A–D** – `slots: [Option<Song>; 4]`, saved with the window state.
+- **Solo** – remembers everyone's mute state and puts it back when the solo ends.
+- **Devices** – every 3 s the UI checks the number of MIDI ports and the name of the default audio output. New port count → reconnect MIDI; another default output (headphones) or a failed stream (`audio_failed`, set by cpal's error callback) → `restart_audio` builds a new engine on new channels and reconnects MIDI to it.
+- **Loaded state is repaired** with `Song::sanitize` (lengths 1–16, finite volumes, tempo 90–180 …), also when the engine receives a song.
 
 ## Generator
 
