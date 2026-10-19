@@ -11,7 +11,7 @@ Techno drum machine: orbit sequencer, pads, bass & acid, auto mode, live effects
 | `cargo fmt` | CI checks `cargo fmt --check` (`max_width = 140`) |
 | `cargo test --release render_ -- --ignored` | screenshots to `target/snapshots/*.png` and demo loops to `target/snapshots/sounds/*.wav` – look at (and listen to) them after UI or sound changes |
 | `cargo test --release print_levels -- --ignored --nocapture` | loudness of every track alone |
-| `./scripts/build-mac.sh --install` | builds `dist/Bunker.app` (universal) and replaces `/Applications/Bunker.app`; `NATIVE=1` builds for this Mac only |
+| `./scripts/build-mac.sh --install` | builds `dist/Bunker.app` (universal), replaces `/Applications/Bunker.app` and removes the build copy; `NATIVE=1` builds for this Mac only |
 | `./scripts/build-mac.sh --zip` | builds `dist/Bunker-macos-universal.zip` (release asset) |
 
 Commit only when `cargo test` exits 0.

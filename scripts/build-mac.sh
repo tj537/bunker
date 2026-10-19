@@ -2,7 +2,7 @@
 # Builds dist/Bunker.app – a universal app for Apple Silicon and Intel Macs.
 #
 #   ./scripts/build-mac.sh            build only
-#   ./scripts/build-mac.sh --install  build and replace /Applications/Bunker.app
+#   ./scripts/build-mac.sh --install  build, replace /Applications/Bunker.app and remove the build copy
 #   ./scripts/build-mac.sh --zip      build and pack dist/Bunker-macos-universal.zip for a release
 #   NATIVE=1 ./scripts/build-mac.sh   only for this Mac's CPU (faster while developing)
 set -euo pipefail
@@ -55,5 +55,8 @@ if [[ "${1:-}" == "--install" ]]; then
     sleep 1
     rm -rf "$INSTALL_DIR/Bunker.app"
     cp -R "$APP" "$INSTALL_DIR/"
+    # Otherwise Spotlight and Launchpad show a second Bunker
+    rm -rf "$APP"
+    rmdir dist 2>/dev/null || true
     echo "==> Installed: $INSTALL_DIR/Bunker.app"
 fi
