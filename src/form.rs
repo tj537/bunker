@@ -75,39 +75,52 @@ impl Form {
 
 use Part::*;
 
-/// Built around favorite 1; favorite 2 (if there is one) takes over after the first drop.
-/// With one favorite only, Bunker makes the part after the drop a new chapter of it.
+/// Built around favorite 1: favorite 2 (if there is one) takes over after the first drop,
+/// favorite 1 comes back for the last one. A drop that keeps the favorite makes a new
+/// chapter of it, so a song with one favorite still moves on. The first drop comes early.
 pub const FORMS: [Form; 3] = [
     Form {
         name: "Short",
-        blurb: "One break, one drop",
-        sections: &[s(Intro, 16, 0), s(Groove, 16, 0), s(Break, 8, 0), s(Peak, 16, 1), s(Outro, 16, 1)],
+        blurb: "Two drops, the first after half a minute",
+        sections: &[
+            s(Intro, 8, 0),
+            s(Groove, 8, 0),
+            s(Break, 4, 0),
+            s(Peak, 16, 1),
+            s(Break, 4, 1),
+            s(Peak, 16, 0),
+            s(Outro, 8, 0),
+        ],
     },
     Form {
         name: "Club",
-        blurb: "Two breaks, two drops – a full club track",
+        blurb: "Three drops – a full club track",
         sections: &[
             s(Intro, 16, 0),
-            s(Groove, 16, 0),
+            s(Groove, 8, 0),
+            s(Break, 4, 0),
+            s(Peak, 16, 1),
+            s(Groove, 8, 1),
+            s(Break, 8, 1),
+            s(Peak, 16, 1),
+            s(Groove, 8, 1),
+            s(Break, 4, 1),
+            s(Peak, 16, 0),
+            s(Outro, 16, 0),
+        ],
+    },
+    Form {
+        name: "Hypnotic",
+        blurb: "Long and rolling, two big drops",
+        sections: &[
+            s(Intro, 16, 0),
             s(Groove, 16, 0),
             s(Break, 8, 0),
             s(Peak, 32, 1),
             s(Groove, 16, 1),
             s(Break, 8, 1),
-            s(Peak, 16, 1),
-            s(Outro, 16, 1),
-        ],
-    },
-    Form {
-        name: "Hypnotic",
-        blurb: "Long and rolling, one big drop",
-        sections: &[
-            s(Intro, 32, 0),
-            s(Groove, 32, 0),
-            s(Groove, 32, 0),
-            s(Break, 16, 0),
-            s(Peak, 32, 1),
-            s(Outro, 32, 1),
+            s(Peak, 32, 0),
+            s(Outro, 16, 0),
         ],
     },
 ];

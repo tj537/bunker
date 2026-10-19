@@ -245,66 +245,35 @@ pub fn filter_slider(ui: &mut Ui, value: &mut f32, width: f32, height: f32) -> R
 
 pub struct EnergyOut {
     pub changed: bool,
-    pub curve_clicked: bool,
     pub locked_clicked: bool,
 }
 
-/// The energy fader: drag to strip the groove down or build it up. Dots below show
-/// where each track comes in. `curve`: None = auto mode off, Some(on) = the auto
-/// mode's energy curve is (not) driving it – the pill switches it. The red end is the
-/// drop zone: pushed in there by hand, the energy starts a build-up.
-/// `locked`: Bunker steers it (auto mode with AUTO FX) – a slim bar that only shows where the set is.
-pub fn energy_fader(ui: &mut Ui, value: &mut f32, width: f32, height: f32, curve: Option<bool>, locked: bool) -> EnergyOut {
-    if locked {
-        return energy_shown(ui, *value, width, height);
+/// The energy fader: drag to strip the groove down (break) or build it up; the red end is
+/// the drop zone: pushed in there by hand, the energy starts a build-up.
+/// `steered`: who moves it instead of you ("AUTO", "SONG") – then it's a slim bar that only
+/// shows where the set is.
+pub fn energy_fader(ui: &mut Ui, value: &mut f32, width: f32, height: f32, steered: Option<&str>) -> EnergyOut {
+    if let Some(who) = steered {
+        return energy_shown(ui, *value, width, height, who);
     }
     let (rect, resp) = ui.allocate_exact_size(vec2(width, height), Sense::click_and_drag());
     let mut out = EnergyOut {
         changed: false,
-        curve_clicked: false,
         locked_clicked: false,
     };
     let p = ui.painter();
     let top = rect.top() + 8.0;
     p.text(pos2(rect.left(), top), Align2::LEFT_CENTER, "ENERGY", bold(10.5), DIM);
-    // The curve pill
-    let pill = Rect::from_min_size(pos2(rect.right() - 62.0, top - 9.0), vec2(62.0, 18.0));
-    if let Some(on) = curve {
-        let hot = ui.rect_contains_pointer(pill);
-        p.rect_filled(
-            pill,
-            9.0,
-            if on {
-                alpha(ACID, 0.18)
-            } else if hot {
-                PANEL_HI
-            } else {
-                Color32::TRANSPARENT
-            },
-        );
-        p.rect_stroke(pill, 9.0, stroke(1.0, if on { ACID } else { LINE }), egui::StrokeKind::Inside);
-        p.text(
-            pill.center(),
-            Align2::CENTER_CENTER,
-            if on { "CURVE" } else { "BY HAND" },
-            bold(9.5),
-            if on { ACID } else { DIM },
-        );
-    }
-    let e = *value;
     p.text(
-        pos2(if curve.is_some() { pill.left() - 8.0 } else { rect.right() }, top),
+        pos2(rect.right(), top),
         Align2::RIGHT_CENTER,
-        format!("{:.0}", e * 100.0),
+        format!("{:.0}", *value * 100.0),
         bold(12.0),
         TEXT,
     );
     let track = Rect::from_min_size(pos2(rect.left() + 6.0, top + 14.0), vec2(width - 12.0, 10.0));
-    let on_pill = curve.is_some() && resp.interact_pointer_pos().is_some_and(|p| pill.contains(p));
-    if resp.clicked() && on_pill {
-        out.curve_clicked = true;
-    } else if let Some(pos) = resp.interact_pointer_pos() {
-        if (resp.dragged() || resp.is_pointer_button_down_on()) && !on_pill {
+    if let Some(pos) = resp.interact_pointer_pos() {
+        if resp.dragged() || resp.is_pointer_button_down_on() {
             let v = ((pos.x - track.left()) / track.width()).clamp(0.0, 1.0);
             if (v - *value).abs() > 1e-4 {
                 *value = v;
@@ -356,13 +325,13 @@ pub fn energy_fader(ui: &mut Ui, value: &mut f32, width: f32, height: f32, curve
          • Groove: kick, bass, open hat and ride come in one by one.\n\
          • Drop (red, 90 and up): the build-up starts on the next bar, the drop two bars later.\n\
          So pull it down, bring it up slowly, and you play a whole track with one fader.\n\
-         In auto mode and songs CURVE lets Bunker move it; touch the fader and break and drop are yours.",
+         In the auto mode with AUTO FX and in AUTO SONG, Bunker moves it.",
     );
     out
 }
 
 /// The energy while Bunker steers it: a slim bar with the break and drop zones, no knob
-fn energy_shown(ui: &mut Ui, value: f32, width: f32, height: f32) -> EnergyOut {
+fn energy_shown(ui: &mut Ui, value: f32, width: f32, height: f32, who: &str) -> EnergyOut {
     let (rect, resp) = ui.allocate_exact_size(vec2(width, height), Sense::click());
     let p = ui.painter();
     let top = rect.top() + 8.0;
@@ -370,7 +339,7 @@ fn energy_shown(ui: &mut Ui, value: f32, width: f32, height: f32) -> EnergyOut {
     p.text(
         pos2(rect.right(), top),
         Align2::RIGHT_CENTER,
-        format!("AUTO · {:.0}", value * 100.0),
+        format!("{who} · {:.0}", value * 100.0),
         bold(10.5),
         ACID,
     );
@@ -391,11 +360,12 @@ fn energy_shown(ui: &mut Ui, value: f32, width: f32, height: f32) -> EnergyOut {
     let fill = Rect::from_min_max(track.min, pos2(at(value), track.bottom()));
     p.rect_filled(fill, 2.0, alpha(mix(cool, RED, value), 0.8));
     let clicked = resp
-        .on_hover_text("Bunker steers the energy now – breaks and drops by itself.\nSwitch AUTO FX off to take it over.")
+        .on_hover_text(
+            "Bunker steers the energy now – breaks and drops by itself.\nSwitch AUTO FX off (or stop AUTO SONG) to take it over.",
+        )
         .clicked();
     EnergyOut {
         changed: false,
-        curve_clicked: false,
         locked_clicked: clicked,
     }
 }

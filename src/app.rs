@@ -634,14 +634,23 @@ impl BunkerApp {
 
     /// Bunker steers the energy itself: the auto mode with AUTO FX on
     fn energy_locked(&self) -> bool {
-        self.song.auto && self.song.auto_fx && self.song_form.is_none()
+        self.song_form.is_some() || (self.song.auto && self.song.auto_fx)
+    }
+
+    /// Why the energy bar doesn't move
+    fn energy_hint(&self) -> &'static str {
+        if self.song_form.is_some() {
+            "The song steers the energy – stop AUTO SONG to take it"
+        } else {
+            "Bunker steers the energy – switch AUTO FX off to take it"
+        }
     }
 
     /// Energy by hand – in a song it takes over until the next part; in the auto mode with
     /// AUTO FX the energy is Bunker's
     fn set_energy(&mut self, e: f32, now: f64) {
         if self.energy_locked() {
-            self.say("Bunker steers the energy – switch AUTO FX off to take it", now);
+            self.say(self.energy_hint(), now);
             return;
         }
         self.song.macros.energy = e.clamp(0.0, 1.0);
@@ -1733,15 +1742,17 @@ impl BunkerApp {
         ui.horizontal(|ui| {
             heading(ui, "LIVE");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // AUTO FX only means something in the auto mode
                 let on = self.song.auto_fx;
-                if chip_small(ui, "AUTO FX", on, ACID, 74.0)
-                    .on_hover_text(
-                        "On: in auto mode Bunker arranges by itself – the energy glides, breakdowns, build-ups \
+                if self.song.auto
+                    && chip_small(ui, "AUTO FX", on, ACID, 74.0)
+                        .on_hover_text(
+                            "On: in auto mode Bunker arranges by itself – the energy glides, breakdowns, build-ups \
                          with effects (low-pass, gate, echo) and drops. The energy bar only shows where it is.\n\
                          Off: the energy bar is yours – low = break, 85 = everything, 90 = drop. The auto mode \
                          still changes patterns, sounds and notes, but never takes a track out.",
-                    )
-                    .clicked()
+                        )
+                        .clicked()
                 {
                     self.song.auto_fx = !on;
                     if on && self.song.auto {
@@ -1763,8 +1774,7 @@ impl BunkerApp {
         });
         // Energy: the big lever of the arrangement
         let mut e = self.song.macros.energy;
-        // In a song CURVE gives the energy back to Bunker; in the auto mode AUTO FX decides
-        let curve = self.song_form.is_some().then_some(self.song.curve);
+        // A song or the auto mode with AUTO FX steer the energy: then it's a slim display
         let locked = self.energy_locked();
         let h = if locked {
             30.0
@@ -1773,23 +1783,13 @@ impl BunkerApp {
         } else {
             50.0
         };
-        let out = widgets::energy_fader(ui, &mut e, w, h, curve, locked);
+        let label = if self.song_form.is_some() { "SONG" } else { "AUTO" };
+        let out = widgets::energy_fader(ui, &mut e, w, h, locked.then_some(label));
         if out.changed {
             self.set_energy(e, now);
         }
         if out.locked_clicked {
-            self.say("Bunker steers the energy – switch AUTO FX off to take it", now);
-        }
-        if out.curve_clicked {
-            self.song.curve = !self.song.curve;
-            self.say(
-                if self.song.curve {
-                    "Energy curve: the song moves the energy"
-                } else {
-                    "Energy by hand"
-                },
-                now,
-            );
+            self.say(self.energy_hint(), now);
         }
         let before = self.filter;
         widgets::filter_slider(ui, &mut self.filter, w, if tall { 54.0 } else { 46.0 });
@@ -2034,7 +2034,7 @@ impl BunkerApp {
                 ui.label(egui::RichText::new("Play a song from your favorite").font(bold(13.0)).color(TEXT));
                 ui.label(
                     egui::RichText::new(
-                        "Favorite 1 starts – quietly, then track by track. Favorite 2 takes over after the first drop (or favorite 1 comes back as a new chapter). Bunker varies it, breaks and drops – you can jam along.",
+                        "Favorite 1 starts – quietly, then track by track. The first drop comes early; favorite 2 takes over after it and favorite 1 returns for the last one (with one favorite, each drop is a new chapter of it). Bunker steers the energy, varies the grooves, breaks and drops – you can jam along.",
                     )
                     .font(body(11.0))
                     .color(FAINT),
@@ -2279,7 +2279,7 @@ impl BunkerApp {
                     row(ui, ph::CIRCLES_THREE, "The orbit", "Each ring is one sound, each dot one step. Click to switch a dot on or off, drag to paint. Right-click: accent (on the synth: slide). Scroll on bass/synth dots to change the note. Shift-click: chance.");
                     row(ui, ph::LIST, "Tracks", "S solos a track, the speaker mutes it, the dice rolls a new rhythm for just that track (right-click: clear), the lock keeps shuffle, vibes, dice and auto mode away from it. The coloured pill is its sound – click it for the list, tune and decay, or scroll on it. The number is the loop length: under 16 it drifts against the beat.");
                     row(ui, ph::MUSIC_NOTES, "Mood", "MOOD picks which notes and chords bass and synth play – from Dark and Hypnotic to Euphoric, Sunny or Mysterious – and gives them fitting new notes. Each has its own chords, so the bars move. Pitch moves them lower or higher. The speaker at the top sets the volume.");
-                    row(ui, ph::STACK, "Favorites & auto song", "Twelve slots under the orbit. Click + to keep what you hear, click a full one to switch – while playing it comes in on the next bar, with a clap roll. Right-click to rename, save over or clear. The lit one is exactly what plays. AUTO SONG turns favorite 1 into a whole track (Short, Club or Hypnotic): a quiet intro that builds track by track, grooves that keep changing a little, breaks and drops, favorite 2 after the first drop, an outro that winds down – you jam along. Click a part in the strip to jump there.");
+                    row(ui, ph::STACK, "Favorites & auto song", "Twelve slots under the orbit. Click + to keep what you hear, click a full one to switch – while playing it comes in on the next bar, with a clap roll. Right-click to rename, save over or clear. The lit one is exactly what plays. AUTO SONG turns favorite 1 into a whole track (Short, Club or Hypnotic): a quiet intro that builds track by track, grooves that keep changing a little, two or three breaks and drops with a gate build-up, favorite 2 after the first drop, an outro that winds down – you jam along. Click a part in the strip to jump there.");
                     row(ui, ph::INFINITY, "Auto mode", "Bunker changes something every 2, 4 or 8 bars – patterns, sounds, notes, fills – and every few drops starts a new chapter. With AUTO FX on it arranges by itself: the energy glides, every 32 to 64 bars a breakdown, a build-up with effects and a drop. With AUTO FX off the energy bar is yours and it never takes a track out.");
                     row(ui, ph::SLIDERS, "Sound & master", "DARK closes the sound and adds rumble. ACID opens the synth filter. SPACE: reverb and echo. PUMP ducks everything under the kick. MASTER: low, mid and high EQ and drive for the whole mix.");
                     row(ui, ph::LIGHTNING, "Live effects", "ENERGY is the arrangement, not the volume (← →): under 30 a break, then the groove builds up, at 90 the build-up starts and two bars later it drops – a whole track with one fader. DROP does the same any time. FILTER springs back when you let go. Hold STUTTER (Q), ECHO (W), WASH (E), CRUSH (X), GATE (C) or TAPE STOP (V) – combine them.");

@@ -710,6 +710,47 @@ pub fn refit_notes(song: &mut Song, rng: &mut Rng) {
     }
 }
 
+/// A gentle change for a song: new notes for bass or synth, a new pattern for one of the
+/// hats or percussion, or another sound for it – never a track out, never a shifted rhythm
+pub fn vary(song: &mut Song, rng: &mut Rng) -> Option<Change> {
+    let perc: Vec<Voice> = [Voice::Hat, Voice::Rim, Voice::Ride, Voice::OpenHat]
+        .into_iter()
+        .filter(|&v| !song.track(v).lock && !song.track(v).mute)
+        .collect();
+    let synths: Vec<Voice> = [Voice::Bass, Voice::Acid]
+        .into_iter()
+        .filter(|&v| !song.track(v).lock && !song.track(v).mute)
+        .collect();
+    let roll = rng.f32();
+    if roll < 0.4 && !synths.is_empty() {
+        let v = *rng.pick(&synths);
+        let fresh = track_for(v, song.vibe, song.macros.energy, song, rng);
+        let t = song.track_mut(v);
+        let mut notes = fresh.steps.iter().filter(|s| s.on).map(|s| s.note).cycle();
+        for s in t.steps.iter_mut().filter(|s| s.on) {
+            s.note = notes.next().unwrap_or(s.note);
+        }
+        return Some(Change::NewNotes(v));
+    }
+    if perc.is_empty() {
+        return None;
+    }
+    let v = *rng.pick(&perc);
+    if roll < 0.75 {
+        let fresh = track_for(v, song.vibe, song.macros.energy, song, rng);
+        let t = song.track_mut(v);
+        t.steps = fresh.steps;
+        t.len = fresh.len;
+        Some(Change::NewPattern(v))
+    } else {
+        let old = song.track(v).sound;
+        let options: Vec<u8> = sounds_for(v, song.vibe).iter().copied().filter(|&s| s != old).collect();
+        let new = *options.first().map(|_| rng.pick(&options))?;
+        song.track_mut(v).sound = new;
+        Some(Change::NewSound(v, new))
+    }
+}
+
 /// Rotate a pattern by a step or two – same notes, new feel
 fn rotate(song: &mut Song, v: Voice, rng: &mut Rng) -> Change {
     let t = song.track_mut(v);
@@ -886,6 +927,29 @@ mod tests {
                     assert!(s.scale.intervals().contains(&st.note.rem_euclid(12)), "{} {v:?} {}", a.0, st.note);
                 }
             }
+        }
+    }
+
+    #[test]
+    fn song_variations_are_gentle() {
+        let mut rng = Rng::new(17);
+        let mut s = generate(Vibe::Hypnotic, &Macros::default(), &mut rng);
+        let before = s;
+        for _ in 0..300 {
+            let c = vary(&mut s, &mut rng);
+            assert!(
+                matches!(c, Some(Change::NewNotes(_) | Change::NewPattern(_) | Change::NewSound(..)) | None),
+                "{c:?}"
+            );
+            // Nothing goes out or comes in, the kick, clap and bass rhythm stay
+            assert_eq!(s.tracks.map(|t| t.mute), before.tracks.map(|t| t.mute));
+            for v in [Voice::Kick, Voice::Clap] {
+                assert_eq!(s.track(v), before.track(v));
+            }
+            assert_eq!(
+                s.track(Voice::Bass).steps.map(|st| st.on),
+                before.track(Voice::Bass).steps.map(|st| st.on)
+            );
         }
     }
 

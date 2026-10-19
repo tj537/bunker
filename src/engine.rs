@@ -201,33 +201,12 @@ const PAN: [f32; TRACKS] = [0.0, 0.0, 0.3, -0.25, 0.22, -0.35, 0.0, 0.12];
 const DELAY_SEND: [f32; TRACKS] = [0.0, 0.18, 0.4, 0.12, 0.18, 0.22, 0.0, 0.35];
 const VERB_SEND: [f32; TRACKS] = [0.04, 0.55, 0.4, 0.15, 0.3, 0.35, 0.0, 0.25];
 
+/// A build-up: two bars from `start`. On top of the groove turning into it, a gate chops
+/// harder and harder under a light high-pass
 struct Build {
     start: u64,
     len: u64,
-    style: BuildStyle,
 }
-
-/// How a build-up sounds on top of the groove turning into it. DROP by hand is always
-/// classic; the auto mode and songs vary it.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum BuildStyle {
-    /// A high-pass opens upwards
-    Classic,
-    /// A low-pass slowly closes, the drop throws it open
-    Lowpass,
-    /// The gate chops harder and harder
-    Gate,
-    /// Classic, and the last hits are thrown into the echo for the silence
-    Echo,
-}
-
-const STYLES: [BuildStyle; 5] = [
-    BuildStyle::Classic,
-    BuildStyle::Lowpass,
-    BuildStyle::Gate,
-    BuildStyle::Echo,
-    BuildStyle::Lowpass,
-];
 
 /// How much of the mix goes into the reverb at full wash
 const WASH_SEND: f32 = 1.2;
@@ -448,8 +427,6 @@ pub struct Engine {
     build: Option<Build>,
     /// Build-up filter amount; it lets go quickly after the drop instead of jumping
     build_cut: f32,
-    /// The style of the last build-up – its filter lets go in the same style
-    cut_style: BuildStyle,
     riser_gain: f32,
     /// The energy was below the drop zone since the last drop
     zone_armed: bool,
@@ -551,7 +528,6 @@ impl Engine {
             stutter: None,
             build: None,
             build_cut: 0.0,
-            cut_style: BuildStyle::Classic,
             riser_gain: 0.0,
             zone_armed: false,
             energy_goal: song.macros.energy,
@@ -737,21 +713,15 @@ impl Engine {
         self.build = Some(Build {
             start: next.div_ceil(STEPS as u64) * STEPS as u64,
             len: 2 * STEPS as u64,
-            style: BuildStyle::Classic,
         });
         self.send_song(Some(Change::Build));
     }
 
-    /// A build-up the arrangement starts now (auto mode, song mode), in a random style
+    /// A build-up the arrangement starts now (auto mode, song mode)
     fn auto_build(&mut self, idx: u64) {
         self.build = Some(Build {
             start: idx,
             len: 2 * STEPS as u64,
-            style: if self.song.auto_fx {
-                *self.auto_rng.pick(&STYLES)
-            } else {
-                BuildStyle::Classic
-            },
         });
         self.send_song(Some(Change::Build));
     }
@@ -787,9 +757,9 @@ impl Engine {
         self.fill = Some((bar, *self.auto_rng.pick(&FILLS)));
     }
 
-    /// Bunker moves the energy: the auto mode with AUTO FX, or a song while its curve is on
+    /// Bunker moves the energy: the auto mode with AUTO FX, or a song
     fn steers_energy(&self) -> bool {
-        (self.song.auto && self.song.auto_fx) || (self.arrangement.is_some() && self.song.curve)
+        (self.song.auto && self.song.auto_fx) || self.arrangement.is_some()
     }
 
     fn start_breakdown(&mut self, idx: u64) {
@@ -900,21 +870,27 @@ impl Engine {
         }
         let sec = form.sections[self.section];
         let (played, n) = (bar - self.section_start, sec.bars as u64);
-        if self.song.curve {
-            self.energy_goal = sec.part.energy(played, n);
+        let next = form.sections.get(self.section + 1).copied();
+        let into_break = next.is_some_and(|nx| nx.part == Part::Break);
+        self.energy_goal = sec.part.energy(played, n);
+        // The last two bars before a break already ease off, so the break doesn't cut in
+        if into_break && played + 2 >= n {
+            self.energy_goal = self.energy_goal.min(0.6);
         }
-        // Grooves and peaks keep moving: a small change every 8 bars (never a track out)
+        // Grooves and peaks keep moving: a gentle change every 8 bars
         if matches!(sec.part, Part::Groove | Part::Peak) && played > 0 && played.is_multiple_of(8) {
-            if let Some(c) = gen::evolve(&mut self.song, &mut self.auto_rng, false) {
+            if let Some(c) = gen::vary(&mut self.song, &mut self.auto_rng) {
                 self.send_song(Some(c));
             }
         }
         if sec.part == Part::Break && played + 2 == n && self.build.is_none() {
             self.auto_build(idx);
         } else if played + 1 == n && sec.part != Part::Break {
-            // A clap roll into the next pattern
-            let next = form.sections.get(self.section + 1).map(|nx| pattern_slot(nx.pattern, full));
-            if next.is_some_and(|slot| slot != self.pattern_now) {
+            // A fill into a break, a clap roll into another favorite
+            let other = next.is_some_and(|nx| pattern_slot(nx.pattern, full) != self.pattern_now);
+            if into_break {
+                self.fill = Some((bar, *self.auto_rng.pick(&FILLS)));
+            } else if other {
                 self.fill = Some((bar, Fill::Roll));
             }
         } else if matches!(sec.part, Part::Groove | Part::Peak)
@@ -1143,12 +1119,6 @@ impl Engine {
         self.shared.step.store(idx, Ordering::Relaxed);
         let build = self.build_progress(idx as f64);
         let gap = self.in_drop_gap(idx as f64);
-        // Echo build-up: the last hits fly into the echo for the silence
-        if let Some(b) = &self.build {
-            if b.style == BuildStyle::Echo && idx == b.start + b.len - DROP_GAP {
-                self.throw = 1.0;
-            }
-        }
         let play_idx = match self.stutter {
             Some(origin) if idx >= origin => origin + (idx - origin) % 2,
             _ => idx,
@@ -1453,13 +1423,10 @@ impl Engine {
                 0.0
             };
             self.riser_gain += (riser_want - self.riser_gain) * 0.0015;
-            match (build, &self.build) {
-                (Some(p), Some(b)) => {
-                    self.build_cut = p;
-                    self.cut_style = b.style;
-                }
+            match build {
+                Some(p) => self.build_cut = p,
                 // After the drop the build-up filter lets go within a few milliseconds
-                _ => self.build_cut *= 0.998,
+                None => self.build_cut *= 0.998,
             }
             if self.riser_gain > 1e-4 {
                 let p = self.build_cut;
@@ -1525,18 +1492,12 @@ impl Engine {
                 r = self.filter_r.run(r).hp;
             }
             if self.build_cut > 0.002 {
-                // Classic and echo: a high-pass opens upwards; gate: a lighter one;
-                // low-pass: the sound closes down to a muffle
-                let cut = self.build_cut;
-                let (fc, low) = match self.cut_style {
-                    BuildStyle::Lowpass => (18_000.0 * 0.025f32.powf(cut), true),
-                    BuildStyle::Gate => (20.0 * 80f32.powf(cut * 0.6), false),
-                    BuildStyle::Classic | BuildStyle::Echo => (20.0 * 80f32.powf(cut), false),
-                };
+                // A light high-pass opens upwards under the gate
+                let fc = 20.0 * 80f32.powf(self.build_cut * 0.6);
                 self.build_hp_l.set(fc, 0.9, sr);
                 self.build_hp_r.set(fc, 0.9, sr);
-                let (ol, or) = (self.build_hp_l.run(l), self.build_hp_r.run(r));
-                (l, r) = if low { (ol.lp, or.lp) } else { (ol.hp, or.hp) };
+                l = self.build_hp_l.run(l).hp;
+                r = self.build_hp_r.run(r).hp;
             }
             l = self.tone_l.run(l).lp;
             r = self.tone_r.run(r).lp;
@@ -1564,10 +1525,7 @@ impl Engine {
                 r += (self.crush_hold.1 * 1.3 - r) * self.crush;
             }
             // Gate: open for the first half of every 16th (a gate build-up chops harder and harder)
-            let build_gate = match build {
-                Some(p) if self.cut_style == BuildStyle::Gate => (p * 1.3).min(1.0),
-                _ => 0.0,
-            };
+            let build_gate = build.map_or(0.0, |p| (p * 1.3).min(1.0));
             let gate_want = if gate_on { 1.0 } else { build_gate };
             self.gate += (gate_want - self.gate) * 0.002;
             if self.gate > 0.002 {
@@ -1924,7 +1882,7 @@ mod tests {
         e.handle(Cmd::Play);
         let bar = (e.step_len() * STEPS as f64) as usize;
         let mut buf = vec![0.0; 2 * bar];
-        let (mut kinds, mut lens, mut styles) = (HashSet::new(), HashSet::new(), HashSet::new());
+        let (mut kinds, mut lens) = (HashSet::new(), HashSet::new());
         for b in 0..(32 * 10) {
             e.render(&mut buf);
             assert!(buf.iter().all(|x| x.is_finite() && x.abs() <= 1.0));
@@ -1933,13 +1891,9 @@ mod tests {
             }
             kinds.insert(e.plan.breakdown_at * 100 + e.plan.out.len() as u64 * 10 + e.plan.sweep as u64);
             lens.insert(e.cycle_len);
-            if let Some(b) = &e.build {
-                styles.insert(format!("{:?}", b.style));
-            }
         }
         assert!(kinds.len() >= 2, "different breakdowns");
         assert!(lens.len() >= 2, "different cycle lengths: {lens:?}");
-        assert!(styles.len() >= 2, "different build-ups: {styles:?}");
         let changes: Vec<Change> = rx.try_iter().filter_map(Event::change).collect();
         assert!(changes.iter().any(|c| matches!(c, Change::NewSound(..))), "{changes:?}");
         assert!(changes.iter().filter(|c| matches!(c, Change::Drop | Change::NewChapter)).count() >= 5);
@@ -2083,13 +2037,25 @@ mod tests {
             .iter()
             .filter_map(|c| if let Change::Part(p, ..) = c { Some(*p) } else { None })
             .collect();
-        assert_eq!(parts, vec![Part::Intro, Part::Groove, Part::Break, Part::Peak, Part::Outro]);
-        // Favorite 1 until the drop, favorite 2 after it
+        assert_eq!(
+            parts,
+            vec![
+                Part::Intro,
+                Part::Groove,
+                Part::Break,
+                Part::Peak,
+                Part::Break,
+                Part::Peak,
+                Part::Outro
+            ]
+        );
+        // Favorite 1 until the first drop, favorite 2 after it, favorite 1 for the last drop
         let slots: Vec<Option<usize>> = changes
             .iter()
             .filter_map(|c| if let Change::Part(_, _, slot) = c { Some(*slot) } else { None })
             .collect();
-        assert_eq!(slots, vec![Some(0), Some(0), Some(0), Some(1), Some(1)]);
+        assert_eq!(slots, vec![Some(0), Some(0), Some(0), Some(1), Some(1), Some(0), Some(0)]);
+        assert_eq!(changes.iter().filter(|c| **c == Change::Drop).count(), 2, "two drops");
         // The grooves keep moving
         assert!(changes.iter().any(|c| matches!(
             c,
@@ -2187,14 +2153,14 @@ mod tests {
         let bar = (e.step_len() * STEPS as f64) as usize;
         let mut buf = vec![0.0; 2 * bar * 2 + 100];
         e.render(&mut buf);
-        e.handle(Cmd::Jump(4)); // the first peak
+        e.handle(Cmd::Jump(3)); // the first peak
         let mut buf = vec![0.0; 2 * bar];
         e.render(&mut buf);
         let changes: Vec<Change> = rx.try_iter().filter_map(Event::change).collect();
         assert!(changes.contains(&Change::Drop), "a peak starts with a drop: {changes:?}");
-        // Pattern C is empty: the peak falls back to B
-        assert!(changes.contains(&Change::Part(Part::Peak, 4, Some(1))), "{changes:?}");
-        assert_eq!(e.section, 4);
+        // The first peak plays favorite 2
+        assert!(changes.contains(&Change::Part(Part::Peak, 3, Some(1))), "{changes:?}");
+        assert_eq!(e.section, 3);
         assert!(e.song.macros.energy > 0.9);
     }
 
