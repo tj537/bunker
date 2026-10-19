@@ -41,7 +41,9 @@ pub enum Cmd {
 }
 
 pub enum Event {
-    Song(Box<Song>, Option<Change>),
+    /// The engine's song, what changed, and how many `Cmd::Song` it had taken in by then –
+    /// the UI ignores a song older than its own last edit
+    Song(Box<Song>, Option<Change>, u64),
     /// Song mode records what plays: the next piece of interleaved stereo
     Audio(Vec<f32>),
     /// The recording is complete (song over or stopped, plus the tail)
@@ -52,7 +54,7 @@ impl Event {
     #[cfg(test)]
     pub fn change(self) -> Option<Change> {
         match self {
-            Event::Song(_, c) => c,
+            Event::Song(_, c, _) => c,
             _ => None,
         }
     }
@@ -131,8 +133,9 @@ pub const BANDS: [f32; 8] = [55.0, 120.0, 260.0, 550.0, 1_200.0, 2_600.0, 5_500.
 
 /// Energy below which a track drops out (Voice::ALL order). The energy is the
 /// arrangement, not the volume: below `BREAK_ZONE` it's a break (no kick, no bass),
-/// then kick, bass, open hat and ride come in, and from `DROP_ZONE` up it drops.
-pub const LAYERS: [f32; TRACKS] = [0.3, 0.2, 0.1, 0.0, 0.45, 0.55, 0.35, 0.0];
+/// then kick, bass, open hat and ride come in – from 70 everything plays, ghost hats
+/// fill it up towards 85 – and from `DROP_ZONE` up it drops.
+pub const LAYERS: [f32; TRACKS] = [0.3, 0.2, 0.1, 0.0, 0.55, 0.7, 0.4, 0.0];
 
 /// Below this energy the groove is a break: kick and bass out, the sound closes and
 /// opens up into the reverb the lower it goes
@@ -458,10 +461,8 @@ pub struct Engine {
     break_lp_r: Svf,
     /// Auto mode: drops since the last new chapter
     drops_since_chapter: u32,
-    /// AUTO FX: an effect at the end of a phrase – bar, effect, from step
-    fx_moment: Option<(u64, Fx, u64)>,
-    /// The stutter running now was started by an effect moment
-    auto_stutter: bool,
+    /// `Cmd::Song`s taken in so far (sent back with every song)
+    songs_in: u64,
     transpose: i8,
     limiter: f32,
     peak: f32,
@@ -554,8 +555,7 @@ impl Engine {
             break_lp_l: Svf::new(18_000.0, 0.7, sr),
             break_lp_r: Svf::new(18_000.0, 0.7, sr),
             drops_since_chapter: 0,
-            fx_moment: None,
-            auto_stutter: false,
+            songs_in: 0,
             transpose: 0,
             limiter: 1.0,
             peak: 0.0,
@@ -570,13 +570,20 @@ impl Engine {
     pub fn handle(&mut self, cmd: Cmd) {
         match cmd {
             Cmd::Song(s) => {
+                self.songs_in += 1;
                 // With the energy curve on (auto or song mode), the engine owns the energy
                 let energy = self.song.macros.energy;
+                let fx_was = self.song.auto_fx;
                 self.song = *s;
-                if (self.song.auto || self.arrangement.is_some()) && self.song.curve {
+                if self.steers_energy() {
                     self.song.macros.energy = energy;
                 } else {
                     self.watch_drop_zone();
+                }
+                // AUTO FX switched off: the bar decides now – a running breakdown lets go
+                // (the UI has already brought every track back)
+                if fx_was && !self.song.auto_fx && self.song.auto {
+                    self.breakdown = None;
                 }
                 self.song.sanitize();
                 // Auto mode switched off in the middle of a breakdown: bring the beat back
@@ -682,7 +689,7 @@ impl Engine {
 
     fn send_song(&self, change: Option<Change>) {
         if let Some(tx) = &self.events {
-            let _ = tx.send(Event::Song(Box::new(self.song), change));
+            let _ = tx.send(Event::Song(Box::new(self.song), change, self.songs_in));
         }
     }
 
@@ -750,25 +757,14 @@ impl Engine {
         }
     }
 
-    /// The last bar of a phrase: a fill – or, with AUTO FX, now and then an effect moment
+    /// The last bar of a phrase: a fill
     fn phrase_end(&mut self, bar: u64) {
-        if self.song.auto_fx && self.auto_rng.chance(0.4) {
-            let (fx, from) = *self
-                .auto_rng
-                .pick(&[(Fx::Stutter, 12u64), (Fx::Gate, 8), (Fx::Crush, 12), (Fx::Echo, 12)]);
-            self.fx_moment = Some((bar, fx, from));
-            self.fill = None;
-        } else {
-            self.fill = Some((bar, *self.auto_rng.pick(&FILLS)));
-        }
+        self.fill = Some((bar, *self.auto_rng.pick(&FILLS)));
     }
 
-    /// An effect moment on now? (`last_fired` step)
-    fn moment(&self, fx: Fx) -> bool {
-        match (self.fx_moment, self.last_fired) {
-            (Some((bar, f, from)), Some(i)) => f == fx && i / STEPS as u64 == bar && i % STEPS as u64 >= from,
-            _ => false,
-        }
+    /// Bunker moves the energy: the auto mode with AUTO FX, or a song while its curve is on
+    fn steers_energy(&self) -> bool {
+        (self.song.auto && self.song.auto_fx) || (self.arrangement.is_some() && self.song.curve)
     }
 
     fn start_breakdown(&mut self, idx: u64) {
@@ -820,10 +816,11 @@ impl Engine {
                 change = gen::new_chapter(&mut self.song, &mut self.auto_rng);
                 self.drops_since_chapter = 0;
             } else {
-                gen::evolve(&mut self.song, &mut self.auto_rng);
+                let mutes = self.song.auto_fx;
+                gen::evolve(&mut self.song, &mut self.auto_rng, mutes);
                 self.drops_since_chapter += 1;
             }
-            if self.song.curve {
+            if self.song.auto_fx {
                 self.song.macros.energy = self.curve_target(0);
             }
         }
@@ -1037,13 +1034,6 @@ impl Engine {
     fn new_bar(&mut self, idx: u64) {
         let bar = idx / STEPS as u64;
         self.bar_now = bar;
-        // An effect moment ends with its bar
-        if self.fx_moment.is_some_and(|(b, ..)| b < bar) {
-            self.fx_moment = None;
-            if std::mem::take(&mut self.auto_stutter) && !self.fx[Fx::Stutter.index()] {
-                self.stutter = None;
-            }
-        }
         let mut dropped = false;
         if let Some(b) = &self.build {
             if idx >= b.start + b.len {
@@ -1070,21 +1060,20 @@ impl Engine {
         }
         let b = bar - self.cycle_start;
         let at = self.breakdown_at();
-        // With the curve and AUTO FX on, Bunker arranges: energy, breakdown, build-up, drop.
-        // Without AUTO FX the curve only sways through the groove; with the energy by hand,
-        // breaks and drops are yours (low = break, 90 = drop) – the groove still evolves.
-        if self.song.curve && self.song.auto_fx {
+        // With AUTO FX on, Bunker arranges: energy, breakdown, build-up, drop. Without it the
+        // energy bar is yours (low = break, 90 = drop) and the auto mode only changes patterns,
+        // sounds and notes – it never takes a track out.
+        let fx = self.song.auto_fx;
+        if fx {
             self.energy_goal = self.curve_target(b);
             if b == at && self.build.is_none() {
                 self.start_breakdown(idx);
             } else if b == self.cycle_len - 2 && self.build.is_none() {
                 self.auto_build(idx);
             }
-        } else if self.song.curve {
-            self.energy_goal = self.curve_target(b.min(at.saturating_sub(1)));
         }
         if b < at && bar.is_multiple_of(self.song.auto_bars.max(1) as u64) {
-            if let Some(change) = gen::evolve(&mut self.song, &mut self.auto_rng) {
+            if let Some(change) = gen::evolve(&mut self.song, &mut self.auto_rng, fx) {
                 self.send_song(Some(change));
             }
         }
@@ -1098,7 +1087,7 @@ impl Engine {
             self.new_bar(idx);
         }
         // Bunker steering the energy: it glides towards the curve instead of jumping
-        if self.song.curve && (self.song.auto || self.arrangement.is_some()) {
+        if self.steers_energy() {
             let e = self.song.macros.energy;
             let next = e + (self.energy_goal - e).clamp(-GLIDE, GLIDE);
             if (next - e).abs() > 1e-4 {
@@ -1119,18 +1108,6 @@ impl Engine {
         if let Some(b) = &self.build {
             if b.style == BuildStyle::Echo && idx == b.start + b.len - DROP_GAP {
                 self.throw = 1.0;
-            }
-        }
-        if let Some((bar, fx, from)) = self.fx_moment {
-            if idx == bar * STEPS as u64 + from {
-                match fx {
-                    Fx::Stutter if self.stutter.is_none() => {
-                        self.stutter = Some(idx);
-                        self.auto_stutter = true;
-                    }
-                    Fx::Echo => self.throw = 1.0,
-                    _ => {}
-                }
             }
         }
         let play_idx = match self.stutter {
@@ -1352,17 +1329,7 @@ impl Engine {
             m.acid
         };
         // (Stutter works on the steps, in `fire`)
-        let [_, echo_on, mut wash_on, crush_on, gate_on, tape_on] = self.fx;
-        let (crush_on, gate_on) = (crush_on || self.moment(Fx::Crush), gate_on || self.moment(Fx::Gate));
-        // AUTO FX: a breakdown starts in the wash
-        if let Some(b) = &self.breakdown {
-            if self.song.auto_fx
-                && (self.song.auto || self.arrangement.is_some())
-                && self.last_fired.is_some_and(|i| i < b.start + STEPS as u64)
-            {
-                wash_on = true;
-            }
-        }
+        let [_, echo_on, wash_on, crush_on, gate_on, tape_on] = self.fx;
         // Pump: the duck lasts a bit more than a 16th
         let pump_coef = (-1.0 / (step_len as f32 * 1.3)).exp();
         let pump = m.pump;
@@ -1934,7 +1901,40 @@ mod tests {
         assert!(changes
             .iter()
             .any(|c| matches!(c, Change::NewPattern(_) | Change::NewSound(..) | Change::Shifted(_))));
-        assert!(e.song.macros.energy > BREAK_ZONE, "the groove sways, it doesn't break");
+        assert!(
+            !changes.iter().any(|c| matches!(c, Change::Muted(_) | Change::Unmuted(_))),
+            "the bar decides what plays"
+        );
+        assert_eq!(e.song.macros.energy, song.macros.energy, "the energy is yours");
+    }
+
+    #[test]
+    fn at_85_everything_plays_and_the_engine_counts_edits() {
+        assert!(LAYERS.iter().all(|&l| l < 0.85), "{LAYERS:?}");
+        let mut song = gen::generate(Vibe::Peak, &Default::default(), &mut Rng::new(2));
+        song.macros.energy = 0.85;
+        for t in song.tracks.iter_mut() {
+            t.mute = false;
+        }
+        let shared = Shared::new();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut e = Engine::new(22_050.0, song, shared.clone(), Some(tx), 1);
+        e.handle(Cmd::Play);
+        let mut buf = vec![0.0; 2 * (e.step_len() * STEPS as f64 * 2.0) as usize];
+        e.render(&mut buf);
+        for (i, t) in song.tracks.iter().enumerate() {
+            if t.hits() > 0 {
+                assert!(shared.hits[i].load(Ordering::Relaxed) > 0, "{:?} plays at 85", Voice::ALL[i]);
+            }
+        }
+        // Every song the engine sends says how many edits it had taken in
+        e.handle(Cmd::Song(Box::new(song)));
+        e.handle(Cmd::Drop);
+        let acks: Vec<u64> = rx
+            .try_iter()
+            .filter_map(|ev| if let Event::Song(_, _, n) = ev { Some(n) } else { None })
+            .collect();
+        assert_eq!(acks.last(), Some(&1));
     }
 
     #[test]
@@ -2138,7 +2138,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_mode_curve_moves_the_energy_until_you_take_it() {
+    fn auto_fx_moves_the_energy_until_you_switch_it_off() {
         let (tx, rx) = std::sync::mpsc::channel();
         let mut song = gen::generate(Vibe::Hypnotic, &Default::default(), &mut Rng::new(4));
         song.auto = true;
@@ -2152,7 +2152,7 @@ mod tests {
         // It glided: no step bigger than the glide between two updates sent to the UI
         let sent: Vec<f32> = rx
             .try_iter()
-            .filter_map(|ev| if let Event::Song(s, _) = ev { Some(s.macros.energy) } else { None })
+            .filter_map(|ev| if let Event::Song(s, ..) = ev { Some(s.macros.energy) } else { None })
             .collect();
         assert!(sent.iter().any(|&x| x > 0.85), "high after the start: {sent:?}");
         for w in sent.windows(2) {
@@ -2163,10 +2163,11 @@ mod tests {
         ui_song.macros.energy = 0.9;
         e.handle(Cmd::Song(Box::new(ui_song)));
         assert!(e.song.macros.energy < 0.3);
-        // … but by hand it can
-        ui_song.curve = false;
+        // … but with AUTO FX off the energy is the UI's (and no breakdown holds tracks out)
+        ui_song.auto_fx = false;
         e.handle(Cmd::Song(Box::new(ui_song)));
         assert_eq!(e.song.macros.energy, 0.9);
+        assert!(e.breakdown.is_none());
     }
 
     #[test]

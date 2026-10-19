@@ -606,7 +606,8 @@ impl Change {
 /// One step of the auto mode: change one thing so the groove keeps moving but
 /// stays recognizable. Locked tracks are left alone; `None` when everything is locked.
 /// (Breakdowns and drops are arranged by the engine.)
-pub fn evolve(song: &mut Song, rng: &mut Rng) -> Option<Change> {
+/// With `mutes` false it never takes a track out or brings one in (the energy bar decides).
+pub fn evolve(song: &mut Song, rng: &mut Rng, mutes: bool) -> Option<Change> {
     let m = song.macros;
     let all = [
         Voice::Clap,
@@ -637,6 +638,8 @@ pub fn evolve(song: &mut Song, rng: &mut Rng) -> Option<Change> {
             ..fresh
         };
         Some(Change::NewPattern(v))
+    } else if roll < 0.5 && !mutes {
+        Some(rotate(song, v, rng))
     } else if roll < 0.5 {
         // Bring in or take out an element; keep at least four running
         let playing = all.iter().filter(|&&x| !song.track(x).mute).count();
@@ -894,7 +897,7 @@ mod tests {
         for vibe in Vibe::ALL {
             let mut s = generate(vibe, &Macros::default(), &mut rng);
             for _ in 0..300 {
-                if let Some(Change::NewSound(v, n)) = evolve(&mut s, &mut rng) {
+                if let Some(Change::NewSound(v, n)) = evolve(&mut s, &mut rng, true) {
                     assert!(sounds_for(v, vibe).contains(&n), "{vibe:?} {v:?} {n}");
                 }
                 assert_eq!(s.track(Voice::Acid).len, 16);
@@ -909,7 +912,7 @@ mod tests {
         let before = s;
         let mut changes = 0;
         for _ in 0..200 {
-            assert!(evolve(&mut s, &mut rng).is_some());
+            assert!(evolve(&mut s, &mut rng, true).is_some());
             changes += 1;
             // The kick is never touched by the auto mode
             assert_eq!(s.track(Voice::Kick), before.track(Voice::Kick));
@@ -957,7 +960,7 @@ mod tests {
         }
         let before = s;
         for _ in 0..300 {
-            evolve(&mut s, &mut rng);
+            evolve(&mut s, &mut rng, true);
             new_chapter(&mut s, &mut rng);
         }
         for v in [Voice::Bass, Voice::Hat, Voice::Clap] {
@@ -967,7 +970,7 @@ mod tests {
         for t in s.tracks.iter_mut() {
             t.lock = true;
         }
-        assert_eq!(evolve(&mut s, &mut rng), None);
+        assert_eq!(evolve(&mut s, &mut rng, true), None);
         // Shuffle keeps locked tracks
         let mut keep = [None; TRACKS];
         keep[Voice::Bass.index()] = Some(*before.track(Voice::Bass));

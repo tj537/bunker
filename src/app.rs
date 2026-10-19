@@ -108,6 +108,8 @@ pub struct BunkerApp {
     fx_sent: [bool; 6],
     key_down: [bool; TRACKS],
     export: Export,
+    /// `Cmd::Song`s sent to this engine – its songs carry how many it had seen
+    songs_sent: u64,
     /// Song mode: the performance as 16-bit stereo, its sample rate, and whether it's still coming in
     recording: Vec<i16>,
     rec_sr: u32,
@@ -223,6 +225,7 @@ impl BunkerApp {
             fx_sent: [false; 6],
             key_down: [false; TRACKS],
             export: Export::Closed,
+            songs_sent: 0,
             recording: Vec::new(),
             rec_sr: 44_100,
             rec_live: false,
@@ -274,6 +277,7 @@ impl BunkerApp {
         self.audio_failed.store(false, Ordering::Relaxed);
         self.audio = Err("Reconnecting…".into()); // close the old stream first
         self.audio = audio::start(self.song, rx, ev_tx, self.shared.clone(), self.audio_failed.clone());
+        self.songs_sent = 0;
         self.tx = tx;
         self.events = events;
         self.sent = self.song;
@@ -526,8 +530,18 @@ impl BunkerApp {
         self.say("Custom – an empty pattern: click the rings to paint your groove", now);
     }
 
-    /// Energy by hand: the auto mode's curve lets go
-    fn set_energy(&mut self, e: f32) {
+    /// Bunker steers the energy itself: the auto mode with AUTO FX on
+    fn energy_locked(&self) -> bool {
+        self.song.auto && self.song.auto_fx && self.song_form.is_none()
+    }
+
+    /// Energy by hand – in a song it takes over until the next part; in the auto mode with
+    /// AUTO FX the energy is Bunker's
+    fn set_energy(&mut self, e: f32, now: f64) {
+        if self.energy_locked() {
+            self.say("Bunker steers the energy – switch AUTO FX off to take it", now);
+            return;
+        }
         self.song.macros.energy = e.clamp(0.0, 1.0);
         self.song.curve = false;
     }
@@ -588,8 +602,8 @@ impl BunkerApp {
 
     fn sync(&mut self, ctx: &egui::Context, now: f64, dt: f32) -> Live {
         while let Ok(ev) = self.events.try_recv() {
-            let (song, change) = match ev {
-                Event::Song(song, change) => (song, change),
+            let (song, change, ack) = match ev {
+                Event::Song(song, change, ack) => (song, change, ack),
                 Event::Audio(piece) => {
                     if self.rec_live {
                         self.recording.extend(piece.iter().map(|&s| crate::wav::to_i16(s)));
@@ -604,8 +618,11 @@ impl BunkerApp {
                     continue;
                 }
             };
-            self.song = *song;
-            self.sent = self.song;
+            // A song the engine sent before it had our last edit would undo that edit
+            if ack >= self.songs_sent {
+                self.song = *song;
+                self.sent = self.song;
+            }
             if let Some(c) = change {
                 match c {
                     gen::Change::Scene(i) => {
@@ -624,6 +641,7 @@ impl BunkerApp {
         }
         while let Ok(m) = self.midi_rx.try_recv() {
             match m {
+                Midi::Macro(0, v) => self.set_energy(v, now),
                 Midi::Macro(i, v) => {
                     let m = &mut self.song.macros;
                     *[&mut m.energy, &mut m.dark, &mut m.acid, &mut m.space][i] = v;
@@ -764,8 +782,8 @@ impl BunkerApp {
                 Key::Space => self.toggle_play(),
                 Key::Enter => self.shuffle(self.song.vibe, now),
                 Key::B => self.drop_now(now),
-                Key::ArrowRight => self.set_energy(self.song.macros.energy + 0.05),
-                Key::ArrowLeft => self.set_energy(self.song.macros.energy - 0.05),
+                Key::ArrowRight => self.set_energy(self.song.macros.energy + 0.05, now),
+                Key::ArrowLeft => self.set_energy(self.song.macros.energy - 0.05, now),
                 Key::P => self.toggle_visual(ctx),
                 Key::ArrowUp => self.song.bpm = (self.song.bpm + 1.0).min(180.0),
                 Key::ArrowDown => self.song.bpm = (self.song.bpm - 1.0).max(90.0),
@@ -1350,6 +1368,12 @@ impl BunkerApp {
                         self.song.scale = scale;
                         self.song.prog = prog;
                         gen::refit_notes(&mut self.song, &mut self.rng);
+                        // The synth carries the mood – a mood with it muted would hardly be heard
+                        let synth = self.song.track_mut(Voice::Acid);
+                        if !synth.lock {
+                            synth.mute = false;
+                        }
+                        self.say(format!("{name} – bass and synth play it"), now);
                     }
                 }
             });
@@ -1548,26 +1572,32 @@ impl BunkerApp {
         });
 
         ui.add_space(2.0);
-        // AUTO FX: Bunker may use the effects itself (build-ups, phrase ends, breakdowns)
+        // AUTO FX: in the auto mode Bunker arranges by itself (energy, breaks, build-ups with effects, drops)
         ui.horizontal(|ui| {
             heading(ui, "LIVE");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let on = self.song.auto_fx;
                 if chip_small(ui, "AUTO FX", on, ACID, 74.0)
                     .on_hover_text(
-                        "On: in auto mode Bunker plays breakdowns, build-ups and drops by itself – with effects \
-                         (low-pass, gate, echo) – and now and then throws in a stutter, gate, crush or echo \
-                         at the end of a phrase.\n\
-                         Off: no automatic drops and plain fills – the drops are yours (DROP, or energy to 90).",
+                        "On: in auto mode Bunker arranges by itself – the energy glides, breakdowns, build-ups \
+                         with effects (low-pass, gate, echo) and drops. The energy bar only shows where it is.\n\
+                         Off: the energy bar is yours – low = break, 85 = everything, 90 = drop. The auto mode \
+                         still changes patterns, sounds and notes, but never takes a track out.",
                     )
                     .clicked()
                 {
                     self.song.auto_fx = !on;
+                    if on && self.song.auto {
+                        // The bar decides now: everything Bunker took out comes back
+                        for t in self.song.tracks.iter_mut().filter(|t| !t.lock) {
+                            t.mute = false;
+                        }
+                    }
                     self.say(
                         if on {
-                            "Auto FX off – drops and effects are all yours"
+                            "Auto FX off – the energy bar is yours: low = break, 85 = everything, 90 = drop"
                         } else {
-                            "Auto FX on – Bunker drops and throws in effects by itself"
+                            "Auto FX on – Bunker plays breaks and drops by itself"
                         },
                         now,
                     );
@@ -1576,25 +1606,33 @@ impl BunkerApp {
         });
         // Energy: the big lever of the arrangement
         let mut e = self.song.macros.energy;
-        let curve = (self.song.auto || self.song_form.is_some()).then_some(self.song.curve);
-        let out = widgets::energy_fader(ui, &mut e, w, if tall { 58.0 } else { 50.0 }, curve);
+        // In a song CURVE gives the energy back to Bunker; in the auto mode AUTO FX decides
+        let curve = self.song_form.is_some().then_some(self.song.curve);
+        let locked = self.energy_locked();
+        let h = if locked {
+            30.0
+        } else if tall {
+            58.0
+        } else {
+            50.0
+        };
+        let out = widgets::energy_fader(ui, &mut e, w, h, curve, locked);
         if out.changed {
-            self.set_energy(e);
+            self.set_energy(e, now);
+        }
+        if out.locked_clicked {
+            self.say("Bunker steers the energy – switch AUTO FX off to take it", now);
         }
         if out.curve_clicked {
-            if self.song.auto || self.song_form.is_some() {
-                self.song.curve = !self.song.curve;
-                self.say(
-                    if self.song.curve {
-                        "Energy curve: Bunker moves the energy"
-                    } else {
-                        "Energy by hand"
-                    },
-                    now,
-                );
-            } else {
-                self.say("The energy curve belongs to the auto mode and the song – switch one on first", now);
-            }
+            self.song.curve = !self.song.curve;
+            self.say(
+                if self.song.curve {
+                    "Energy curve: the song moves the energy"
+                } else {
+                    "Energy by hand"
+                },
+                now,
+            );
         }
         let before = self.filter;
         widgets::filter_slider(ui, &mut self.filter, w, if tall { 54.0 } else { 46.0 });
@@ -2072,7 +2110,7 @@ impl BunkerApp {
                     row(ui, ph::LIST, "Tracks", "S solos a track, the speaker mutes it, the dice rolls a new rhythm for just that track (right-click: clear), the lock keeps shuffle, vibes, dice and auto mode away from it. The coloured pill is its sound – click it for the list, tune and decay, or scroll on it. The number is the loop length: under 16 it drifts against the beat.");
                     row(ui, ph::MUSIC_NOTES, "Mood", "MOOD picks which notes and chords bass and synth play – from Dark and Hypnotic to Euphoric, Sunny or Mysterious – and gives them fitting new notes. Each has its own chords, so the bars move. Pitch moves them lower or higher. The speaker at the top sets the volume.");
                     row(ui, ph::STACK, "Patterns & song", "Four memory slots under the orbit. Click + to keep what you hear, click a full pattern to switch – while playing it comes in on the next bar, with a clap roll. The lit one keeps your changes. SONG turns your patterns into a whole track (Short, Club or Hypnotic): intro, groove, break, drop, outro – Bunker steers the energy, you jam along. Click a part in the strip to jump there.");
-                    row(ui, ph::INFINITY, "Auto mode", "Bunker changes something every 2, 4 or 8 bars – patterns, sounds, notes, fills – and every 32 to 64 bars plays a breakdown, a build-up (each time a bit different) and a drop. Every few drops a new chapter brings a bigger change. With CURVE on the energy fader it moves the energy and plays breaks and drops; touch the fader and they're yours. AUTO FX lets it use the effects too.");
+                    row(ui, ph::INFINITY, "Auto mode", "Bunker changes something every 2, 4 or 8 bars – patterns, sounds, notes, fills – and every few drops starts a new chapter. With AUTO FX on it arranges by itself: the energy glides, every 32 to 64 bars a breakdown, a build-up with effects and a drop. With AUTO FX off the energy bar is yours and it never takes a track out.");
                     row(ui, ph::SLIDERS, "Sound & master", "DARK closes the sound and adds rumble. ACID opens the synth filter. SPACE: reverb and echo. PUMP ducks everything under the kick. MASTER: low, mid and high EQ and drive for the whole mix.");
                     row(ui, ph::LIGHTNING, "Live effects", "ENERGY is the arrangement, not the volume (← →): under 30 a break, then the groove builds up, at 90 the build-up starts and two bars later it drops – a whole track with one fader. DROP does the same any time. FILTER springs back when you let go. Hold STUTTER (Q), ECHO (W), WASH (E), CRUSH (X), GATE (C) or TAPE STOP (V) – combine them.");
                     row(ui, ph::MONITOR_PLAY, "Visualizer", "P turns the window into a fullscreen light show – no text, just a small energy bar at the bottom. All keys keep working (← → energy). Esc goes back.");
@@ -2250,6 +2288,7 @@ impl BunkerApp {
             }
             self.sent = self.song;
             self.send(Cmd::Song(Box::new(self.song)));
+            self.songs_sent += 1;
         }
         if let Some(v) = self.preview.take() {
             self.send(Cmd::Hit {
@@ -2385,14 +2424,17 @@ mod tests {
     }
 
     #[test]
-    fn energy_by_hand_stops_the_curve() {
+    fn energy_by_hand_unless_auto_fx_steers_it() {
         let mut app = BunkerApp::headless(Song::default(), View::Orbit, false);
         app.song.auto = true;
-        assert!(app.song.curve);
-        app.set_energy(0.2);
-        assert!(!app.song.curve);
+        app.song.auto_fx = true;
+        let before = app.song.macros.energy;
+        app.set_energy(0.2, 0.0);
+        assert_eq!(app.song.macros.energy, before, "AUTO FX steers it");
+        app.song.auto_fx = false;
+        app.set_energy(0.2, 0.0);
         assert_eq!(app.song.macros.energy, 0.2);
-        app.set_energy(3.0);
+        app.set_energy(3.0, 0.0);
         assert_eq!(app.song.macros.energy, 1.0);
     }
 

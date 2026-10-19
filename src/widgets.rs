@@ -246,17 +246,23 @@ pub fn filter_slider(ui: &mut Ui, value: &mut f32, width: f32, height: f32) -> R
 pub struct EnergyOut {
     pub changed: bool,
     pub curve_clicked: bool,
+    pub locked_clicked: bool,
 }
 
 /// The energy fader: drag to strip the groove down or build it up. Dots below show
 /// where each track comes in. `curve`: None = auto mode off, Some(on) = the auto
 /// mode's energy curve is (not) driving it – the pill switches it. The red end is the
 /// drop zone: pushed in there by hand, the energy starts a build-up.
-pub fn energy_fader(ui: &mut Ui, value: &mut f32, width: f32, height: f32, curve: Option<bool>) -> EnergyOut {
+/// `locked`: Bunker steers it (auto mode with AUTO FX) – a slim bar that only shows where the set is.
+pub fn energy_fader(ui: &mut Ui, value: &mut f32, width: f32, height: f32, curve: Option<bool>, locked: bool) -> EnergyOut {
+    if locked {
+        return energy_shown(ui, *value, width, height);
+    }
     let (rect, resp) = ui.allocate_exact_size(vec2(width, height), Sense::click_and_drag());
     let mut out = EnergyOut {
         changed: false,
         curve_clicked: false,
+        locked_clicked: false,
     };
     let p = ui.painter();
     let top = rect.top() + 8.0;
@@ -353,6 +359,45 @@ pub fn energy_fader(ui: &mut Ui, value: &mut f32, width: f32, height: f32, curve
          In auto mode and songs CURVE lets Bunker move it; touch the fader and break and drop are yours.",
     );
     out
+}
+
+/// The energy while Bunker steers it: a slim bar with the break and drop zones, no knob
+fn energy_shown(ui: &mut Ui, value: f32, width: f32, height: f32) -> EnergyOut {
+    let (rect, resp) = ui.allocate_exact_size(vec2(width, height), Sense::click());
+    let p = ui.painter();
+    let top = rect.top() + 8.0;
+    p.text(pos2(rect.left(), top), Align2::LEFT_CENTER, "ENERGY", bold(10.5), DIM);
+    p.text(
+        pos2(rect.right(), top),
+        Align2::RIGHT_CENTER,
+        format!("AUTO · {:.0}", value * 100.0),
+        bold(10.5),
+        ACID,
+    );
+    let cool = Color32::from_rgb(69, 200, 255);
+    let track = Rect::from_min_size(pos2(rect.left() + 6.0, top + 12.0), vec2(width - 12.0, 4.0));
+    let at = |e: f32| track.left() + track.width() * e;
+    p.rect_filled(track, 2.0, PANEL_HI);
+    p.rect_filled(
+        Rect::from_min_max(track.min, pos2(at(crate::engine::BREAK_ZONE), track.bottom())),
+        2.0,
+        alpha(cool, 0.22),
+    );
+    p.rect_filled(
+        Rect::from_min_max(pos2(at(crate::engine::DROP_ZONE), track.top()), track.max),
+        2.0,
+        alpha(RED, 0.35),
+    );
+    let fill = Rect::from_min_max(track.min, pos2(at(value), track.bottom()));
+    p.rect_filled(fill, 2.0, alpha(mix(cool, RED, value), 0.8));
+    let clicked = resp
+        .on_hover_text("Bunker steers the energy now – breaks and drops by itself.\nSwitch AUTO FX off to take it over.")
+        .clicked();
+    EnergyOut {
+        changed: false,
+        curve_clicked: false,
+        locked_clicked: clicked,
+    }
 }
 
 /// Thin horizontal value bar (track volume, swing, master)
