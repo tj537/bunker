@@ -202,6 +202,9 @@ pub struct BunkerApp {
 impl BunkerApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         install(&cc.egui_ctx);
+        // eframe brings the window back as it was – quit inside a visualizer, and that was
+        // fullscreen. Bunker always starts in its window; only a visualizer goes fullscreen.
+        cc.egui_ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
         let mut song: Song = cc.storage.and_then(|s| eframe::get_value(s, "song")).unwrap_or_default();
         song.sanitize();
         let view = cc.storage.and_then(|s| eframe::get_value(s, "view")).unwrap_or(View::Orbit);
@@ -1112,7 +1115,7 @@ impl BunkerApp {
                 ui.add_space(4.0);
                 // Two visualizers for a projector: double-click or Esc comes back
                 if chip(ui, ph::MASK_HAPPY, self.visual && self.face, RED)
-                    .on_hover_text("FACE: a low-poly head that lives with the music – it screams on the drop (O)")
+                    .on_hover_text("FACE: a low-poly head that nods in time – it screams on the drop (O)")
                     .clicked()
                 {
                     let ctx = ui.ctx().clone();
@@ -2357,7 +2360,7 @@ impl BunkerApp {
                     row(ui, ph::INFINITY, "8 · Auto mode", "Bunker keeps the groove moving: something changes every 2, 4 or 8 bars. With AUTO FX on it also steers the energy and plays breakdowns, build-ups and drops by itself. With AUTO FX off the energy bar is yours and no track is ever taken out.");
                     row(ui, ph::STACK, "9 · Favorites & auto song", "Click + under the orbit to keep what you hear (twelve slots), click a full one to switch on the next bar, right-click to rename, save over or clear. AUTO SONG makes a whole track from favorite 1 – a quiet intro, two or three drops, favorite 2 after the first – while you jam along. Click a part in the strip to jump there.");
                     row(ui, ph::RECORD, "10 · Record", "The red record button at the top (R) records everything you hear until you click it again – then save it as a WAV. An AUTO SONG records itself.");
-                    row(ui, ph::SPARKLE, "11 · Visualizers", "Two fullscreen shows for a projector, with a small energy bar at the bottom: LIGHTS (P) – a spectrum ring, shockwaves and stars – and FACE (O) – a low-poly head whose eyes glow with the beat, that warps and opens its mouth in a build-up, screams and bursts apart on the drop. All keys keep working. Esc or a double-click goes back.");
+                    row(ui, ph::SPARKLE, "11 · Visualizers", "Two fullscreen shows for a projector, with a small energy bar at the bottom: LIGHTS (P) – a spectrum ring, shockwaves and stars – and FACE (O) – a low-poly head that nods in time, glitches in a build-up, and on the drop tears its mouth open, screams and bursts apart. All keys keep working. Esc or a double-click goes back.");
                     row(ui, ph::FOLDER_SIMPLE, "12 · Files & settings", "File → Save keeps the groove and your favorites in a .bunker file; open it from the menu or drag it onto the window. The gear holds volume, sound output, MIDI keyboard and the update check.");
                     row(ui, ph::KEYBOARD, "Keys", "Space play · Enter shuffle · A–K pads · 1–8 mute · ← → energy · ↑ ↓ tempo · B drop · Q W E  X C V effects (hold) · R record · Tab orbit/classic · P lights · O face · ⌘/Ctrl Z undo · Esc close");
                 });

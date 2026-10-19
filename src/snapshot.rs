@@ -48,7 +48,8 @@ mod tests {
     fn render_face_frames() {
         render_face("face", &[(10.0, None), (10.02, None)]);
         render_face("face_build", &[(10.0, Some(0.85)), (10.02, Some(0.85))]);
-        render_face("face_drop", &[(10.0, Some(0.99)), (10.02, None), (10.6, None)]);
+        render_face("face_scream", &[(10.0, Some(0.99)), (10.02, None), (10.35, None)]);
+        render_face("face_drop", &[(10.0, Some(0.99)), (10.02, None), (10.9, None)]);
         render_face("face_burst", &[(10.0, Some(0.99)), (10.02, None), (11.1, None)]);
         render_face("face_back", &[(10.0, Some(0.99)), (10.02, None), (12.4, None)]);
     }

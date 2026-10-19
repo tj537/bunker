@@ -7,7 +7,7 @@ src/
   main.rs       window setup
   app.rs        BunkerApp: panels (top bar with the vibe dropdown, tracks, mood, sound|master/auto/live, favorites (12, named) and song strip, the record button, the settings window), keys, MIDI, files, recording, help, persistence
   visual.rs     the LIGHTS visualizer: spectrum ring, kick shockwaves, star field, a small energy bar (`energy_bar`, shared), no text – drawn from `Live` only
-  face.rs       the FACE visualizer: a procedural low-poly head (ellipsoid grid + gaussian bumps, a dropping jaw), flat-shaded mesh + wireframe, glitch bands and RGB split in build-ups, a drop that zooms, screams and bursts into shards
+  face.rs       the FACE visualizer: a procedural low-poly head (rings of a squared-off head profile + gaussian bumps, a jaw that only drops on the drop), flat-shaded mesh + wireframe, a nod on every beat, glitch bands and RGB split in build-ups, a drop that zooms, screams and bursts into shards
   file.rs       .bunker files (RON): song, favorites and their names
   form.rs       song forms (Short, Club, Hypnotic): parts, lengths, favorite 1 then 2, energy per part
   orbit.rs      the circular sequencer (drawing + mouse) and `Live`, the playback state the UI shows
@@ -74,6 +74,7 @@ Live effects are `Cmd::Fx(Fx, bool)` – held down / let go. The UI sends a chan
 - **Undo/redo** – at the end of every frame the UI compares `song` with `sent` (the last song it gave the engine). A difference is a user edit: the previous song goes on the undo stack, unless the last edit was less than 0.8 s ago (a slider move or a painted row is one step). Songs coming from the engine don't count; neither does the restore itself (`restoring`). Undo and slot loads keep the current master volume and auto-mode settings (`keep_live_settings`).
 - **Locks** – `Track::lock`: shuffle uses `gen::generate_keeping` with the locked tracks, the dice is disabled, `gen::evolve` and `gen::new_chapter` skip them.
 - **Files** – *File* menu: `.bunker` save/open (also by drag and drop). A loaded file is an ordinary edit, so undo goes back.
+- **Window** – eframe restores the last window state, so a quit inside a visualizer would come back fullscreen; `new` always leaves fullscreen.
 - **Visualizers** – `visual: bool` and `face: bool` (which one); the window then shows only `visual::visual` or `face::face` in fullscreen, keys keep working, Esc or a double-click leaves. The face notices the drop itself (the build-up ending) and keeps that moment in egui temp data.
 - **OUT tags** – a track row shows OUT while `song.macros.energy` is under its `engine::LAYERS` entry (a break). "Change every" only shows in the auto mode.
 - **Auto effects** – `auto_fx(fx, live)` lights an effect button while Bunker uses it by itself: the gate during every build-up (`Live::build`), flickering with the chop.
