@@ -787,13 +787,24 @@ impl BunkerApp {
                 Key::P => self.toggle_visual(ctx),
                 Key::ArrowUp => self.song.bpm = (self.song.bpm + 1.0).min(180.0),
                 Key::ArrowDown => self.song.bpm = (self.song.bpm - 1.0).max(90.0),
-                Key::R => {
-                    let r = !self.record.load(Ordering::Relaxed);
-                    self.record.store(r, Ordering::Relaxed);
-                }
+                Key::R => self.toggle_record(now),
                 _ => {}
             }
         }
+    }
+
+    /// RECORD: pads, keys and MIDI write into the pattern while it plays
+    fn toggle_record(&mut self, now: f64) {
+        let r = !self.record.load(Ordering::Relaxed);
+        self.record.store(r, Ordering::Relaxed);
+        self.say(
+            if r {
+                "Recording – play the pads (A–K) and your hits land on the beat"
+            } else {
+                "Recording off"
+            },
+            now,
+        );
     }
 
     fn toggle_visual(&mut self, ctx: &egui::Context) {
@@ -932,6 +943,13 @@ impl BunkerApp {
                     }
                 }
                 ui.add_space(8.0);
+                let rec = self.record.load(Ordering::Relaxed);
+                if chip(ui, ph::RECORD, rec, RED)
+                    .on_hover_text("Record: play the pads (A–K) or a MIDI keyboard and your hits land in the pattern, on the beat (R)")
+                    .clicked()
+                {
+                    self.toggle_record(now);
+                }
                 if chip(ui, ph::MONITOR_PLAY, self.visual, ACID)
                     .on_hover_text("Visualizer: the whole screen becomes a light show (P)")
                     .clicked()
@@ -2235,7 +2253,7 @@ impl BunkerApp {
                         self.hit(v);
                     }
                     if out.toggle_record {
-                        self.record.store(!rec, Ordering::Relaxed);
+                        self.toggle_record(now);
                     }
                 }
             }

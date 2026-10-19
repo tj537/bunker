@@ -702,6 +702,13 @@ impl Engine {
         t.steps[si].on = true;
         t.steps[si].chance = 100;
         t.mute = false;
+        // What you record should be heard: lift the energy just enough to let its track in
+        // (unless Bunker steers the energy – then it comes in when the energy gets there)
+        let layer = LAYERS[voice.index()];
+        if self.song.macros.energy < layer && !self.steers_energy() {
+            self.song.macros.energy = layer + 0.01;
+            self.layer_energy = self.song.macros.energy;
+        }
         // Recorded right after the step already played? Don't wait a whole loop to hear it
         self.send_song(None);
     }
@@ -1843,6 +1850,33 @@ mod tests {
         });
         assert!(e.song.track(Voice::Clap).steps[3].on);
         assert!(rx.try_recv().is_ok());
+    }
+
+    #[test]
+    fn a_recorded_hit_is_heard() {
+        let mut song = Song::empty();
+        song.macros.energy = 0.6;
+        let shared = Shared::new();
+        let mut e = Engine::new(22_050.0, song, shared.clone(), None, 1);
+        e.handle(Cmd::Play);
+        let step = e.step_len() as usize;
+        let mut buf = vec![0.0; 2 * step * 3 + 100];
+        e.render(&mut buf);
+        // The ride only plays from energy 70 – recording it lets it in
+        e.handle(Cmd::Hit {
+            voice: Voice::Ride,
+            vel: 0.9,
+            record: true,
+        });
+        assert!(e.song.macros.energy >= LAYERS[Voice::Ride.index()]);
+        let before = shared.hits[Voice::Ride.index()].load(Ordering::Relaxed);
+        let mut buf = vec![0.0; 2 * step * 16];
+        e.render(&mut buf);
+        assert_eq!(
+            shared.hits[Voice::Ride.index()].load(Ordering::Relaxed) - before,
+            1,
+            "the loop plays it"
+        );
     }
 
     #[test]
