@@ -310,7 +310,9 @@ pub fn energy_fader(ui: &mut Ui, value: &mut f32, width: f32, height: f32, curve
     let cool = Color32::from_rgb(69, 200, 255);
     let hot_col = mix(cool, RED, *value);
     p.rect_filled(track, 5.0, PANEL_HI);
-    // The drop zone
+    // The break zone and the drop zone
+    let break_x = track.left() + track.width() * crate::engine::BREAK_ZONE;
+    p.rect_filled(Rect::from_min_max(track.min, pos2(break_x, track.bottom())), 5.0, alpha(cool, 0.22));
     let zone_x = track.left() + track.width() * crate::engine::DROP_ZONE;
     p.rect_filled(Rect::from_min_max(pos2(zone_x, track.top()), track.max), 5.0, alpha(RED, 0.35));
     let fill = Rect::from_min_max(track.min, pos2(track.left() + track.width() * *value, track.bottom()));
@@ -327,14 +329,28 @@ pub fn energy_fader(ui: &mut Ui, value: &mut f32, width: f32, height: f32, curve
             bold(9.5),
             alpha(RED, 0.8),
         );
-        p.text(pos2(track.left(), y + 9.0), Align2::LEFT_CENTER, "less", body(9.5), FAINT);
+        p.text(
+            pos2(track.left(), y + 9.0),
+            Align2::LEFT_CENTER,
+            "break",
+            bold(9.5),
+            alpha(cool, 0.8),
+        );
+        p.text(
+            pos2(track.left() + track.width() * 0.6, y + 9.0),
+            Align2::CENTER_CENTER,
+            "groove",
+            bold(9.5),
+            FAINT,
+        );
     }
     resp.on_hover_cursor(egui::CursorIcon::ResizeHorizontal).on_hover_text(
-        "Energy: turn it down and the groove strips down to hats and synth, turn it up and kick, bass, clap, \
-         open hat and ride come back, plus extra hats and drive at the top. ← → on the keyboard.\n\
-         Then hit DROP – the energy comes back with it.\n\
-         The red end is the drop zone: push it to 90 or more and the build-up starts on the next bar, the drop two bars later.\n\
-         In auto mode CURVE lets Bunker move it through the set; touching the fader takes over by hand.",
+        "Energy is the arrangement – it changes what plays, not how loud. ← → on the keyboard.\n\
+         • Break (blue, under 30): no kick, no bass, the sound closes and opens into the reverb.\n\
+         • Groove: kick, bass, open hat and ride come in one by one.\n\
+         • Drop (red, 90 and up): the build-up starts on the next bar, the drop two bars later.\n\
+         So pull it down, bring it up slowly, and you play a whole track with one fader.\n\
+         In auto mode and songs CURVE lets Bunker move it; touch the fader and break and drop are yours.",
     );
     out
 }

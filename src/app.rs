@@ -34,6 +34,7 @@ fn keep_live_settings(mut song: Song, now: &Song) -> Song {
     song.auto = now.auto;
     song.auto_bars = now.auto_bars;
     song.curve = now.curve;
+    song.auto_fx = now.auto_fx;
     song.eq = now.eq;
     song
 }
@@ -1547,7 +1548,31 @@ impl BunkerApp {
         });
 
         ui.add_space(2.0);
-        heading(ui, "LIVE");
+        // AUTO FX: Bunker may use the effects itself (build-ups, phrase ends, breakdowns)
+        ui.horizontal(|ui| {
+            heading(ui, "LIVE");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let on = self.song.auto_fx;
+                if chip_small(ui, "AUTO FX", on, ACID, 74.0)
+                    .on_hover_text(
+                        "On: automatic build-ups use the effects (low-pass, gate, echo), and now and then \
+                         Bunker throws in a stutter, gate, crush or echo at the end of a phrase.\n\
+                         Off: classic build-ups and plain fills – the effects are all yours.",
+                    )
+                    .clicked()
+                {
+                    self.song.auto_fx = !on;
+                    self.say(
+                        if on {
+                            "Auto FX off – the effects are all yours"
+                        } else {
+                            "Auto FX on – Bunker throws in effects now and then"
+                        },
+                        now,
+                    );
+                }
+            });
+        });
         // Energy: the big lever of the arrangement
         let mut e = self.song.macros.energy;
         let curve = (self.song.auto || self.song_form.is_some()).then_some(self.song.curve);
@@ -2044,11 +2069,11 @@ impl BunkerApp {
                     row(ui, ph::PLAY, "Press play", "Space or the button in the middle. Pick a vibe in the list at the top – each pick rolls a fresh groove in that style. SHUFFLE rolls again.");
                     row(ui, ph::CIRCLES_THREE, "The orbit", "Each ring is one sound, each dot one step. Click to switch a dot on or off, drag to paint. Right-click: accent (on the synth: slide). Scroll on bass/synth dots to change the note. Shift-click: chance.");
                     row(ui, ph::LIST, "Tracks", "S solos a track, the speaker mutes it, the dice rolls a new rhythm for just that track (right-click: clear), the lock keeps shuffle, vibes, dice and auto mode away from it. The coloured pill is its sound – click it for the list, tune and decay, or scroll on it. The number is the loop length: under 16 it drifts against the beat.");
-                    row(ui, ph::MUSIC_NOTES, "Mood", "MOOD picks which notes and chords bass and synth play – Dark, Hypnotic, Deep, Sad or Euphoric – and gives them fitting new notes. Pitch moves them lower or higher. The speaker at the top sets the volume.");
+                    row(ui, ph::MUSIC_NOTES, "Mood", "MOOD picks which notes and chords bass and synth play – from Dark and Hypnotic to Euphoric, Sunny or Mysterious – and gives them fitting new notes. Each has its own chords, so the bars move. Pitch moves them lower or higher. The speaker at the top sets the volume.");
                     row(ui, ph::STACK, "Patterns & song", "Four memory slots under the orbit. Click + to keep what you hear, click a full pattern to switch – while playing it comes in on the next bar, with a clap roll. The lit one keeps your changes. SONG turns your patterns into a whole track (Short, Club or Hypnotic): intro, groove, break, drop, outro – Bunker steers the energy, you jam along. Click a part in the strip to jump there.");
-                    row(ui, ph::INFINITY, "Auto mode", "Bunker changes something every 2, 4 or 8 bars – patterns, sounds, notes, fills – and every 32 to 64 bars plays a breakdown, a build-up (each time a bit different) and a drop. Sometimes the drop starts a new chapter with a new bassline or key. A drop you play by hand makes the next automatic one wait. With CURVE on the energy fader it also moves the energy; touch the fader to take over.");
+                    row(ui, ph::INFINITY, "Auto mode", "Bunker changes something every 2, 4 or 8 bars – patterns, sounds, notes, fills – and every 32 to 64 bars plays a breakdown, a build-up (each time a bit different) and a drop. Every few drops a new chapter brings a bigger change. With CURVE on the energy fader it moves the energy and plays breaks and drops; touch the fader and they're yours. AUTO FX lets it use the effects too.");
                     row(ui, ph::SLIDERS, "Sound & master", "DARK closes the sound and adds rumble. ACID opens the synth filter. SPACE: reverb and echo. PUMP ducks everything under the kick. MASTER: low, mid and high EQ and drive for the whole mix.");
-                    row(ui, ph::LIGHTNING, "Live effects", "ENERGY strips the groove down or builds it up (← →) – pull it down, hit DROP and everything comes back. Pushed up to 90 or more, the fader starts the build-up itself – the drop lands two bars after the next bar starts. FILTER springs back when you let go. Hold STUTTER (Q), ECHO (W), WASH (E), CRUSH (X), GATE (C) or TAPE STOP (V) – combine them.");
+                    row(ui, ph::LIGHTNING, "Live effects", "ENERGY is the arrangement, not the volume (← →): under 30 a break, then the groove builds up, at 90 the build-up starts and two bars later it drops – a whole track with one fader. DROP does the same any time. FILTER springs back when you let go. Hold STUTTER (Q), ECHO (W), WASH (E), CRUSH (X), GATE (C) or TAPE STOP (V) – combine them.");
                     row(ui, ph::MONITOR_PLAY, "Visualizer", "P turns the window into a fullscreen light show – all keys keep working. Esc goes back.");
                     row(ui, ph::FOLDER_SIMPLE, "Files", "File → Save as .bunker keeps the groove and the four patterns in one file. Open it from the menu or drag it onto the window. A song played with SONG is recorded – when it ends (or you stop it), save it as a WAV.");
                     row(ui, ph::GRID_FOUR, "Pads", "Tab switches to big pads and a classic grid. Hit RECORD and play along – your hits land on the beat.");

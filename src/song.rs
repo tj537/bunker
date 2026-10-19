@@ -335,13 +335,21 @@ pub const PROGRESSIONS: [(&str, [i32; 4]); 7] = [
     ("i → II (dark)", [0, 1, 0, 1]),
 ];
 
+fn yes() -> bool {
+    true
+}
+
 /// Moods: a scale and a chord progression (index into `PROGRESSIONS`) that go together
-pub const MOODS: [(&str, &str, Scale, u8); 5] = [
+pub const MOODS: [(&str, &str, Scale, u8); 9] = [
     ("Dark", "Tense and menacing – one dark step up and back", Scale::Phrygian, 6),
     ("Hypnotic", "One chord, round and round", Scale::Minor, 0),
     ("Deep", "Warm and soulful", Scale::Dorian, 2),
     ("Sad", "Melancholic, two chords that long for each other", Scale::Minor, 1),
     ("Euphoric", "Big uplifting chords, hands in the air", Scale::Minor, 3),
+    ("Dreamy", "Soft and floating, rolling down and back up", Scale::Dorian, 4),
+    ("Epic", "Dramatic, climbing for three bars, then home", Scale::Harmonic, 5),
+    ("Sunny", "Bright and happy – techno in a major key", Scale::Major, 2),
+    ("Mysterious", "Exotic and dark, one chord that never settles", Scale::Harmonic, 0),
 ];
 
 /// The master section: three-band EQ and drive, each 0…1 (0.5 = flat)
@@ -408,6 +416,10 @@ pub struct Song {
     pub auto_bars: u8,
     /// Auto mode moves the energy itself (off once you take the energy fader)
     pub curve: bool,
+    /// Automatic build-ups get effects (low-pass, gate, echo) and phrase ends sometimes an
+    /// effect moment – off: classic build-ups and plain fills only
+    #[serde(default = "yes")]
+    pub auto_fx: bool,
     /// Index into `PROGRESSIONS`
     pub prog: u8,
     pub eq: MasterEq,
@@ -442,6 +454,7 @@ impl Song {
             auto: false,
             auto_bars: 8,
             curve: true,
+            auto_fx: true,
             prog: 0,
             eq: MasterEq::default(),
         }

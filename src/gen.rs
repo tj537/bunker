@@ -332,10 +332,6 @@ fn rim(vibe: Vibe, e: f32, song: &Song, rng: &mut Rng) -> Track {
             s.chance = 65;
         }
     }
-    // A three-beat rim loop drifts against the bar and meets it again every three bars – hypnotic
-    if matches!(vibe, Vibe::Hypnotic | Vibe::Minimal | Vibe::Dub | Vibe::Melodic) && rng.chance(0.3) {
-        t.len = 12;
-    }
     t
 }
 
@@ -412,13 +408,7 @@ fn ride(vibe: Vibe, e: f32, rng: &mut Rng) -> Track {
             }
             t
         }
-        _ => {
-            let mut t = from_mask(euclid(rng.range(3, 5) as usize, STEPS, rng.below(4) as usize * 2));
-            if rng.chance(0.25) {
-                t.len = 12;
-            }
-            t
-        }
+        _ => from_mask(euclid(rng.range(3, 5) as usize, STEPS, rng.below(4) as usize * 2)),
     }
 }
 
@@ -692,10 +682,10 @@ pub fn evolve(song: &mut Song, rng: &mut Rng) -> Option<Change> {
         }
         Some(Change::NewNotes(v))
     } else if !loops.is_empty() {
-        // Polyrhythm: a loop gets shorter (or back to a full bar)
+        // A loop gets half a bar long (or back to a full bar) – always in step with the beat
         let v = *rng.pick(&loops);
         let t = song.track_mut(v);
-        t.len = if t.len < 16 { 16 } else { *rng.pick(&[8u8, 12]) };
+        t.len = if t.len < 16 { 16 } else { 8 };
         if t.hits() == 0 {
             t.steps[2] = Step::hit();
         }
@@ -729,39 +719,61 @@ fn rotate(song: &mut Song, v: Voice, rng: &mut Rng) -> Change {
     Change::Shifted(v)
 }
 
-/// A bigger change after a drop: new bassline and synth line, often new sounds,
-/// sometimes a key change
+/// A new chapter after a drop: one or two bigger changes – a new bassline, a new synth
+/// line, another sound, other chords or (rarely) another key – not everything at once
 pub fn new_chapter(song: &mut Song, rng: &mut Rng) -> Change {
     let vibe = song.vibe;
-    if rng.chance(0.3) {
-        // Up a fourth or down a whole tone – stays in the bass range
-        let shifted = song.root as i32 + *rng.pick(&[5, -2, 3, -5]);
-        song.root = if (36..=47).contains(&shifted) {
-            shifted as u8
-        } else {
-            (shifted - 12).clamp(36, 47) as u8
-        };
-    }
-    if rng.chance(0.3) {
-        song.prog = rng.below(PROGRESSIONS.len() as u32) as u8;
-    }
-    for v in [Voice::Hat, Voice::Clap, Voice::Bass, Voice::Acid] {
-        if rng.chance(0.4) && !song.track(v).lock {
-            song.track_mut(v).sound = sound_for(v, vibe, rng);
+    // What can change; a key change is the rarest
+    let kinds = [0u8, 1, 1, 2, 2, 3, 3, 4];
+    let first = *rng.pick(&kinds);
+    let second = rng.chance(0.4).then(|| *rng.pick(&kinds)).filter(|&k| k != first);
+    for kind in std::iter::once(first).chain(second) {
+        match kind {
+            0 => {
+                // Up a fourth or down a whole tone – stays in the bass range
+                let shifted = song.root as i32 + *rng.pick(&[5, -2, 3, -5]);
+                song.root = if (36..=47).contains(&shifted) {
+                    shifted as u8
+                } else {
+                    (shifted - 12).clamp(36, 47) as u8
+                };
+            }
+            1 | 2 => {
+                let v = if kind == 1 { Voice::Bass } else { Voice::Acid };
+                if song.track(v).lock {
+                    continue;
+                }
+                let fresh = track_for(v, vibe, song.macros.energy, song, rng);
+                let t = song.track_mut(v);
+                // The synth sometimes comes in with its new line
+                let mute = t.mute && !(v == Voice::Acid && rng.chance(0.4));
+                *t = Track {
+                    mute,
+                    volume: t.volume,
+                    sound: t.sound,
+                    tune: t.tune,
+                    decay: t.decay,
+                    ..fresh
+                };
+            }
+            3 => {
+                let v = *rng.pick(&[Voice::Hat, Voice::Clap, Voice::Bass, Voice::Acid]);
+                if !song.track(v).lock {
+                    song.track_mut(v).sound = sound_for(v, vibe, rng);
+                    if v == Voice::Acid {
+                        // A line written for the new sound
+                        let fresh = track_for(v, vibe, song.macros.energy, song, rng);
+                        let t = song.track_mut(v);
+                        t.steps = fresh.steps;
+                        t.len = fresh.len;
+                    }
+                }
+            }
+            _ => {
+                song.prog = rng.below(PROGRESSIONS.len() as u32) as u8;
+                refit_notes(song, rng);
+            }
         }
-    }
-    for v in [Voice::Bass, Voice::Acid, Voice::Rim] {
-        if song.track(v).lock {
-            continue;
-        }
-        let fresh = track_for(v, vibe, song.macros.energy, song, rng);
-        let t = song.track_mut(v);
-        let mute = if v == Voice::Acid { rng.chance(0.3) } else { t.mute };
-        *t = Track {
-            mute,
-            volume: t.volume,
-            ..fresh
-        };
     }
     Change::NewChapter
 }
@@ -845,12 +857,33 @@ mod tests {
                     let rim = s.track(Voice::Rim).steps[i].on;
                     assert!(!(rim && (i % 4 == 0 || s.track(Voice::Clap).steps[i].on)), "{vibe:?} rim step {i}");
                 }
-                // Loops are a full bar, half a bar or three beats
+                // Loops are a full bar or half a bar – always in step with the beat
                 for t in &s.tracks {
-                    assert!([8, 12, 16].contains(&t.len), "{vibe:?} {}", t.len);
+                    assert!([8, 16].contains(&t.len), "{vibe:?} {}", t.len);
                 }
                 // Kicks always play
                 assert!(s.track(Voice::Kick).steps.iter().all(|st| st.chance == 100));
+            }
+        }
+    }
+
+    #[test]
+    fn every_mood_is_its_own_and_its_notes_fit() {
+        use crate::song::MOODS;
+        let mut rng = Rng::new(9);
+        for (i, a) in MOODS.iter().enumerate() {
+            for b in &MOODS[i + 1..] {
+                assert!((a.2, a.3) != (b.2, b.3), "{} and {} are the same", a.0, b.0);
+            }
+            let mut s = generate(Vibe::Hypnotic, &Macros::default(), &mut rng);
+            s.scale = a.2;
+            s.prog = a.3;
+            refit_notes(&mut s, &mut rng);
+            assert_eq!(s.mood(), Some(i));
+            for v in [Voice::Bass, Voice::Acid] {
+                for st in s.track(v).steps.iter().filter(|st| st.on) {
+                    assert!(s.scale.intervals().contains(&st.note.rem_euclid(12)), "{} {v:?} {}", a.0, st.note);
+                }
             }
         }
     }

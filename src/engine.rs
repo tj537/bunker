@@ -129,9 +129,17 @@ const PENDING: u64 = u64::MAX;
 /// Bands of the spectrum the visualizer shows (centre frequencies in Hz)
 pub const BANDS: [f32; 8] = [55.0, 120.0, 260.0, 550.0, 1_200.0, 2_600.0, 5_500.0, 11_000.0];
 
-/// Energy below which a track drops out (Voice::ALL order): turning the energy down
-/// strips the groove to hats and synth, turning it up brings kick, bass, clap … back
-pub const LAYERS: [f32; TRACKS] = [0.12, 0.28, 0.05, 0.0, 0.35, 0.42, 0.2, 0.0];
+/// Energy below which a track drops out (Voice::ALL order). The energy is the
+/// arrangement, not the volume: below `BREAK_ZONE` it's a break (no kick, no bass),
+/// then kick, bass, open hat and ride come in, and from `DROP_ZONE` up it drops.
+pub const LAYERS: [f32; TRACKS] = [0.3, 0.2, 0.1, 0.0, 0.45, 0.55, 0.35, 0.0];
+
+/// Below this energy the groove is a break: kick and bass out, the sound closes and
+/// opens up into the reverb the lower it goes
+pub const BREAK_ZONE: f32 = 0.3;
+
+/// How far the energy may move per step when Bunker steers it (curve, song mode)
+const GLIDE: f32 = 0.02;
 
 /// Lock-free state the UI reads every frame
 pub struct Shared {
@@ -440,6 +448,20 @@ pub struct Engine {
     riser_gain: f32,
     /// The energy was below the drop zone since the last drop
     zone_armed: bool,
+    /// Where the energy curve (auto, song) wants to go – the energy glides there step by step
+    energy_goal: f32,
+    /// The energy the layers follow: taken on every beat, so tracks come and go in time
+    layer_energy: f32,
+    /// The energy smoothed for the sound (break filter, space, bass brightness)
+    energy_smooth: f32,
+    break_lp_l: Svf,
+    break_lp_r: Svf,
+    /// Auto mode: drops since the last new chapter
+    drops_since_chapter: u32,
+    /// AUTO FX: an effect at the end of a phrase – bar, effect, from step
+    fx_moment: Option<(u64, Fx, u64)>,
+    /// The stutter running now was started by an effect moment
+    auto_stutter: bool,
     transpose: i8,
     limiter: f32,
     peak: f32,
@@ -526,6 +548,14 @@ impl Engine {
             cut_style: BuildStyle::Classic,
             riser_gain: 0.0,
             zone_armed: false,
+            energy_goal: song.macros.energy,
+            layer_energy: song.macros.energy,
+            energy_smooth: song.macros.energy,
+            break_lp_l: Svf::new(18_000.0, 0.7, sr),
+            break_lp_r: Svf::new(18_000.0, 0.7, sr),
+            drops_since_chapter: 0,
+            fx_moment: None,
+            auto_stutter: false,
             transpose: 0,
             limiter: 1.0,
             peak: 0.0,
@@ -685,7 +715,11 @@ impl Engine {
         self.build = Some(Build {
             start: idx,
             len: 2 * STEPS as u64,
-            style: *self.auto_rng.pick(&STYLES),
+            style: if self.song.auto_fx {
+                *self.auto_rng.pick(&STYLES)
+            } else {
+                BuildStyle::Classic
+            },
         });
         self.send_song(Some(Change::Build));
     }
@@ -713,6 +747,27 @@ impl Engine {
             if self.playing && self.build.is_none() {
                 self.start_build();
             }
+        }
+    }
+
+    /// The last bar of a phrase: a fill – or, with AUTO FX, now and then an effect moment
+    fn phrase_end(&mut self, bar: u64) {
+        if self.song.auto_fx && self.auto_rng.chance(0.4) {
+            let (fx, from) = *self
+                .auto_rng
+                .pick(&[(Fx::Stutter, 12u64), (Fx::Gate, 8), (Fx::Crush, 12), (Fx::Echo, 12)]);
+            self.fx_moment = Some((bar, fx, from));
+            self.fill = None;
+        } else {
+            self.fill = Some((bar, *self.auto_rng.pick(&FILLS)));
+        }
+    }
+
+    /// An effect moment on now? (`last_fired` step)
+    fn moment(&self, fx: Fx) -> bool {
+        match (self.fx_moment, self.last_fired) {
+            (Some((bar, f, from)), Some(i)) => f == fx && i / STEPS as u64 == bar && i % STEPS as u64 >= from,
+            _ => false,
         }
     }
 
@@ -760,15 +815,21 @@ impl Engine {
         let mut change = Change::Drop;
         if self.song.auto {
             self.new_cycle(self.bar_now);
-            if self.auto_rng.chance(0.45) {
+            // A new chapter only every few drops – the set keeps its identity for a while
+            if self.drops_since_chapter >= 2 && self.auto_rng.chance(0.5) {
                 change = gen::new_chapter(&mut self.song, &mut self.auto_rng);
+                self.drops_since_chapter = 0;
             } else {
                 gen::evolve(&mut self.song, &mut self.auto_rng);
+                self.drops_since_chapter += 1;
             }
             if self.song.curve {
                 self.song.macros.energy = self.curve_target(0);
             }
         }
+        // The drop lands at once; from here the curve glides on
+        self.energy_goal = self.song.macros.energy;
+        self.layer_energy = self.song.macros.energy;
         self.send_song(Some(change));
     }
 
@@ -779,6 +840,7 @@ impl Engine {
         s.auto = self.song.auto && self.arrangement.is_none();
         s.auto_bars = self.song.auto_bars;
         s.curve = self.song.curve;
+        s.auto_fx = self.song.auto_fx;
         s.eq = self.song.eq;
         s.macros.energy = self.song.macros.energy;
         s.sanitize();
@@ -817,11 +879,7 @@ impl Engine {
         let sec = form.sections[self.section];
         let (played, n) = (bar - self.section_start, sec.bars as u64);
         if self.song.curve {
-            let e = sec.part.energy(played, n);
-            if (e - self.song.macros.energy).abs() > 0.005 {
-                self.song.macros.energy = e;
-                self.send_song(None);
-            }
+            self.energy_goal = sec.part.energy(played, n);
         }
         if sec.part == Part::Break && played + 2 == n && self.build.is_none() {
             self.auto_build(idx);
@@ -836,7 +894,7 @@ impl Engine {
             && played + 1 < n
             && self.auto_rng.chance(0.7)
         {
-            self.fill = Some((bar, *self.auto_rng.pick(&FILLS)));
+            self.phrase_end(bar);
         }
     }
 
@@ -883,7 +941,11 @@ impl Engine {
             _ => {}
         }
         self.song.curve = true;
-        self.song.macros.energy = sec.part.energy(0, sec.bars as u64);
+        self.energy_goal = sec.part.energy(0, sec.bars as u64);
+        if sec.part == Part::Peak {
+            self.song.macros.energy = self.energy_goal;
+            self.layer_energy = self.energy_goal;
+        }
         self.shared.part.store(i as u32 + 1, Ordering::Relaxed);
         self.shared.part_start.store(bar, Ordering::Relaxed);
         self.send_song(Some(Change::Part(sec.part, i, slot)));
@@ -944,13 +1006,13 @@ impl Engine {
     fn curve_target(&self, b: u64) -> f32 {
         let (at, build) = (self.breakdown_at(), self.cycle_len - 2);
         if b < 8 {
-            0.95 - 0.35 * b as f32 / 8.0
+            0.95 - 0.25 * b as f32 / 8.0
         } else if b < at {
-            0.6 + 0.32 * (b - 8) as f32 / (at - 8).max(1) as f32
+            0.7 + 0.15 * (b - 8) as f32 / (at - 8).max(1) as f32
         } else if b < build {
-            0.22
+            0.2
         } else {
-            0.4 + (b - build) as f32 * 0.2
+            0.5 + (b - build) as f32 * 0.2
         }
     }
 
@@ -975,6 +1037,13 @@ impl Engine {
     fn new_bar(&mut self, idx: u64) {
         let bar = idx / STEPS as u64;
         self.bar_now = bar;
+        // An effect moment ends with its bar
+        if self.fx_moment.is_some_and(|(b, ..)| b < bar) {
+            self.fx_moment = None;
+            if std::mem::take(&mut self.auto_stutter) && !self.fx[Fx::Stutter.index()] {
+                self.stutter = None;
+            }
+        }
         let mut dropped = false;
         if let Some(b) = &self.build {
             if idx >= b.start + b.len {
@@ -1000,31 +1069,45 @@ impl Engine {
             self.new_cycle(bar);
         }
         let b = bar - self.cycle_start;
+        let at = self.breakdown_at();
+        // With the curve on, Bunker arranges: energy, breakdown, build-up, drop. With the
+        // energy by hand, those are yours (low = break, 90 = drop) – the groove still evolves.
         if self.song.curve {
-            let e = self.curve_target(b);
-            if (e - self.song.macros.energy).abs() > 0.005 {
-                self.song.macros.energy = e;
-                self.send_song(None);
+            self.energy_goal = self.curve_target(b);
+            if b == at && self.build.is_none() {
+                self.start_breakdown(idx);
+            } else if b == self.cycle_len - 2 && self.build.is_none() {
+                self.auto_build(idx);
             }
         }
-        let at = self.breakdown_at();
-        if b == at && self.build.is_none() {
-            self.start_breakdown(idx);
-        } else if b == self.cycle_len - 2 && self.build.is_none() {
-            self.auto_build(idx);
-        } else if b < at && bar.is_multiple_of(self.song.auto_bars.max(1) as u64) {
+        if b < at && bar.is_multiple_of(self.song.auto_bars.max(1) as u64) {
             if let Some(change) = gen::evolve(&mut self.song, &mut self.auto_rng) {
                 self.send_song(Some(change));
             }
         }
         if b + 1 < at && (b + 1).is_multiple_of(8) && self.auto_rng.chance(0.8) {
-            self.fill = Some((bar, *self.auto_rng.pick(&FILLS)));
+            self.phrase_end(bar);
         }
     }
 
     fn fire(&mut self, idx: u64) {
         if idx.is_multiple_of(STEPS as u64) {
             self.new_bar(idx);
+        }
+        // Bunker steering the energy: it glides towards the curve instead of jumping
+        if self.song.curve && (self.song.auto || self.arrangement.is_some()) {
+            let e = self.song.macros.energy;
+            let next = e + (self.energy_goal - e).clamp(-GLIDE, GLIDE);
+            if (next - e).abs() > 1e-4 {
+                self.song.macros.energy = next;
+                if idx.is_multiple_of(4) {
+                    self.send_song(None);
+                }
+            }
+        }
+        // Tracks come and go on the beat
+        if idx.is_multiple_of(4) || self.build.is_some() {
+            self.layer_energy = self.song.macros.energy;
         }
         self.shared.step.store(idx, Ordering::Relaxed);
         let build = self.build_progress(idx as f64);
@@ -1035,6 +1118,18 @@ impl Engine {
                 self.throw = 1.0;
             }
         }
+        if let Some((bar, fx, from)) = self.fx_moment {
+            if idx == bar * STEPS as u64 + from {
+                match fx {
+                    Fx::Stutter if self.stutter.is_none() => {
+                        self.stutter = Some(idx);
+                        self.auto_stutter = true;
+                    }
+                    Fx::Echo => self.throw = 1.0,
+                    _ => {}
+                }
+            }
+        }
         let play_idx = match self.stutter {
             Some(origin) if idx >= origin => origin + (idx - origin) % 2,
             _ => idx,
@@ -1042,7 +1137,7 @@ impl Engine {
         let in_bar = idx % STEPS as u64;
         let fill = self.fill.filter(|(b, _)| *b == idx / STEPS as u64).map(|(_, f)| f);
         let step_len = self.step_len() as f32;
-        let energy = self.song.macros.energy;
+        let energy = self.layer_energy;
         // The kick roll of a build-up comes in even when the energy or a breakdown took the kick out
         let kick_by_hand = self.breakdown.as_ref().map_or(self.song.track(Voice::Kick).mute, |b| {
             if b.out.contains(&Voice::Kick) {
@@ -1187,7 +1282,7 @@ impl Engine {
                 } else {
                     0.0
                 };
-                self.kick.drive = (1.4 + m.energy * 1.6 + hard) * k.drive + k.drive_add;
+                self.kick.drive = (2.5 + hard) * k.drive + k.drive_add;
                 self.kick.trigger(vel, (0.11 + m.dark * 0.2) * k.length * decay, sr);
                 self.pump_env = 1.0;
             }
@@ -1229,17 +1324,15 @@ impl Engine {
     pub fn render(&mut self, out: &mut [f32]) {
         let sr = self.sr;
         let m = self.song.macros;
-        let vol: [f32; TRACKS] = std::array::from_fn(|i| {
-            let live = match Voice::ALL[i] {
-                Voice::Hat | Voice::Ride | Voice::Rim => 0.65 + m.energy * 0.55,
-                _ => 1.0,
-            };
-            live * if self.song.tracks[i].mute { 0.0 } else { 1.0 }
-        });
+        // (The energy changes what plays, never how loud)
+        let vol: [f32; TRACKS] = std::array::from_fn(|i| if self.song.tracks[i].mute { 0.0 } else { 1.0 });
         let step_len = self.step_len();
         let delay_time = (step_len * 3.0) as f32;
         let space = m.space;
         let dark = m.dark;
+        // Break zone: the lower the energy, the more closed and spacious the sound
+        let es_coef = 1.0 - (-1.0 / (0.12 * sr)).exp();
+        let break_space = 1.0 + ((BREAK_ZONE - self.energy_smooth) / BREAK_ZONE).clamp(0.0, 1.0) * 1.2;
         // Darkness closes the master tone filter – all the way down to a muffled 1.5 kHz
         let tone = 18_000.0 * 0.1f32.powf(dark * dark * 1.08);
         self.tone_l.set(tone, 0.6, sr);
@@ -1256,7 +1349,17 @@ impl Engine {
             m.acid
         };
         // (Stutter works on the steps, in `fire`)
-        let [_, echo_on, wash_on, crush_on, gate_on, tape_on] = self.fx;
+        let [_, echo_on, mut wash_on, crush_on, gate_on, tape_on] = self.fx;
+        let (crush_on, gate_on) = (crush_on || self.moment(Fx::Crush), gate_on || self.moment(Fx::Gate));
+        // AUTO FX: a breakdown starts in the wash
+        if let Some(b) = &self.breakdown {
+            if self.song.auto_fx
+                && (self.song.auto || self.arrangement.is_some())
+                && self.last_fired.is_some_and(|i| i < b.start + STEPS as u64)
+            {
+                wash_on = true;
+            }
+        }
         // Pump: the duck lasts a bit more than a 16th
         let pump_coef = (-1.0 / (step_len as f32 * 1.3)).exp();
         let pump = m.pump;
@@ -1303,7 +1406,7 @@ impl Engine {
                 self.hat.next(sr, &mut self.rng) * vol[3] * pg,
                 self.open_hat.next(sr, &mut self.rng) * vol[4] * pg,
                 self.ride.next(sr, &mut self.rng) * vol[5] * pg,
-                self.bass.next(sr, m.energy, dark) * vol[6] * 2.0 * (1.0 - duck * 0.7) * pg,
+                self.bass.next(sr, self.energy_smooth, dark) * vol[6] * 2.0 * (1.0 - duck * 0.7) * pg,
                 self.acid.next(sr, acid) * vol[7] * (1.0 - duck * 0.3) * pg,
             ];
             let (mut l, mut r) = (0.0f32, 0.0f32);
@@ -1317,7 +1420,7 @@ impl Engine {
                 let ds = delay_send[i] * space * 2.0 + if i == 0 || i == 6 { 0.0 } else { echo_send };
                 dl += x * ds * (1.0 - p * 0.5);
                 dr += x * ds * (1.0 + p * 0.5);
-                rv += x * VERB_SEND[i] * (0.15 + space * 1.6);
+                rv += x * VERB_SEND[i] * (0.15 + space * 1.6) * break_space;
             }
             // Rumble and the drop
             let rumble = self.rumble.run(kick_raw * vol[0], duck) * dark * 1.3;
@@ -1428,6 +1531,15 @@ impl Engine {
             }
             l = self.tone_l.run(l).lp;
             r = self.tone_r.run(r).lp;
+            self.energy_smooth += (m.energy - self.energy_smooth) * es_coef;
+            let brk = ((BREAK_ZONE - self.energy_smooth) / BREAK_ZONE).clamp(0.0, 1.0);
+            if brk > 0.001 {
+                let fc = 18_000.0 * 0.12f32.powf(brk);
+                self.break_lp_l.set(fc, 0.8, sr);
+                self.break_lp_r.set(fc, 0.8, sr);
+                l = self.break_lp_l.run(l).lp;
+                r = self.break_lp_r.run(r).lp;
+            }
 
             // Crush: hold every few samples and round to fewer bits
             self.crush += ((if crush_on { 1.0 } else { 0.0 }) - self.crush) * 0.002;
@@ -1466,8 +1578,8 @@ impl Engine {
                     *x += lo * g_low + mid * g_mid + hi * g_high;
                 }
             }
-            // Glue: saturation – more with energy and the DRIVE knob
-            let drive = 0.8 + m.energy * 0.9 + (eq.drive - 0.3) * 1.6;
+            // Glue: saturation with the DRIVE knob
+            let drive = 1.34 + (eq.drive - 0.3) * 1.6;
             l = sat(l * drive * 0.7);
             r = sat(r * drive * 0.7);
             // Brick-wall-ish limiter
@@ -2006,14 +2118,18 @@ mod tests {
         let mut e = Engine::new(11_025.0, song, Shared::new(), Some(tx), 1);
         e.handle(Cmd::Play);
         let bar = (e.step_len() * STEPS as f64) as usize;
-        let mut buf = vec![0.0; 2 * bar * 25 + 100];
-        e.render(&mut buf); // into the breakdown
+        let mut buf = vec![0.0; 2 * bar * 27 + 100];
+        e.render(&mut buf); // into the breakdown – the energy glides down over two bars
         assert!(e.song.macros.energy < 0.3, "low in the breakdown: {}", e.song.macros.energy);
+        // It glided: no step bigger than the glide between two updates sent to the UI
         let sent: Vec<f32> = rx
             .try_iter()
             .filter_map(|ev| if let Event::Song(s, _) = ev { Some(s.macros.energy) } else { None })
             .collect();
         assert!(sent.iter().any(|&x| x > 0.85), "high after the start: {sent:?}");
+        for w in sent.windows(2) {
+            assert!((w[1] - w[0]).abs() <= 4.0 * GLIDE + 1e-3, "a jump: {} → {}", w[0], w[1]);
+        }
         // The UI can't override it while the curve is on …
         let mut ui_song = e.song;
         ui_song.macros.energy = 0.9;
