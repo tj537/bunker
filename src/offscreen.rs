@@ -159,7 +159,7 @@ impl Offscreen {
     pub fn save(&self, primitives: &[ClippedPrimitive], path: &Path) {
         let (w, h, mut pixels) = self.rgba(primitives);
         // Un-premultiply for PNG
-        for px in pixels.chunks_exact_mut(4) {
+        for px in pixels.as_chunks_mut::<4>().0 {
             let a = px[3] as f32 / 255.0;
             if a > 0.0 && a < 1.0 {
                 for c in &mut px[..3] {

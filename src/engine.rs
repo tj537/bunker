@@ -868,7 +868,7 @@ impl Engine {
         let eq_on = g_low.abs() + g_mid.abs() + g_high.abs() > 0.01;
         let band_coef = (-1.0 / (0.03 * sr)).exp();
 
-        for frame in out.chunks_exact_mut(2) {
+        for frame in out.as_chunks_mut::<2>().0 {
             // ── Clock ──
             if self.playing {
                 self.phase += 1.0 / step_len;
