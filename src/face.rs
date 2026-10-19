@@ -148,7 +148,7 @@ fn fang_tooth(p: &egui::Painter, a: Pos2, b: Pos2, tip: Pos2, bone: Color32) {
 }
 
 /// A colour that adds light (premultiplied with no alpha), `k` 0…1 of it
-fn additive(color: Color32, k: f32) -> Color32 {
+pub fn additive(color: Color32, k: f32) -> Color32 {
     let k = k.clamp(0.0, 1.0);
     Color32::from_rgba_premultiplied(
         (color.r() as f32 * k) as u8,
@@ -177,7 +177,7 @@ fn beam(p: &egui::Painter, from: Pos2, dir: egui::Vec2, len: f32, w0: f32, w1: f
 }
 
 /// A soft round light: bright in the middle, fading smoothly to nothing (added on top)
-fn halo(p: &egui::Painter, c: Pos2, r: f32, color: Color32, k: f32) {
+pub fn halo(p: &egui::Painter, c: Pos2, r: f32, color: Color32, k: f32) {
     let k = k.clamp(0.0, 1.0);
     let light = |f: f32| additive(color, k * f);
     let mut mesh = Mesh::default();

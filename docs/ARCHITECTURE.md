@@ -11,7 +11,7 @@ src/
   file.rs       .bunker files (RON): song, favorites and their names
   form.rs       song forms (Short, Club, Hypnotic): parts, lengths, favorite 1 then 2, energy per part
   orbit.rs      the circular sequencer (drawing + mouse) and `Live`, the playback state the UI shows
-  planets.rs    the Planets view (`View::Planets`): tilted orbits (`System`: place, lift, hit), beads sorted far to near around the sun, planets lit from the middle; same input as the orbit (`Paint`, `step_context_menu`)
+  planets.rs    the Planets view (`View::Planets`): tilted orbits (`System`: place, lift, hit) all starting at the back like the orbit's 12 o'clock, a radar beam lying on the plane, steps drawn far to near around the sun as planets lit from the middle; same input as the orbit (`Paint`, `step_context_menu`)
   pads.rs       the Classic view (`View::Pads`): eight pads + step grid
   widgets.rs    macro sliders, chips, glowing buttons, effect buttons, the energy fader, the spring-back filter slider, concrete and stars
   theme.rs      colours, fonts (Space Grotesk, Anton, Phosphor icons), egui style

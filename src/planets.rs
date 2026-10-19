@@ -1,20 +1,19 @@
-//! The planets: a little solar system seen from an angle. Every track is a planet that
-//! goes round the sun once a bar; its steps are beads on its orbit, and it plays when
-//! it passes one. The orbits are turned against each other, so the beats form spiral
-//! arms. Bass and synth beads stand on stalks: the higher, the higher the note.
+//! The planets: the groove as a little solar system seen from an angle. Every track is
+//! an orbit round the sun, every step that plays a planet on it. A radar beam sweeps
+//! round once a bar – like in the orbit – and every planet it passes lights up and
+//! sends out a ring. Bass and synth planets float above the plane: the higher, the
+//! higher the note.
 
+use crate::face::{additive, halo};
 use crate::orbit::{scroll_notches, step_context_menu, Live, OrbitOut, Paint};
 use crate::song::{Song, Voice, STEPS, TRACKS};
 use crate::theme::*;
-use crate::widgets::glow;
-use eframe::egui::{self, pos2, vec2, Align2, Color32, Pos2, Rect, Sense, Ui};
+use eframe::egui::{self, pos2, vec2, Align2, Color32, Mesh, Pos2, Rect, Sense, Ui};
 use egui_phosphor::regular as ph;
 use std::f32::consts::{PI, TAU};
 
 /// How flat the orbits look: 1 = from straight above, 0 = edge-on
 const TILT: f32 = 0.42;
-/// Every orbit is turned this much further than the one inside it
-const SPIRAL: f32 = TAU / STEPS as f32;
 
 pub struct System {
     pub c: Pos2,
@@ -34,24 +33,34 @@ impl System {
         self.r_max * (0.3 + 0.7 * (track as f32 + 0.5) / TRACKS as f32)
     }
 
+    /// Half the gap between two orbits
+    fn half_gap(&self) -> f32 {
+        self.r_max * 0.35 / TRACKS as f32
+    }
+
     pub fn sun(&self) -> f32 {
         self.r_max * 0.12
     }
 
-    /// The angle of a point `steps` (with fraction) into the bar on a track's orbit:
-    /// step 1 of the innermost orbit is at the front
-    pub fn angle(track: usize, steps: f32) -> f32 {
-        PI / 2.0 + TAU * steps / STEPS as f32 + track as f32 * SPIRAL
+    /// The angle `steps` (with fraction) into the bar: step 1 at the back, like 12 o'clock
+    /// on the orbit, then clockwise – the same on every orbit, so the planets line up
+    pub fn angle(steps: f32) -> f32 {
+        -PI / 2.0 + TAU * steps / STEPS as f32
     }
 
-    /// Where an angle on a track's orbit lands on the screen, lifted by `height`, and how
-    /// near it is (-1 behind the sun … 1 in front)
-    pub fn place(&self, track: usize, a: f32, height: f32) -> (Pos2, f32) {
-        let r = self.orbit(track);
-        (self.c + vec2(r * a.cos(), r * a.sin() * TILT - height), a.sin())
+    /// A point at radius `r` and angle `a` on the plane, lifted by `height`
+    fn at(&self, r: f32, a: f32, height: f32) -> Pos2 {
+        self.c + vec2(r * a.cos(), r * a.sin() * TILT - height)
     }
 
-    /// How high a note lifts a bead
+    /// Where a step of a track lands on the screen, lifted by `height`, and how near it
+    /// is (-1 behind the sun … 1 in front)
+    pub fn place(&self, track: usize, step: usize, height: f32) -> (Pos2, f32) {
+        let a = Self::angle(step as f32);
+        (self.at(self.orbit(track), a, height), a.sin())
+    }
+
+    /// How high a note lifts a planet
     pub fn lift(&self, voice: Voice, note: i8) -> f32 {
         if voice.is_synth() {
             note as f32 * self.r_max * 0.006
@@ -60,40 +69,26 @@ impl System {
         }
     }
 
-    pub fn bead_radius(&self) -> f32 {
-        (self.r_max * 0.018).clamp(3.0, 7.0)
+    pub fn planet_radius(&self) -> f32 {
+        (self.r_max * 0.022).clamp(3.5, 8.5)
     }
 
-    /// The step bead under `p`, if any – the nearest, the front one on a tie
+    /// The step under `p`, if any – the nearest, the front one on a tie
     pub fn hit(&self, p: Pos2, song: &Song) -> Option<(usize, usize)> {
         let mut best: Option<(f32, usize, usize)> = None;
         for (t, voice) in Voice::ALL.into_iter().enumerate() {
             for s in 0..STEPS {
                 let step = song.tracks[t].steps[s];
                 let h = if step.on { self.lift(voice, step.note) } else { 0.0 };
-                let (at, depth) = self.place(t, Self::angle(t, s as f32), h);
+                let (at, depth) = self.place(t, s, h);
                 let d = at.distance(p) - depth * 0.5;
-                if d < self.bead_radius() * 2.2 && best.is_none_or(|b| d < b.0) {
+                if d < self.planet_radius() * 2.0 && best.is_none_or(|b| d < b.0) {
                     best = Some((d, t, s));
                 }
             }
         }
         best.map(|(_, t, s)| (t, s))
     }
-}
-
-/// Points along an orbit between two angles
-fn arc_points(sys: &System, track: usize, a0: f32, a1: f32) -> Vec<Pos2> {
-    let n = 48;
-    (0..=n)
-        .map(|i| sys.place(track, a0 + (a1 - a0) * i as f32 / n as f32, 0.0).0)
-        .collect()
-}
-
-/// Something to draw, at a depth, so the near things cover the far ones
-enum Thing {
-    Bead { t: usize, s: usize },
-    Planet { t: usize },
 }
 
 pub fn planets(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mut Paint) -> OrbitOut {
@@ -169,162 +164,167 @@ pub fn planets(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mu
     // ── Drawing ──
     let kick = if live.playing { live.flash(0) } else { 0.0 };
     let build = live.build.unwrap_or(0.0);
-    let bar = if live.playing {
-        live.pos.rem_euclid(STEPS as f64) as f32
-    } else {
-        0.0
-    };
     let now = live.playing.then(|| live.step() as usize % STEPS);
-    let br = sys.bead_radius();
+    let pr = sys.planet_radius();
+    let (r_in, r_out) = (sys.orbit(0) - sys.half_gap(), sys.orbit(TRACKS - 1) + sys.half_gap());
 
     // The plane of the system, faintly
-    let rim = sys.r_max + 18.0;
-    let plane: Vec<Pos2> = (0..96)
-        .map(|i| {
-            let a = i as f32 / 96.0 * TAU;
-            sys.c + vec2(rim * a.cos(), rim * a.sin() * TILT)
-        })
-        .collect();
+    let rim = r_out + 12.0;
+    let plane: Vec<Pos2> = (0..96).map(|i| sys.at(rim, i as f32 / 96.0 * TAU, 0.0)).collect();
     p.add(egui::Shape::convex_polygon(plane, alpha(SPACE, 0.5), stroke(1.0, alpha(LINE, 0.6))));
 
-    // Beat numbers outside the outer orbit, where its beats are
-    let outer = TRACKS - 1;
+    // Beat numbers outside, where the beats are
     for (i, label) in ["1", "2", "3", "4"].iter().enumerate() {
-        let a = System::angle(outer, (i * 4) as f32);
-        let r = rim + 14.0;
-        let at = sys.c + vec2(r * a.cos(), r * a.sin() * TILT + if a.sin() > 0.0 { 6.0 } else { -6.0 });
+        let a = System::angle((i * 4) as f32);
+        let at = sys.at(rim + 16.0, a, 0.0) + vec2(0.0, a.sin() * 8.0);
         let current = now.is_some_and(|n| n / 4 == i);
         p.text(at, Align2::CENTER_CENTER, *label, display(15.0), if current { TEXT } else { FAINT });
     }
 
+    // The radar beam, lying on the plane
+    if live.playing {
+        let a = System::angle(live.pos.rem_euclid(STEPS as f64) as f32);
+        let light = mix(Color32::WHITE, RED, build);
+        let mut mesh = Mesh::default();
+        let n = 32;
+        for i in 0..=n {
+            let f = i as f32 / n as f32;
+            let b = a - 0.9 * (1.0 - f);
+            let k = 0.35 * f * f * (1.0 + build);
+            mesh.colored_vertex(sys.at(r_in, b, 0.0), additive(light, k * 0.5));
+            mesh.colored_vertex(sys.at(r_out + 8.0, b, 0.0), additive(light, k));
+            if i > 0 {
+                let j = 2 * i as u32;
+                mesh.add_triangle(j - 2, j - 1, j);
+                mesh.add_triangle(j - 1, j + 1, j);
+            }
+        }
+        p.add(egui::Shape::mesh(mesh));
+        p.line_segment([sys.at(r_in, a, 0.0), sys.at(r_out + 8.0, a, 0.0)], stroke(1.5, alpha(light, 0.55)));
+    }
+
     // Orbit lines: the far halves now, the near halves after the sun
     let orbit_line = |t: usize, near: bool| {
-        let voice = Voice::ALL[t];
         let muted = song.tracks[t].mute;
         let flash = if live.playing { live.flash(t) } else { 0.0 };
         let k = if muted { 0.08 } else { 0.18 + 0.4 * flash + 0.15 * build };
         let (a0, a1) = if near { (0.0, PI) } else { (PI, TAU) };
-        egui::Shape::line(arc_points(&sys, t, a0, a1), stroke(1.0 + flash * 1.5, alpha(track_color(voice), k)))
+        let r = sys.orbit(t);
+        let points: Vec<Pos2> = (0..=48).map(|i| sys.at(r, a0 + (a1 - a0) * i as f32 / 48.0, 0.0)).collect();
+        egui::Shape::line(points, stroke(1.0 + flash * 1.5, alpha(track_color(Voice::ALL[t]), k)))
     };
     for t in 0..TRACKS {
         p.add(orbit_line(t, false));
     }
 
-    // Beads and planets, far to near
-    let mut things: Vec<(f32, Thing)> = Vec::new();
-    for t in 0..TRACKS {
-        for s in 0..STEPS {
-            things.push((System::angle(t, s as f32).sin(), Thing::Bead { t, s }));
+    // Every step, far to near: a planet if it plays, a speck if not
+    let mut steps: Vec<(f32, usize, usize)> = (0..TRACKS)
+        .flat_map(|t| (0..STEPS).map(move |s| (System::angle(s as f32).sin(), t, s)))
+        .collect();
+    steps.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let draw = |t: usize, s: usize| {
+        let voice = Voice::ALL[t];
+        let track = &song.tracks[t];
+        let step = track.steps[s];
+        let color = track_color(voice);
+        let muted = track.mute;
+        let (base, depth) = sys.place(t, s, 0.0);
+        let scale = 1.0 + 0.18 * depth;
+        let is_hover = hovered == Some((t, s));
+        if !step.on {
+            let r = if s.is_multiple_of(4) { 2.0 } else { 1.3 } * scale;
+            p.circle_filled(base, r, alpha(color, if muted { 0.12 } else { 0.35 }));
+            if is_hover {
+                p.circle_stroke(base, pr * scale * 1.5, stroke(2.0, TEXT));
+            }
+            return;
         }
-        things.push((System::angle(t, bar).sin() + 0.01, Thing::Planet { t }));
-    }
-    things.sort_by(|a, b| a.0.total_cmp(&b.0));
-    let draw = |thing: &Thing| match *thing {
-        Thing::Bead { t, s } => {
-            let voice = Voice::ALL[t];
-            let track = &song.tracks[t];
-            let step = track.steps[s];
-            let color = track_color(voice);
-            let muted = track.mute;
-            let a = System::angle(t, s as f32);
-            let (base, depth) = sys.place(t, a, 0.0);
-            let scale = 1.0 + 0.18 * depth;
-            let is_now = now == Some(s);
-            let flash = if live.playing { live.flash(t) } else { 0.0 };
-            if step.on {
-                let lift = sys.lift(voice, step.note);
-                let (at, _) = sys.place(t, a, lift);
-                let strength = if muted { 0.25 } else { 0.5 + 0.5 * step.chance as f32 / 100.0 };
-                if lift.abs() > 0.5 {
-                    p.line_segment([base, at], stroke(1.0, alpha(color, strength * 0.5)));
-                    p.circle_filled(base, 1.5, alpha(color, strength * 0.5));
-                }
-                // A slide: a line from the bead before
-                if step.slide && s > 0 && track.steps[s - 1].on {
-                    let prev = track.steps[s - 1];
-                    let (from, _) = sys.place(t, System::angle(t, (s - 1) as f32), sys.lift(voice, prev.note));
-                    p.line_segment([from, at], stroke(2.0, alpha(color, strength * 0.7)));
-                }
-                let r = br * scale * if step.accent { 1.3 } else { 1.0 };
-                if is_now && !muted {
-                    glow(&p, at, r, color, flash * 1.8);
-                    // The planet just passed it: a ring goes out
-                    let age = live.hit_age[t];
-                    if age < 0.45 {
-                        p.circle_stroke(at, r + age * 80.0, stroke(1.5, alpha(color, 0.6 * (1.0 - age / 0.45))));
-                    }
-                }
-                p.circle_filled(at, r, alpha(color, strength));
-                if step.accent {
-                    p.circle_filled(at, r * 0.4, alpha(Color32::WHITE, strength));
-                }
-                if step.chance < 100 {
-                    p.circle_stroke(at, r + 2.5, stroke(1.0, alpha(color, 0.5)));
-                }
-                if hovered == Some((t, s)) {
-                    p.circle_stroke(at, r * 1.7, stroke(2.0, TEXT));
-                }
-            } else {
-                // An empty spot: a speck, a bit bigger on the beat
-                let r = if s % 4 == 0 { 2.0 } else { 1.3 } * scale;
-                p.circle_filled(base, r, alpha(color, if muted { 0.12 } else { 0.35 }));
-                if hovered == Some((t, s)) {
-                    p.circle_stroke(base, br * scale * 1.5, stroke(2.0, TEXT));
-                }
+        let lift = sys.lift(voice, step.note);
+        let (at, _) = sys.place(t, s, lift);
+        let strength = if muted { 0.3 } else { 0.55 + 0.45 * step.chance as f32 / 100.0 };
+        let color = if muted { mix(color, FAINT, 0.6) } else { color };
+        if lift.abs() > 0.5 {
+            p.line_segment([base, at], stroke(1.0, alpha(color, strength * 0.5)));
+            p.circle_filled(base, 1.5, alpha(color, strength * 0.5));
+        }
+        // A slide: a trail from the planet before
+        if step.slide && s > 0 && track.steps[s - 1].on {
+            let prev = track.steps[s - 1];
+            let (from, _) = sys.place(t, s - 1, sys.lift(voice, prev.note));
+            p.line_segment([from, at], stroke(2.0, alpha(color, strength * 0.7)));
+        }
+        let r = pr * scale * if step.accent { 1.35 } else { 1.0 };
+        let lit = if now == Some(s) && !muted { live.flash(t) } else { 0.0 };
+        if lit > 0.01 {
+            halo(&p, at, r * 4.0, color, 0.7 * lit);
+            // The beam just passed it: a ring goes out
+            let age = live.hit_age[t];
+            if age < 0.45 {
+                p.circle_stroke(at, r + age * 80.0, stroke(1.5, alpha(color, 0.6 * (1.0 - age / 0.45))));
             }
         }
-        Thing::Planet { t } => {
-            let voice = Voice::ALL[t];
-            let muted = song.tracks[t].mute;
-            let color = if muted {
-                mix(track_color(voice), FAINT, 0.7)
-            } else {
-                track_color(voice)
-            };
-            let a = System::angle(t, bar);
-            let (at, depth) = sys.place(t, a, 0.0);
-            let r = br * 1.9 * (1.0 + 0.2 * depth);
-            let flash = if live.playing && !muted { live.flash(t) } else { 0.0 };
-            glow(&p, at, r, color, 0.25 + flash * 1.4 + build * 0.5);
-            // Lit from the sun: a dark ball with its bright side turned to the middle
-            p.circle_filled(at, r, mix(SPACE, color, 0.35));
-            let to_sun = (sys.c - at).normalized();
-            p.circle_filled(at + to_sun * r * 0.22, r * 0.78, mix(color, Color32::WHITE, 0.15 + 0.4 * flash));
-            if voice == Voice::Acid {
-                // The synth gets a ring, like Saturn
-                let ring: Vec<Pos2> = (0..=40)
-                    .map(|i| {
-                        let b = i as f32 / 40.0 * TAU;
-                        at + vec2(b.cos() * r * 1.9, b.sin() * r * 0.55)
-                    })
-                    .collect();
-                p.add(egui::Shape::line(ring, stroke(1.5, alpha(color, 0.7))));
-            }
+        // A little planet, lit from the sun: dark with its bright side to the middle
+        let ink = |c: Color32| alpha(c, strength);
+        p.circle_filled(at, r, ink(mix(SPACE, color, 0.4)));
+        let to_sun = (sys.c - at).normalized();
+        p.circle_filled(at + to_sun * r * 0.22, r * 0.78, ink(mix(color, Color32::WHITE, 0.1 + 0.6 * lit)));
+        if step.accent {
+            // Accents wear a ring, like Saturn
+            let ring: Vec<Pos2> = (0..=40)
+                .map(|i| {
+                    let b = i as f32 / 40.0 * TAU;
+                    at + vec2(b.cos() * r * 1.8, b.sin() * r * 0.5)
+                })
+                .collect();
+            p.add(egui::Shape::line(ring, stroke(1.5, ink(mix(color, Color32::WHITE, 0.3)))));
+        }
+        if step.chance < 100 {
+            p.circle_stroke(at, r + 3.0, stroke(1.0, alpha(color, 0.5)));
+        }
+        if is_hover {
+            p.circle_stroke(at, r * 1.8, stroke(2.0, TEXT));
         }
     };
-    let split = things.partition_point(|(d, _)| *d < 0.0);
-    for (_, thing) in &things[..split] {
-        draw(thing);
+    let split = steps.partition_point(|(d, _, _)| *d < 0.0);
+    for &(_, t, s) in &steps[..split] {
+        draw(t, s);
     }
 
     // ── The sun: the play button ──
-    let rs = sys.sun() * (1.0 + 0.06 * kick + 0.25 * build);
+    let time = ui.input(|i| i.time) as f32;
+    let rs = sys.sun() * (1.0 + 0.06 * kick + 0.2 * build);
     let warm = if live.playing {
-        mix(mix(RED, track_color(Voice::Clap), 0.45), RED, build)
+        mix(mix(RED, track_color(Voice::Clap), 0.55), RED, build)
     } else {
         ACID
     };
-    glow(
+    halo(
         &p,
         sys.c,
-        rs * 1.3,
+        rs * 3.2,
         warm,
-        0.3 + kick * 0.5 + build * 0.6 + if on_sun { 0.15 } else { 0.0 },
+        0.35 + 0.4 * kick + 0.4 * build + if on_sun { 0.15 } else { 0.0 },
     );
-    p.circle_filled(sys.c, rs, mix(SPACE, warm, 0.55 + 0.25 * kick));
-    p.circle_filled(sys.c - vec2(rs, rs) * 0.18, rs * 0.7, mix(SPACE, warm, 0.75 + 0.25 * kick));
+    // Its corona: slow rays that reach out on the kick
+    let mut rays = Mesh::default();
+    for i in 0..16 {
+        let a = i as f32 / 16.0 * TAU + time * 0.15;
+        let reach = rs * (1.3 + 0.15 * (time * 1.7 + i as f32 * 2.3).sin() + 0.35 * kick);
+        let dir = vec2(a.cos(), a.sin());
+        let side = vec2(-dir.y, dir.x) * rs * 0.13;
+        let base = rays.vertices.len() as u32;
+        rays.colored_vertex(sys.c + dir * rs * 0.85 + side, additive(warm, 0.5));
+        rays.colored_vertex(sys.c + dir * rs * 0.85 - side, additive(warm, 0.5));
+        rays.colored_vertex(sys.c + dir * reach, Color32::TRANSPARENT);
+        rays.add_triangle(base, base + 1, base + 2);
+    }
+    p.add(egui::Shape::mesh(rays));
+    p.circle_filled(sys.c, rs, mix(warm, Color32::WHITE, 0.15));
+    p.circle_filled(sys.c - vec2(rs, rs) * 0.12, rs * 0.8, mix(warm, Color32::WHITE, 0.45));
+    p.circle_filled(sys.c - vec2(rs, rs) * 0.22, rs * 0.45, mix(warm, Color32::WHITE, 0.75));
     let icon = if live.playing { ph::STOP } else { ph::PLAY };
-    p.text(sys.c - vec2(0.0, rs * 0.18), Align2::CENTER_CENTER, icon, body(rs * 0.6), SPACE);
+    let ink = mix(warm, SPACE, 0.8);
+    p.text(sys.c - vec2(0.0, rs * 0.16), Align2::CENTER_CENTER, icon, body(rs * 0.6), ink);
     let info = if let Some(b) = live.build {
         format!("BUILD {}%", (b * 100.0) as u32)
     } else if live.playing {
@@ -337,14 +337,17 @@ pub fn planets(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mu
         Align2::CENTER_CENTER,
         info,
         bold((rs * 0.22).clamp(9.0, 12.0)),
-        SPACE,
+        ink,
     );
+    if live.playing {
+        ui.ctx().request_repaint();
+    }
 
     for t in 0..TRACKS {
         p.add(orbit_line(t, true));
     }
-    for (_, thing) in &things[split..] {
-        draw(thing);
+    for &(_, t, s) in &steps[split..] {
+        draw(t, s);
     }
 
     // Hover info and captions in the corners
@@ -364,7 +367,7 @@ pub fn planets(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mu
         p.text(
             info_pos,
             Align2::LEFT_BOTTOM,
-            "Every planet goes round once a bar and plays its beads\nClick: on/off · drag: paint · right-click: the step's menu\nScroll on bass/synth: note (the higher, the higher)",
+            "Every orbit is a track, every planet a step that plays\nClick: on/off · drag: paint · right-click: the step's menu\nScroll on bass/synth: note (the higher, the higher)",
             body(11.5),
             FAINT,
         );
@@ -387,18 +390,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_bead_can_be_hit() {
+    fn every_step_can_be_hit() {
         let sys = System::new(Rect::from_min_size(pos2(0.0, 0.0), vec2(900.0, 700.0)));
         let mut song = Song::default();
         for t in 0..TRACKS {
             for s in 0..STEPS {
                 let step = song.tracks[t].steps[s];
                 let h = if step.on { sys.lift(Voice::ALL[t], step.note) } else { 0.0 };
-                let (at, _) = sys.place(t, System::angle(t, s as f32), h);
+                let (at, _) = sys.place(t, s, h);
                 assert_eq!(sys.hit(at, &song), Some((t, s)), "track {t} step {s}");
             }
         }
-        // The sun is not a bead
+        // The sun is not a step
         song.tracks[0].steps[0].on = false;
         assert_eq!(sys.hit(sys.c, &song), None);
     }
