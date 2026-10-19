@@ -1312,13 +1312,16 @@ impl BunkerApp {
             let flash = live.flash(i);
             let muted = self.song.tracks[i].mute;
             let locked = self.song.tracks[i].lock;
+            // Low energy takes this track out (a break)
+            let layer = crate::engine::LAYERS[i];
+            let out = !muted && self.song.macros.energy < layer;
             let p = ui.painter().clone();
             if resp.hovered() {
                 p.rect_filled(row, 10.0, PANEL_HI);
             }
             let top = row.top() + (row_h - 42.0) / 2.0;
             let dot = pos2(row.left() + 11.0, top + 12.0);
-            glow(&p, dot, 5.0, color, if muted { 0.0 } else { 0.3 + flash });
+            glow(&p, dot, 5.0, color, if muted || out { 0.0 } else { 0.3 + flash });
             p.circle_filled(dot, 5.0, if muted { FAINT } else { color });
             let name_rect = p.text(
                 pos2(row.left() + 24.0, top + 3.0),
@@ -1329,11 +1332,26 @@ impl BunkerApp {
                     ACID
                 } else if muted {
                     FAINT
+                } else if out {
+                    DIM
                 } else {
                     TEXT
                 },
             );
             ui.allocate_rect(name_rect, Sense::hover()).on_hover_text(voice.blurb());
+            // …say so next to its name
+            if out {
+                let tag = Rect::from_min_size(pos2(name_rect.right() + 6.0, name_rect.top() + 1.5), vec2(30.0, 16.0));
+                let cool = track_color(Voice::OpenHat);
+                p.rect_filled(tag, 8.0, mix(PANEL, cool, 0.16));
+                p.rect_stroke(tag, 8.0, stroke(1.0, alpha(cool, 0.7)), egui::StrokeKind::Inside);
+                p.text(tag.center(), Align2::CENTER_CENTER, "OUT", bold(9.5), cool);
+                ui.allocate_rect(tag, Sense::hover()).on_hover_text(format!(
+                    "The energy is low, so {} sits out – it comes back at {:.0}",
+                    voice.name(),
+                    layer * 100.0
+                ));
+            }
 
             // Buttons on the right: solo, mute, dice, lock
             let mut x = row.right() - 2.0;
@@ -1761,18 +1779,21 @@ impl BunkerApp {
         {
             self.toggle_auto(now);
         }
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Change every").font(body(12.0)).color(DIM));
-            for bars in [2u8, 4, 8] {
-                if chip_sized(ui, &format!("{bars}"), self.song.auto_bars == bars, ACID, Some(36.0))
-                    .on_hover_text(format!("The auto mode changes one thing every {bars} bars"))
-                    .clicked()
-                {
-                    self.song.auto_bars = bars;
+        // How often it changes something – only there while the auto mode runs
+        if self.song.auto {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Change every").font(body(12.0)).color(DIM));
+                for bars in [2u8, 4, 8] {
+                    if chip_sized(ui, &format!("{bars}"), self.song.auto_bars == bars, ACID, Some(36.0))
+                        .on_hover_text(format!("The auto mode changes one thing every {bars} bars"))
+                        .clicked()
+                    {
+                        self.song.auto_bars = bars;
+                    }
                 }
-            }
-            ui.label(egui::RichText::new("bars").font(body(12.0)).color(DIM));
-        });
+                ui.label(egui::RichText::new("bars").font(body(12.0)).color(DIM));
+            });
+        }
 
         ui.add_space(2.0);
         // AUTO FX: in the auto mode Bunker arranges by itself (energy, breaks, build-ups with effects, drops)
@@ -2331,7 +2352,7 @@ impl BunkerApp {
                     row(ui, ph::HAND_POINTING, "3 · Change the groove", "Click a dot to switch it on or off, drag to paint. Right-click a dot (or a tile in CLASSIC, the pads and step grid – Tab) for its menu: on, accent, slide, how often it plays and – on bass and synth – its note. The mouse wheel on a bass or synth dot moves its note too.");
                     row(ui, ph::LIST, "4 · Tracks", "S solos a track, the speaker mutes it, the dice rolls a new rhythm for it (right-click: clear), the lock keeps shuffle and the auto mode away from it. The coloured pill is its sound – click it for the list, tune and decay. The number is the loop length: 16, 8, 4, 2 or 1 steps.");
                     row(ui, ph::MUSIC_NOTES, "5 · Mood & pitch", "MOOD picks the notes and chords of bass and synth – from Dark and Hypnotic to Euphoric, Sunny or Mysterious. Pitch moves them lower or higher.");
-                    row(ui, ph::LIGHTNING, "6 · Energy & drop", "The energy bar is the arrangement, not the volume (← →): under 30 a break with no kick and bass, then the tracks come in one by one, from 70 everything plays, at 90 the build-up starts and two bars later it drops. DROP (B) does the same any time.");
+                    row(ui, ph::LIGHTNING, "6 · Energy & drop", "The energy bar is the arrangement, not the volume (← →): under 30 a break with no kick and bass, then the tracks come in one by one, from 70 everything plays (a track the energy takes out says OUT next to its name), at 90 the build-up starts and two bars later it drops. DROP (B) does the same any time.");
                     row(ui, ph::WAVEFORM, "7 · Effects & sound", "Hold STUTTER (Q), ECHO (W), WASH (E), CRUSH (X), GATE (C) or TAPE STOP (V) and combine them; FILTER springs back when you let go. SOUND: DARK, ACID, SPACE and PUMP. MASTER: low, mid, high and drive.");
                     row(ui, ph::INFINITY, "8 · Auto mode", "Bunker keeps the groove moving: something changes every 2, 4 or 8 bars. With AUTO FX on it also steers the energy and plays breakdowns, build-ups and drops by itself. With AUTO FX off the energy bar is yours and no track is ever taken out.");
                     row(ui, ph::STACK, "9 · Favorites & auto song", "Click + under the orbit to keep what you hear (twelve slots), click a full one to switch on the next bar, right-click to rename, save over or clear. AUTO SONG makes a whole track from favorite 1 – a quiet intro, two or three drops, favorite 2 after the first – while you jam along. Click a part in the strip to jump there.");
@@ -2460,21 +2481,19 @@ impl BunkerApp {
                 stroke(1.0, alpha(Color32::WHITE, 0.06)),
                 egui::StrokeKind::Outside,
             );
-            // The output level, running along the window's lower edge between its corners
+            // The output level: a thin light along the window's lower edge, between its corners
             {
                 let level = live.level.min(1.0);
-                let line = Rect::from_min_max(
-                    pos2(rect.left() + 22.0, rect.bottom() - 2.5),
-                    pos2(rect.right() - 22.0, rect.bottom() + 2.5),
-                );
+                let (x0, x1, y) = (rect.left() + 22.0, rect.right() - 22.0, rect.bottom() - 1.0);
                 let col = if level > 0.94 {
                     RED
                 } else {
                     mix(ACID, Color32::from_rgb(255, 154, 60), level)
                 };
-                ui.painter().rect_filled(line, 2.5, PANEL);
-                ui.painter()
-                    .rect_filled(Rect::from_min_size(line.min, vec2(line.width() * level, line.height())), 2.5, col);
+                if level > 0.001 {
+                    ui.painter()
+                        .line_segment([pos2(x0, y), pos2(x0 + (x1 - x0) * level, y)], stroke(1.5, alpha(col, 0.8)));
+                }
             }
             let inner = rect.shrink(18.0);
             match self.view {
@@ -2644,6 +2663,19 @@ mod tests {
         app.events = events;
         let engine = crate::engine::Engine::new(44_100.0, app.song, app.shared.clone(), Some(ev_tx), 1);
         (app, engine, rx)
+    }
+
+    #[test]
+    fn the_first_start_is_hypnotic_and_waits_for_play() {
+        let (mut app, mut e, rx) = with_engine();
+        let ctx = egui::Context::default();
+        let mut buf = vec![0.0; 2 * 44_100];
+        e.drain(&rx);
+        e.render(&mut buf);
+        app.sync(&ctx, 0.0, 0.016);
+        assert_eq!(app.song.vibe, Vibe::Hypnotic);
+        assert!(!app.playing() && !app.song.auto, "silent until play or Space");
+        assert!(buf.iter().all(|s| s.abs() < 1e-3), "not a sound before play");
     }
 
     #[test]

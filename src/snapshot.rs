@@ -121,6 +121,10 @@ mod tests {
             app.slot_now = Some(0);
             app.fake_live = Some(playing(4.2, &[0]));
         });
+        render("break_small", 1100.0, 700.0, |app| {
+            app.song.macros.energy = 0.15;
+            app.fake_live = Some(playing(4.2, &[3]));
+        });
         render("pads", 1360.0, 860.0, |app| {
             app.view = View::Pads;
             app.fake_live = Some(playing(9.4, &[2, 7]));
