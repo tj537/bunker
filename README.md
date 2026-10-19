@@ -69,9 +69,9 @@ Under the list: **Tune** (±12 semitones) and **Decay** (shorter or longer) for 
 <td width="50%" valign="top">
 
 ### 📈 Energy & drop
-The **ENERGY** fader is the big lever: pull it down and the groove strips to hats and synth, push it up and kick, bass, clap, open hat and ride come back one by one (the coloured dots show where), with extra hats and drive at the top. Pull it down, hit **DROP** – from the next bar on two bars of build-up (kick and bass fade out, clap roll, noise riser), half a beat of silence, and then everything hits at once. <kbd>←</kbd> <kbd>→</kbd> on the keyboard.
+The **ENERGY** fader is the big lever: pull it down and the groove strips to hats and synth, push it up and kick, bass, clap, open hat and ride come back one by one (the coloured dots show where), with extra hats and drive at the top. Pull it down, hit **DROP** – from the next bar on the groove itself turns into the build-up: the kick rolls in quarters, 8ths, then 16ths, the hats run, bass and synth loop their first beat and jump an octave up, a clap roll and a noise riser on top – half a beat of silence, and everything hits. <kbd>←</kbd> <kbd>→</kbd> on the keyboard.
 
-Switch on **RISE** next to the fader and the fader drops by itself: pull it down, then push it up slowly – the push turns into a build-up and a drop. A quick push stays just energy, so you can still bring a track in by hand.
+The red end of the fader is the **drop zone**: push the energy to **90** or more and the build-up starts on the next bar, the drop lands two bars later. So pull it down, bring it back up slowly, and you know exactly when the drop comes. It starts again once you've been below 88.
 
 ### ♾️ Auto mode
 Bunker plays a whole set on its own. Every **2, 4 or 8 bars** it changes one thing – a new pattern, another sound, new notes, a polyrhythm, a track in or out. Every 8 bars a **fill**. Every 32 bars a **breakdown** – a different kind each time – a build-up and the drop. After some drops a **new chapter** starts: new bassline, new sounds, sometimes a new key. The **energy curve** (CURVE) moves the energy through the set; touch the fader and it's yours.
