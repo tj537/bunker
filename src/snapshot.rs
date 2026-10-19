@@ -46,7 +46,11 @@ mod tests {
     #[test]
     #[ignore]
     fn render_face_frames() {
-        render_face("face", &[(10.0, None), (10.02, None)]);
+        render_face("face", &[(0.5, None), (0.52, None)]);
+        render_face(
+            "face_grin",
+            &[(crate::face::grin_at(), None), (crate::face::grin_at() + 0.02, None)],
+        );
         render_face("face_build", &[(10.0, Some(0.85)), (10.02, Some(0.85))]);
         render_face("face_scream", &[(10.0, Some(0.99)), (10.02, None), (10.35, None)]);
         render_face("face_laser", &[(10.0, Some(0.99)), (10.02, None), (10.9, None)]);

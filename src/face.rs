@@ -81,8 +81,8 @@ fn head(u: f32, v: f32, jaw: f32) -> [f32; 3] {
     z += 0.03 * bump(x, y, 0.0, -0.2, 0.08, 0.05); // between the brows
     z += 0.2 * bump(x, y, 0.0, 0.08, 0.065, 0.2); // nose
     z += 0.07 * bump(x, y, 0.0, 0.24, 0.07, 0.05); // its tip
-    z += 0.04 * bump(x, y, 0.0, 0.37, 0.15, 0.035); // upper lip
-    z += 0.05 * bump(x, y, 0.0, 0.47, 0.13, 0.04); // lower lip
+    z += 0.055 * bump(x, y, 0.0, 0.37, 0.16, 0.035); // upper lip
+    z += 0.07 * bump(x, y, 0.0, 0.47, 0.14, 0.04); // lower lip
     z += 0.06 * bump(x, y, 0.0, 0.82, 0.15, 0.08); // chin
                                                    // The jaw drops: everything under the lips moves down and a little back, most in the middle
     if y > MOUTH_Y {
@@ -265,7 +265,16 @@ pub fn face(ui: &mut Ui, rect: Rect, song: &Song, live: &Live, now: f64) {
     let beat = live.pos / if build > 0.5 { 2.0 } else { 4.0 };
     let nod = if playing { (1.0 - beat.fract() as f32).powi(3) } else { 0.0 };
     let yaw = 0.3 * (t * 0.27).sin() + 0.08 * warp * (t * 7.0).sin();
-    let pitch = 0.06 * (t * 0.21).sin() - 0.02 - 0.13 * nod;
+    // Now and then, out of nowhere, an evil grin for a few seconds (not while it builds
+    // up or breaks): the chin dips and the eyes narrow
+    let slot = (t / 7.0).floor();
+    let into = t - slot * 7.0;
+    let grin = if hash(slot as u32 * 13 + 5) < 0.35 && build < 0.2 && since > DONE {
+        ease((into - 1.0) / 0.4) * (1.0 - ease((into - 3.6) / 0.6))
+    } else {
+        0.0
+    };
+    let pitch = 0.06 * (t * 0.21).sin() - 0.02 - 0.13 * nod - 0.06 * grin;
     let jitter = 0.004 + 0.006 * hats + 0.05 * warp;
     let zoom = 1.0 + 0.035 * kick + 0.55 * rush;
     let size = rect.width().min(rect.height()) * 0.34 * zoom;
@@ -460,13 +469,73 @@ pub fn face(ui: &mut Ui, rect: Rect, song: &Song, live: &Live, now: f64) {
         p.line_segment([a, b], stroke(1.0 + crack, col));
     }
 
-    // The shut mouth: a dark line where the lips meet
-    if jaw <= 0.1 && fly < 0.02 && lips.len() > 1 {
-        let seam: Vec<Pos2> = lips
-            .iter()
-            .map(|&(up, down)| project([(up[0] + down[0]) / 2.0, (up[1] + down[1]) / 2.0, (up[2] + down[2]) / 2.0]).0)
-            .collect();
-        p.add(egui::Shape::line(seam, stroke(2.5, mix(SPACE, tint, 0.1))));
+    // The shut mouth: low-poly lips – a darker upper lip with a bow, a fuller lower lip
+    // catching the light – that stretch into a grin with clenched teeth
+    if jaw <= 0.1 && fly < 0.02 {
+        let at = |x: f32, y: f32| {
+            let [hx, hy, hz] = head(column_at(x, y), y, 0.0);
+            project(rotate([hx, hy, hz + 0.012], yaw, pitch)).0
+        };
+        let w = 0.19 + 0.05 * grin;
+        let thin = 1.0 - 0.45 * grin;
+        let xs: Vec<f32> = (0..=10).map(|i| -w + 2.0 * w * i as f32 / 10.0).collect();
+        let seam = |x: f32| MOUTH_Y - grin * 0.09 * (x.abs() / w).powf(2.5);
+        let gap = |x: f32| grin * 0.022 * (1.0 - (x / w).powi(2)).max(0.0);
+        let upper = |x: f32| {
+            let f = (1.0 - (x / w).powi(2)).max(0.0);
+            seam(x) - gap(x) / 2.0 - (0.04 * f.sqrt() - 0.012 * (-(x / 0.035).powi(2)).exp()) * thin
+        };
+        let lower = |x: f32| seam(x) + gap(x) / 2.0 + 0.06 * (1.0 - (x / w).powi(2)).max(0.0).powf(0.6) * thin;
+        let lip = mix(tint, RED, 0.45);
+        let band = |top: &dyn Fn(f32) -> f32, bottom: &dyn Fn(f32) -> f32, light: f32| {
+            let mut mesh = Mesh::default();
+            for (i, pair) in xs.windows(2).enumerate() {
+                let (x0, x1) = (pair[0], pair[1]);
+                // Every other facet a touch lighter: low-poly, like the rest of the head
+                let col = mix(SPACE, lip, light + if i % 2 == 0 { 0.06 } else { 0.0 });
+                let base = mesh.vertices.len() as u32;
+                for q in [at(x0, top(x0)), at(x1, top(x1)), at(x1, bottom(x1)), at(x0, bottom(x0))] {
+                    mesh.colored_vertex(q, col);
+                }
+                mesh.add_triangle(base, base + 1, base + 2);
+                mesh.add_triangle(base, base + 2, base + 3);
+            }
+            mesh
+        };
+        let mid_top = |x: f32| seam(x) - gap(x) / 2.0;
+        let mid_bottom = |x: f32| seam(x) + gap(x) / 2.0;
+        p.add(egui::Shape::mesh(band(&upper, &mid_top, 0.32)));
+        p.add(egui::Shape::mesh(band(&mid_bottom, &lower, 0.55)));
+        if grin > 0.15 {
+            // Clenched teeth in the gap
+            p.add(egui::Shape::mesh(band(&mid_top, &mid_bottom, 0.0)));
+            let bone = mix(SPACE, mix(TEXT, tint, 0.25), 0.85 * grin);
+            let mut teeth = Mesh::default();
+            for pair in xs.windows(2) {
+                let (x0, x1) = (pair[0], pair[1]);
+                let base = teeth.vertices.len() as u32;
+                for q in [
+                    at(x0, mid_top(x0)),
+                    at(x1, mid_top(x1)),
+                    at(x1, mid_bottom(x1)),
+                    at(x0, mid_bottom(x0)),
+                ] {
+                    teeth.colored_vertex(q, bone);
+                }
+                teeth.add_triangle(base, base + 1, base + 2);
+                teeth.add_triangle(base, base + 2, base + 3);
+            }
+            p.add(egui::Shape::mesh(teeth));
+            for &x in &xs[1..xs.len() - 1] {
+                p.line_segment([at(x, mid_top(x)), at(x, mid_bottom(x))], stroke(1.0, mix(SPACE, tint, 0.2)));
+            }
+        }
+        let line: Vec<Pos2> = xs.iter().map(|&x| at(x, mid_top(x))).collect();
+        p.add(egui::Shape::line(line, stroke(1.5, mix(SPACE, tint, 0.1))));
+        if grin > 0.15 {
+            let line: Vec<Pos2> = xs.iter().map(|&x| at(x, mid_bottom(x))).collect();
+            p.add(egui::Shape::line(line, stroke(1.5, mix(SPACE, tint, 0.1))));
+        }
     }
 
     // Eyes: they glow with the beat, burn in the build-up and blaze on the drop
@@ -507,7 +576,7 @@ pub fn face(ui: &mut Ui, rect: Rect, song: &Song, live: &Live, now: f64) {
         // The eye: a narrow, slanted almond – inner corner down, outer corner up, a heavy
         // upper lid – hollow and dark, with a slit of a pupil that glows. It hardly ever
         // blinks, and never while it screams.
-        let open = if since < BACK { 1.0 } else { blink } * (1.0 + 0.35 * build.max(laser));
+        let open = if since < BACK { 1.0 } else { blink } * (1.0 + 0.35 * build.max(laser)) * (1.0 - 0.4 * grin);
         let almond: Vec<Pos2> = [
             (-0.11, 0.03),
             (-0.05, -0.012),
@@ -547,6 +616,13 @@ pub fn face(ui: &mut Ui, rect: Rect, song: &Song, live: &Live, now: f64) {
     }
 
     crate::visual::energy_bar(&p, rect, energy, tint);
+}
+
+/// A moment when the face grins (for the screenshots)
+#[cfg(test)]
+pub fn grin_at() -> f64 {
+    let slot = (1..).find(|&n: &u32| hash(n * 13 + 5) < 0.35).unwrap_or(1);
+    slot as f64 * 7.0 + 2.5
 }
 
 #[cfg(test)]
