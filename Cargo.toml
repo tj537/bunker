@@ -1,6 +1,6 @@
 [package]
 name = "bunker"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Techno beats in orbit – a playful drum machine with bass, acid and an auto mode"
 license = "MIT"
