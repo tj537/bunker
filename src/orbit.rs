@@ -121,6 +121,73 @@ impl Geometry {
     }
 }
 
+/// Right-click on a step (orbit dot or grid tile): its menu
+pub fn step_context_menu(ui: &Ui, resp: &egui::Response, song: &mut Song, hovered: Option<(usize, usize)>) {
+    let id = resp.id.with("step_menu");
+    if resp.secondary_clicked() {
+        ui.data_mut(|d| d.insert_temp(id, hovered));
+    }
+    resp.context_menu(|ui| match ui.data(|d| d.get_temp::<Option<(usize, usize)>>(id)).flatten() {
+        Some((t, s)) => step_menu(ui, song, t, s),
+        None => ui.close_menu(),
+    });
+}
+
+/// Everything about one step: on, accent, slide, how often it plays, and its note
+fn step_menu(ui: &mut Ui, song: &mut Song, t: usize, s: usize) {
+    const NAMES: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+    let voice = Voice::ALL[t];
+    let (scale, root) = (song.scale, song.root);
+    ui.set_min_width(250.0);
+    ui.label(
+        egui::RichText::new(format!("{} · step {}", voice.name(), s + 1))
+            .font(bold(13.0))
+            .color(track_color(voice)),
+    );
+    let st = &mut song.tracks[t].steps[s];
+    ui.checkbox(&mut st.on, "Plays");
+    if ui.checkbox(&mut st.accent, "Accent – louder").changed() && st.accent {
+        st.on = true;
+    }
+    if voice == Voice::Acid && ui.checkbox(&mut st.slide, "Slide into this note").changed() && st.slide {
+        st.on = true;
+    }
+    ui.add_space(4.0);
+    ui.label(egui::RichText::new("How often").font(bold(11.0)).color(FAINT));
+    ui.horizontal(|ui| {
+        for (chance, label) in [(100u8, "always"), (75, "75 %"), (50, "50 %"), (25, "25 %")] {
+            if ui.selectable_label(st.chance == chance, label).clicked() {
+                st.chance = chance;
+                st.on = true;
+            }
+        }
+    });
+    if voice.is_synth() {
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new("Note").font(bold(11.0)).color(FAINT));
+        // The scale's notes from an octave below the root to two above
+        let notes: Vec<i8> = (-7..=14).map(|d| scale.shift(0, d)).filter(|n| (-12..=24).contains(n)).collect();
+        for row in notes.chunks(7) {
+            ui.horizontal(|ui| {
+                for &n in row {
+                    let name = NAMES[(root as i32 + n as i32).rem_euclid(12) as usize];
+                    let mark = if n < 0 {
+                        "↓"
+                    } else if n >= 12 {
+                        "↑"
+                    } else {
+                        ""
+                    };
+                    if ui.selectable_label(st.on && st.note == n, format!("{name}{mark}")).clicked() {
+                        st.note = n;
+                        st.on = true;
+                    }
+                }
+            });
+        }
+    }
+}
+
 pub struct OrbitOut {
     pub toggle_play: bool,
 }
@@ -179,17 +246,7 @@ pub fn orbit(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mut 
     if resp.clicked() && on_center {
         out.toggle_play = true;
     }
-    if resp.secondary_clicked() {
-        if let Some((t, s)) = hovered {
-            let step = &mut song.tracks[t].steps[s];
-            step.accent = !step.accent;
-            step.on = true;
-            if Voice::ALL[t] == Voice::Acid && !step.accent {
-                // Second right-click on an acid step: toggle the slide instead
-                step.slide = !step.slide;
-            }
-        }
-    }
+    step_context_menu(ui, &resp, song, hovered);
     if let Some((t, s)) = hovered {
         let scroll = ui.input(|i| i.raw_scroll_delta.y);
         let notches = scroll_notches(&mut paint.scroll, scroll, 24.0);
@@ -350,7 +407,7 @@ pub fn orbit(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mut 
         p.text(
             info_pos,
             Align2::LEFT_BOTTOM,
-            "Click: on/off · drag: paint\nRight-click: accent · Shift: chance\nScroll on bass/acid: note",
+            "Click: on/off · drag: paint\nRight-click: the step's menu · Shift: how often\nScroll on bass/synth: note",
             body(11.5),
             FAINT,
         );

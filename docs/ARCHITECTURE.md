@@ -5,13 +5,13 @@ Bunker is one Rust binary: an [egui](https://github.com/emilk/egui) window (efra
 ```
 src/
   main.rs       window setup
-  app.rs        BunkerApp: panels (top bar with the vibe dropdown, tracks, mood, sound|master/auto/live, favorites (12, named) and song strip, volume on the speaker, the record button), keys, MIDI, files, recording, help, persistence
+  app.rs        BunkerApp: panels (top bar with the vibe dropdown, tracks, mood, sound|master/auto/live, favorites (12, named) and song strip, the record button, the settings window), keys, MIDI, files, recording, help, persistence
   visual.rs     the visualizer: spectrum ring, kick shockwaves, star field, a small energy bar, no text – drawn from `Live` only
   file.rs       .bunker files (RON): song, favorites and their names
   form.rs       song forms (Short, Club, Hypnotic): parts, lengths, favorite 1 then 2, energy per part
   orbit.rs      the circular sequencer (drawing + mouse) and `Live`, the playback state the UI shows
   pads.rs       pads view: eight pads + step grid
-  widgets.rs    knobs, chips, glowing buttons, effect buttons, the energy fader, the spring-back filter slider
+  widgets.rs    macro sliders, chips, glowing buttons, effect buttons, the energy fader, the spring-back filter slider, concrete and stars
   theme.rs      colours, fonts (Space Grotesk, Anton, Phosphor icons), egui style
   song.rs       data model: Song → 8 Tracks (sound, tune, decay, lock) → 16 Steps, vibes, scales, chord progressions, moods, macros, master EQ (all `Copy`)
   gen.rs        groove generator (vibes, sounds per vibe, per-track dice), `evolve` and `new_chapter` for the auto mode
@@ -70,7 +70,7 @@ Live effects are `Cmd::Fx(Fx, bool)` – held down / let go. The UI sends a chan
 
 ## App state around the song
 
-- **Undo/redo** – at the end of every frame the UI compares `song` with `sent` (the last song it gave the engine). A difference is a user edit: the previous song goes on the undo stack, unless the last edit was less than 0.8 s ago (a knob turn or a painted row is one step). Songs coming from the engine don't count; neither does the restore itself (`restoring`). Undo and slot loads keep the current master volume and auto-mode settings (`keep_live_settings`).
+- **Undo/redo** – at the end of every frame the UI compares `song` with `sent` (the last song it gave the engine). A difference is a user edit: the previous song goes on the undo stack, unless the last edit was less than 0.8 s ago (a slider move or a painted row is one step). Songs coming from the engine don't count; neither does the restore itself (`restoring`). Undo and slot loads keep the current master volume and auto-mode settings (`keep_live_settings`).
 - **Locks** – `Track::lock`: shuffle uses `gen::generate_keeping` with the locked tracks, the dice is disabled, `gen::evolve` and `gen::new_chapter` skip them.
 - **Files** – *File* menu: `.bunker` save/open (also by drag and drop). A loaded file is an ordinary edit, so undo goes back.
 - **Visualizer** – `visual: bool`; the window then shows only `visual::visual` in fullscreen, keys keep working, Esc leaves.
@@ -94,7 +94,7 @@ Live effects are `Cmd::Fx(Fx, bool)` – held down / let go. The UI sends a chan
 
 Immediate mode: `BunkerApp::ui` draws everything every frame (continuously while playing). The orbit and pads are custom-painted with the egui painter (circles, arcs, a mesh for the beam). `Geometry` in `orbit.rs` maps steps to positions and back for hit testing.
 
-Layout: top bar (with the vibe dropdown and SHUFFLE), tracks on the left (row height adapts to the window; the sound pill opens sounds + tune/decay), SOUND|MASTER knobs / auto / LIVE with the AUTO FX switch, energy, filter, effects, drop on the right, the orbit or pads in the middle with the pattern strip below (and the song strip above it while a song plays). No status bar: the shortcuts are in the help, the sound status is an icon in the top bar. Look: bunker concrete around everything (`widgets::concrete` on the background layer: soft clouds, mottling, grain and air pores, drawn with exact premultiplied shades – `alpha()` blends white in linear light, far too bright for a texture this subtle; the panels are transparent on it, without separator lines) and a window into deep space in the middle (`theme::SPACE` and a parallax `widgets::star_field` whose drift is integrated per frame so speed changes never jump); the visualizer uses the same space and stars. Short windows get smaller effect buttons and DROP. Minimum window size is 1100 × 700.
+Layout: top bar (with the vibe dropdown and SHUFFLE), tracks on the left (row height adapts to the window; the sound pill opens sounds + tune/decay), SOUND|MASTER sliders (2 × 2) / auto / LIVE with the AUTO FX switch, energy, filter, effects, drop on the right, the orbit or pads in the middle with the pattern strip below (and the song strip above it while a song plays). No status bar: the shortcuts are in the help (?), volume, sound output, MIDI and the update check in the settings (gear), "No sound" shows in the top bar, and the output level runs along the lower edge of the space window. Right-click on a step (orbit or grid) opens its menu (`orbit::step_context_menu`). Colour fills use opaque `mix(PANEL, colour, k)` – translucent colours read washed out on the concrete. Look: bunker concrete around everything (`widgets::concrete` on the background layer: soft clouds, mottling, grain and air pores, drawn with exact premultiplied shades – `alpha()` blends white in linear light, far too bright for a texture this subtle; the panels are transparent on it, without separator lines) and a window into deep space in the middle (`theme::SPACE` and a parallax `widgets::star_field` whose drift is integrated per frame so speed changes never jump); the visualizer uses the same space and stars. Short windows get smaller effect buttons and DROP. Minimum window size is 1100 × 700.
 
 The UI fonts have no ♯, ◂ or ▸ – use `#` and words instead.
 

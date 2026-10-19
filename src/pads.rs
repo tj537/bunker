@@ -134,13 +134,7 @@ pub fn pads(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mut P
     if released {
         paint.active = false;
     }
-    if resp.secondary_clicked() {
-        if let Some((t, s)) = hovered {
-            let st = &mut song.tracks[t].steps[s];
-            st.accent = !st.accent;
-            st.on = true;
-        }
-    }
+    crate::orbit::step_context_menu(ui, &resp, song, hovered);
     let p = ui.painter_at(grid_area.expand(2.0));
     p.rect_filled(grid_area.expand(2.0), 12.0, alpha(SPACE, 0.6));
     for (t, voice) in Voice::ALL.into_iter().enumerate() {

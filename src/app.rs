@@ -14,7 +14,7 @@ use crate::song::{Song, Step, Track, Vibe, Voice, MOODS, STEPS, TRACKS};
 use crate::theme::*;
 use crate::update::{self, Release};
 use crate::visual;
-use crate::widgets::{self, chip, chip_sized, chip_small, concrete, glow, heading, knob};
+use crate::widgets::{self, chip, chip_sized, chip_small, concrete, glow, heading};
 use eframe::egui::{self, pos2, vec2, Align2, Color32, Key, Rect, Sense, Ui};
 use egui_phosphor::regular as ph;
 use std::path::PathBuf;
@@ -165,6 +165,8 @@ pub struct BunkerApp {
     pub song_form: Option<usize>,
     /// Song mode: what plays where no pattern is saved (the groove when the song started)
     song_fallback: Song,
+    /// The settings window is open
+    pub settings: bool,
     /// Visualizer: the whole window is a light show
     pub visual: bool,
     /// The right panel shows the master section instead of the sound knobs
@@ -293,6 +295,7 @@ impl BunkerApp {
             song_form: None,
             song_fallback: song,
             visual: false,
+            settings: false,
             master_tab: false,
             last_preview: -1.0,
             solo: None,
@@ -894,6 +897,7 @@ impl BunkerApp {
                     self.toggle_visual(ctx);
                 }
                 self.help = false;
+                self.settings = false;
                 continue;
             }
             if let Some(i) = pad_keys.iter().position(|&k| k == key) {
@@ -1005,8 +1009,8 @@ impl BunkerApp {
                 if icon_button(ui, ph::QUESTION, "How it works").clicked() {
                     self.help = !self.help;
                 }
-                if icon_button(ui, ph::GITHUB_LOGO, "Bunker on GitHub – code, downloads, ideas").clicked() {
-                    ui.ctx().open_url(egui::OpenUrl::new_tab(update::REPO_URL));
+                if icon_button(ui, ph::GEAR_SIX, "Settings: volume, sound output, MIDI, updates").clicked() {
+                    self.settings = !self.settings;
                 }
                 let mut action = None;
                 ui.menu_button(egui::RichText::new(format!("{}  File", ph::FOLDER_SIMPLE)).font(bold(13.0)), |ui| {
@@ -1048,22 +1052,10 @@ impl BunkerApp {
                         }
                     }
                 }
-                let midi_on = self.midi.as_ref().is_some_and(|m| m.is_connected());
-                let names = self.midi.as_ref().map(|m| m.names.join(", ")).unwrap_or_default();
-                ui.label(
-                    egui::RichText::new(ph::PIANO_KEYS)
-                        .size(20.0)
-                        .color(if midi_on { ACID } else { FAINT }),
-                )
-                .on_hover_text(if midi_on {
-                    format!("MIDI: {names}")
-                } else {
-                    "No MIDI keyboard connected".into()
-                });
-                // Sound output and volume: click for the slider, scroll on it; red when there is no sound
+                // No sound: say so right here (volume, device and MIDI are in the settings)
                 // (tests and screenshots run without a sound card)
-                match &self.audio {
-                    Err(e) if self.with_devices => {
+                if let Err(e) = &self.audio {
+                    if self.with_devices {
                         let e = e.clone();
                         ui.label(
                             egui::RichText::new(format!("{}  No sound", ph::SPEAKER_SLASH))
@@ -1071,13 +1063,6 @@ impl BunkerApp {
                                 .color(RED),
                         )
                         .on_hover_text(e);
-                    }
-                    audio => {
-                        let device = audio
-                            .as_ref()
-                            .map(|a| format!("{} · {} Hz", a.device, a.sample_rate))
-                            .unwrap_or_default();
-                        self.volume_button(ui, &device);
                     }
                 }
                 ui.add_space(8.0);
@@ -1176,50 +1161,74 @@ impl BunkerApp {
         }
     }
 
-    /// The speaker in the top bar: master volume (click: slider, scroll: up and down)
-    fn volume_button(&mut self, ui: &mut Ui, device: &str) {
-        let v = self.song.master;
-        let icon = if v < 0.01 {
-            ph::SPEAKER_X
-        } else if v < 0.5 {
-            ph::SPEAKER_LOW
-        } else {
-            ph::SPEAKER_HIGH
-        };
-        let resp = ui
-            .add(egui::Button::new(egui::RichText::new(icon).size(19.0).color(DIM)).frame(false))
-            .on_hover_text(format!(
-                "Volume {:.0} – click for the slider, or scroll\nSound: {device}",
-                v * 100.0
-            ))
-            .on_hover_cursor(egui::CursorIcon::PointingHand);
-        if resp.hovered() {
-            let s = ui.input(|i| i.raw_scroll_delta.y);
-            if s != 0.0 {
-                self.song.master = (self.song.master + s * 0.002).clamp(0.0, 1.0);
-            }
-        }
-        let popup = ui.make_persistent_id("volume");
-        if resp.clicked() {
-            ui.memory_mut(|m| m.toggle_popup(popup));
-        }
-        egui::popup_below_widget(ui, popup, &resp, egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
-            ui.set_min_width(220.0);
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Volume").font(bold(12.5)).color(TEXT));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+    /// Settings: volume, sound output, MIDI, update check, and the way to the code
+    fn settings_window(&mut self, ctx: &egui::Context) {
+        let mut open = self.settings;
+        egui::Window::new("Settings")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .default_width(380.0)
+            .anchor(Align2::RIGHT_TOP, vec2(-16.0, 64.0))
+            .show(ctx, |ui| {
+                let section = |ui: &mut Ui, title: &str| {
+                    ui.add_space(4.0);
+                    heading(ui, title);
+                };
+                section(ui, "VOLUME");
+                ui.horizontal(|ui| {
+                    widgets::bar_slider(ui, &mut self.song.master, 300.0, TEXT);
+                    ui.label(egui::RichText::new(format!("{:.0}", self.song.master * 100.0)).font(bold(12.0)));
+                });
+                let sound = match &self.audio {
+                    Ok(a) => format!("Sound: {} · {} Hz", a.device, a.sample_rate),
+                    Err(e) => format!("No sound: {e}"),
+                };
+                ui.label(egui::RichText::new(sound).font(body(11.5)).color(DIM));
+                ui.label(
+                    egui::RichText::new("Plug in headphones any time – Bunker follows within a few seconds.")
+                        .font(body(11.0))
+                        .color(FAINT),
+                );
+
+                section(ui, "MIDI KEYBOARD");
+                let names = self.midi.as_ref().filter(|m| m.is_connected()).map(|m| m.names.join(", "));
+                ui.label(
+                    egui::RichText::new(match &names {
+                        Some(n) => format!("{}  {n}", ph::PIANO_KEYS),
+                        None => format!("{}  None connected – plug one in, Bunker finds it", ph::PIANO_KEYS),
+                    })
+                    .font(bold(12.0))
+                    .color(if names.is_some() { ACID } else { DIM }),
+                );
+                ui.label(
+                    egui::RichText::new(
+                        "Keys below middle C play the sounds (C kick, D clap, E rim, F hat, G open hat, A ride, B bass). \
+                         Hold a key from middle C up to transpose bass and synth. Mod wheel = acid, pitch bend = filter, \
+                         sustain = echo, knobs CC 70–73 (or 74/71/91/93) = energy, dark, acid, space.",
+                    )
+                    .font(body(11.0))
+                    .color(FAINT),
+                );
+
+                section(ui, "UPDATES");
+                ui.checkbox(&mut self.check_updates, "Tell me when a new version is out")
+                    .on_hover_text("Asks GitHub once at start – nothing else is sent");
+
+                ui.add_space(6.0);
+                ui.separator();
+                ui.horizontal(|ui| {
                     ui.label(
-                        egui::RichText::new(format!("{:.0}", self.song.master * 100.0))
-                            .font(bold(12.0))
+                        egui::RichText::new(concat!("Bunker ", env!("CARGO_PKG_VERSION")))
+                            .font(body(11.5))
                             .color(FAINT),
                     );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.hyperlink_to(format!("{}  github.com/tj537/bunker", ph::GITHUB_LOGO), update::REPO_URL);
+                    });
                 });
             });
-            widgets::bar_slider(ui, &mut self.song.master, 210.0, TEXT);
-            if !device.is_empty() {
-                ui.label(egui::RichText::new(device).font(body(11.0)).color(FAINT));
-            }
-        });
+        self.settings = open;
     }
 
     fn bpm_box(&mut self, ui: &mut Ui) {
@@ -1299,7 +1308,7 @@ impl BunkerApp {
                 let resp = ui.allocate_rect(r, Sense::click()).on_hover_text(tip);
                 let hot = resp.hovered();
                 if on {
-                    ui.painter().rect_filled(r, 7.0, alpha(col, 0.18));
+                    ui.painter().rect_filled(r, 7.0, mix(PANEL, col, 0.22));
                 } else if hot {
                     ui.painter().rect_filled(r, 7.0, mix(PANEL_HI, Color32::WHITE, 0.06));
                 }
@@ -1385,7 +1394,7 @@ impl BunkerApp {
             let sound_rect = Rect::from_min_size(pos2(row.left() + 22.0, y), vec2(84.0, 18.0));
             let sound = ui.allocate_rect(sound_rect, Sense::click());
             let hot = sound.hovered();
-            p.rect_filled(sound_rect, 9.0, if hot { alpha(color, 0.22) } else { alpha(color, 0.1) });
+            p.rect_filled(sound_rect, 9.0, mix(PANEL, color, if hot { 0.3 } else { 0.18 }));
             p.text(
                 sound_rect.left_center() + vec2(8.0, 0.0),
                 Align2::LEFT_CENTER,
@@ -1573,17 +1582,6 @@ impl BunkerApp {
                     .on_hover_text("Transposed by the MIDI keyboard");
             }
         });
-        // Output level
-        let level = self.shared.level().min(1.0);
-        let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 5.0), Sense::hover());
-        ui.painter().rect_filled(r, 3.0, PANEL_HI);
-        let col = if level > 0.94 {
-            RED
-        } else {
-            mix(ACID, Color32::from_rgb(255, 154, 60), level)
-        };
-        ui.painter()
-            .rect_filled(Rect::from_min_size(r.min, vec2(r.width() * level, r.height())), 3.0, col);
     }
 
     fn live_panel(&mut self, ui: &mut Ui, live: &Live, now: f64) {
@@ -1615,7 +1613,6 @@ impl BunkerApp {
                 }
             }
         });
-        let ks = ((w - 24.0) / 4.0).min(if tall { 64.0 } else { 58.0 });
         let m = self.song.macros;
         let eq = self.song.eq;
         let defaults = crate::song::Macros::default();
@@ -1653,16 +1650,21 @@ impl BunkerApp {
             )
         };
         let mut hint = None;
-        ui.horizontal(|ui| {
-            for i in 0..4 {
-                let r = knob(ui, &mut vals[i], def[i], names[i], colors[i], ks);
-                if r.hovered() || r.dragged() {
-                    hint = Some(i);
+        let sw = (w - 14.0) / 2.0;
+        for row in 0..2 {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 14.0;
+                for col in 0..2 {
+                    let i = row * 2 + col;
+                    let r = widgets::macro_slider(ui, &mut vals[i], def[i], names[i], colors[i], sw);
+                    if r.hovered() || r.dragged() {
+                        hint = Some(i);
+                    }
                 }
-            }
-        });
+            });
+        }
         if tall {
-            let text = hint.map_or("Drag a knob up or down · double-click resets", |i| tips[i]);
+            let text = hint.map_or("Drag along a bar · double-click resets", |i| tips[i]);
             ui.add_sized(
                 vec2(w, 28.0),
                 egui::Label::new(
@@ -1696,7 +1698,7 @@ impl BunkerApp {
         let on = self.song.auto;
         {
             let p = ui.painter();
-            p.rect_filled(r, 12.0, if on { alpha(ACID, 0.12) } else { PANEL_HI });
+            p.rect_filled(r, 12.0, if on { mix(PANEL, ACID, 0.14) } else { PANEL_HI });
             p.rect_stroke(r, 12.0, stroke(1.2, if on { ACID } else { LINE }), egui::StrokeKind::Inside);
             p.text(
                 r.left_top() + vec2(14.0, 9.0),
@@ -1838,16 +1840,16 @@ impl BunkerApp {
             r,
             14.0,
             if building.is_some() {
-                mix(alpha(RED, 0.25), RED, pulse * 0.5)
+                mix(mix(PANEL, RED, 0.3), RED, pulse * 0.5)
             } else if hot {
-                alpha(RED, 0.22)
+                mix(PANEL, RED, 0.3)
             } else {
-                alpha(RED, 0.12)
+                mix(PANEL, RED, 0.18)
             },
         );
         if let Some(b) = building {
             let fill = Rect::from_min_size(r.min, vec2(r.width() * b, r.height()));
-            p.rect_filled(fill, 14.0, alpha(RED, 0.55));
+            p.rect_filled(fill, 14.0, mix(PANEL, RED, 0.6));
         }
         p.rect_stroke(r, 14.0, stroke(1.5, RED), egui::StrokeKind::Inside);
         let text = if building.is_some() { "BUILDING…" } else { "DROP" };
@@ -2106,14 +2108,15 @@ impl BunkerApp {
             p.rect_filled(
                 r,
                 7.0,
-                alpha(
+                mix(
+                    PANEL,
                     col,
                     if now_here.is_some() {
-                        0.22
+                        0.28
                     } else if hot {
-                        0.16
+                        0.2
                     } else {
-                        0.08
+                        0.12
                     },
                 ),
             );
@@ -2122,7 +2125,7 @@ impl BunkerApp {
                 p.rect_filled(
                     Rect::from_min_size(r.min, vec2(r.width() * done, r.height())),
                     7.0,
-                    alpha(col, 0.35),
+                    mix(PANEL, col, 0.4),
                 );
             }
             p.rect_stroke(
@@ -2277,28 +2280,19 @@ impl BunkerApp {
                 };
                 let max_h = ctx.screen_rect().height() - 200.0;
                 egui::ScrollArea::vertical().max_height(max_h).show(ui, |ui| {
-                    row(ui, ph::PLAY, "Press play", "Space or the button in the middle. Pick a vibe in the list at the top – each pick rolls a fresh groove in that style. SHUFFLE rolls again.");
-                    row(ui, ph::CIRCLES_THREE, "The orbit", "Each ring is one sound, each dot one step. Click to switch a dot on or off, drag to paint. Right-click: accent (on the synth: slide). Scroll on bass/synth dots to change the note. Shift-click: chance.");
-                    row(ui, ph::LIST, "Tracks", "S solos a track, the speaker mutes it, the dice rolls a new rhythm for just that track (right-click: clear), the lock keeps shuffle, vibes, dice and auto mode away from it. The coloured pill is its sound – click it for the list, tune and decay, or scroll on it. The number is the loop length: under 16 it drifts against the beat.");
-                    row(ui, ph::MUSIC_NOTES, "Mood", "MOOD picks which notes and chords bass and synth play – from Dark and Hypnotic to Euphoric, Sunny or Mysterious – and gives them fitting new notes. Each has its own chords, so the bars move. Pitch moves them lower or higher. The speaker at the top sets the volume.");
-                    row(ui, ph::STACK, "Favorites & auto song", "Twelve slots under the orbit. Click + to keep what you hear, click a full one to switch – while playing it comes in on the next bar, with a clap roll. Right-click to rename, save over or clear. The lit one is exactly what plays. AUTO SONG turns favorite 1 into a whole track (Short, Club or Hypnotic): a quiet intro that builds track by track, grooves that keep changing a little, two or three breaks and drops with a gate build-up, favorite 2 after the first drop, an outro that winds down – you jam along. Click a part in the strip to jump there.");
-                    row(ui, ph::INFINITY, "Auto mode", "Bunker changes something every 2, 4 or 8 bars – patterns, sounds, notes, fills – and every few drops starts a new chapter. With AUTO FX on it arranges by itself: the energy glides, every 32 to 64 bars a breakdown, a build-up with effects and a drop. With AUTO FX off the energy bar is yours and it never takes a track out.");
-                    row(ui, ph::SLIDERS, "Sound & master", "DARK closes the sound and adds rumble. ACID opens the synth filter. SPACE: reverb and echo. PUMP ducks everything under the kick. MASTER: low, mid and high EQ and drive for the whole mix.");
-                    row(ui, ph::LIGHTNING, "Live effects", "ENERGY is the arrangement, not the volume (← →): under 30 a break, then the groove builds up, at 90 the build-up starts and two bars later it drops – a whole track with one fader. DROP does the same any time. FILTER springs back when you let go. Hold STUTTER (Q), ECHO (W), WASH (E), CRUSH (X), GATE (C) or TAPE STOP (V) – combine them.");
-                    row(ui, ph::MONITOR_PLAY, "Visualizer", "P turns the window into a fullscreen light show – no text, just a small energy bar at the bottom. All keys keep working (← → energy). Esc goes back.");
-                    row(ui, ph::FOLDER_SIMPLE, "Files", "File → Save as .bunker keeps the groove and your favorites in one file. Open it from the menu or drag it onto the window. The record button at the top (R) records everything you hear until you click it again – then save it as a WAV wherever you like. An AUTO SONG records itself.");
-                    row(ui, ph::GRID_FOUR, "Pads", "Tab switches to big pads and a classic grid. Play the pads with the mouse or A–K.");
-                    row(ui, ph::ARROW_COUNTER_CLOCKWISE, "Undo", "⌘/Ctrl + Z takes back any change – a shuffle too. ⌘/Ctrl + Shift + Z redoes it.");
-                    row(ui, ph::KEYBOARD, "Keyboard", "Space play · Enter shuffle · A–K pads · 1–8 mute · ← → energy · B drop · Q W E  X C V effects (hold) · R record your set · Tab orbit/pads · P visuals · ⌘/Ctrl Z undo");
-                    row(ui, ph::PIANO_KEYS, "MIDI keyboard", "Keys below middle C play the sounds. Hold a key from middle C up to transpose bass and synth. Mod wheel = acid, pitch bend = filter, sustain = echo, knobs (CC 70–73) = sound knobs.");
-                });
-                ui.separator();
-                ui.horizontal(|ui| {
-                    ui.checkbox(&mut self.check_updates, "Tell me when a new version is out")
-                        .on_hover_text("Asks GitHub once at start – nothing else is sent");
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.hyperlink_to(format!("{}  github.com/tj537/bunker", ph::GITHUB_LOGO), update::REPO_URL);
-                    });
+                    row(ui, ph::PLAY, "1 · Press play", "Space, or the button in the middle. Pick a vibe at the top – every pick rolls a new groove in that style (Custom starts empty). SHUFFLE (Enter) rolls again. ⌘/Ctrl + Z undoes anything, a shuffle too.");
+                    row(ui, ph::CIRCLES_THREE, "2 · Read the orbit", "Each ring is one sound, once round is one bar of 16 steps, the numbers 1–4 are the beats and the beam is where it plays. A hollow circle is a step that's off, a filled dot one that plays. A white core: accent (louder). A coloured ring around it: it only plays sometimes. An arc to the dot before: the synth slides into it. A white ring: playing right now. A faded ring: that track is muted.");
+                    row(ui, ph::HAND_POINTING, "3 · Change the groove", "Click a dot to switch it on or off, drag to paint. Right-click a dot (or a tile in the grid) for its menu: on, accent, slide, how often it plays and – on bass and synth – its note. The mouse wheel on a bass or synth dot moves its note too.");
+                    row(ui, ph::LIST, "4 · Tracks", "S solos a track, the speaker mutes it, the dice rolls a new rhythm for it (right-click: clear), the lock keeps shuffle and the auto mode away from it. The coloured pill is its sound – click it for the list, tune and decay. The number is the loop length: 16, 8, 4, 2 or 1 steps.");
+                    row(ui, ph::MUSIC_NOTES, "5 · Mood & pitch", "MOOD picks the notes and chords of bass and synth – from Dark and Hypnotic to Euphoric, Sunny or Mysterious. Pitch moves them lower or higher.");
+                    row(ui, ph::LIGHTNING, "6 · Energy & drop", "The energy bar is the arrangement, not the volume (← →): under 30 a break with no kick and bass, then the tracks come in one by one, from 70 everything plays, at 90 the build-up starts and two bars later it drops. DROP (B) does the same any time.");
+                    row(ui, ph::WAVEFORM, "7 · Effects & sound", "Hold STUTTER (Q), ECHO (W), WASH (E), CRUSH (X), GATE (C) or TAPE STOP (V) and combine them; FILTER springs back when you let go. SOUND: DARK, ACID, SPACE and PUMP. MASTER: low, mid, high and drive.");
+                    row(ui, ph::INFINITY, "8 · Auto mode", "Bunker keeps the groove moving: something changes every 2, 4 or 8 bars. With AUTO FX on it also steers the energy and plays breakdowns, build-ups and drops by itself. With AUTO FX off the energy bar is yours and no track is ever taken out.");
+                    row(ui, ph::STACK, "9 · Favorites & auto song", "Click + under the orbit to keep what you hear (twelve slots), click a full one to switch on the next bar, right-click to rename, save over or clear. AUTO SONG makes a whole track from favorite 1 – a quiet intro, two or three drops, favorite 2 after the first – while you jam along. Click a part in the strip to jump there.");
+                    row(ui, ph::RECORD, "10 · Record", "The record button at the top (R) records everything you hear until you click it again – then save it as a WAV. An AUTO SONG records itself.");
+                    row(ui, ph::MONITOR_PLAY, "11 · Visualizer", "P: a fullscreen light show for a projector, with a small energy bar at the bottom. All keys keep working. Esc goes back.");
+                    row(ui, ph::FOLDER_SIMPLE, "12 · Files & settings", "File → Save keeps the groove and your favorites in a .bunker file; open it from the menu or drag it onto the window. The gear holds volume, sound output, MIDI keyboard and the update check.");
+                    row(ui, ph::KEYBOARD, "Keys", "Space play · Enter shuffle · A–K pads · 1–8 mute · ← → energy · ↑ ↓ tempo · B drop · Q W E  X C V effects (hold) · R record · Tab orbit/pads · P visuals · ⌘/Ctrl Z undo · Esc close");
                 });
             });
         self.help = open;
@@ -2416,6 +2410,22 @@ impl BunkerApp {
                 stroke(1.0, alpha(Color32::WHITE, 0.06)),
                 egui::StrokeKind::Outside,
             );
+            // The output level, running along the window's lower edge between its corners
+            {
+                let level = live.level.min(1.0);
+                let line = Rect::from_min_max(
+                    pos2(rect.left() + 22.0, rect.bottom() - 2.5),
+                    pos2(rect.right() - 22.0, rect.bottom() + 2.5),
+                );
+                let col = if level > 0.94 {
+                    RED
+                } else {
+                    mix(ACID, Color32::from_rgb(255, 154, 60), level)
+                };
+                ui.painter().rect_filled(line, 2.5, PANEL);
+                ui.painter()
+                    .rect_filled(Rect::from_min_size(line.min, vec2(line.width() * level, line.height())), 2.5, col);
+            }
             let inner = rect.shrink(18.0);
             match self.view {
                 View::Orbit => {
@@ -2441,6 +2451,7 @@ impl BunkerApp {
 
         self.export_window(ctx, now);
         self.rename_window(ctx);
+        self.settings_window(ctx);
         self.help_window(ctx);
         self.finish_frame(now);
     }

@@ -2,7 +2,6 @@
 
 use crate::theme::*;
 use eframe::egui::{self, pos2, vec2, Align2, Color32, Pos2, Rect, Response, Sense, Shape, Stroke, Ui};
-use std::f32::consts::PI;
 
 /// Soft glow: stacked translucent circles
 pub fn glow(p: &egui::Painter, c: Pos2, r: f32, color: Color32, strength: f32) {
@@ -38,62 +37,46 @@ pub fn arc(p: &egui::Painter, c: Pos2, r: f32, a0: f32, a1: f32, stroke: Stroke)
     p.add(Shape::line(pts, stroke));
 }
 
-/// A big rotary knob. Drag up/down (or scroll); double-click resets.
-pub fn knob(ui: &mut Ui, value: &mut f32, default: f32, label: &str, color: Color32, size: f32) -> Response {
-    let (rect, mut resp) = ui.allocate_exact_size(vec2(size, size + 22.0), Sense::click_and_drag());
-    let c = pos2(rect.center().x, rect.top() + size / 2.0);
-    let r = size * 0.36;
-    if resp.dragged() {
-        let d = resp.drag_delta();
-        let fine = if ui.input(|i| i.modifiers.shift) { 0.25 } else { 1.0 };
-        *value = (*value + (d.x - d.y) * 0.005 * fine).clamp(0.0, 1.0);
-        resp.mark_changed();
-    }
-    if resp.hovered() {
-        let scroll = ui.input(|i| i.smooth_scroll_delta.y);
-        if scroll != 0.0 {
-            *value = (*value + scroll * 0.002).clamp(0.0, 1.0);
-            resp.mark_changed();
-        }
-    }
+/// A sound or master control: name and value above a coloured bar. Drag along it,
+/// double-click to reset.
+pub fn macro_slider(ui: &mut Ui, value: &mut f32, default: f32, label: &str, color: Color32, width: f32) -> Response {
+    let (rect, mut resp) = ui.allocate_exact_size(vec2(width, 34.0), Sense::click_and_drag());
+    let bar = Rect::from_min_max(pos2(rect.left(), rect.bottom() - 8.0), pos2(rect.right(), rect.bottom() - 2.0));
     if resp.double_clicked() {
         *value = default;
         resp.mark_changed();
+    } else if let Some(pos) = resp.interact_pointer_pos() {
+        if resp.dragged() || resp.is_pointer_button_down_on() {
+            let v = ((pos.x - bar.left()) / bar.width()).clamp(0.0, 1.0);
+            if (v - *value).abs() > 1e-4 {
+                *value = v;
+                resp.mark_changed();
+            }
+        }
     }
     let p = ui.painter();
-    let start = PI * 0.75;
-    let sweep = PI * 1.5;
     let hot = resp.hovered() || resp.dragged();
-    // Body
-    p.circle_filled(c, r * 1.25, PANEL_HI);
-    p.circle_stroke(c, r * 1.25, stroke(1.0, LINE));
-    // Track and value arc
-    arc(p, c, r * 1.02, start, start + sweep, stroke(5.0, alpha(Color32::WHITE, 0.07)));
-    let end = start + sweep * *value;
-    if *value > 0.002 {
-        arc(p, c, r * 1.02, start, end, stroke(9.0, alpha(color, 0.18)));
-        arc(p, c, r * 1.02, start, end, stroke(5.0, color));
-    }
-    // Indicator
-    let tip = c + vec2(end.cos(), end.sin()) * r * 1.02;
-    glow(p, tip, 4.0, color, if hot { 1.0 } else { 0.6 });
-    p.circle_filled(tip, 4.5, Color32::WHITE);
-    // Value in the middle
     p.text(
-        c,
-        Align2::CENTER_CENTER,
-        format!("{}", (*value * 100.0).round()),
-        display(size * 0.22),
+        rect.left_top() + vec2(0.0, 2.0),
+        Align2::LEFT_TOP,
+        label,
+        bold(10.5),
         if hot { TEXT } else { DIM },
     );
     p.text(
-        pos2(c.x, rect.bottom() - 9.0),
-        Align2::CENTER_CENTER,
-        label,
-        bold(if size < 80.0 { 10.0 } else { 11.5 }),
-        DIM,
+        rect.right_top() + vec2(0.0, 1.0),
+        Align2::RIGHT_TOP,
+        format!("{:.0}", *value * 100.0),
+        bold(12.0),
+        TEXT,
     );
-    resp.on_hover_cursor(egui::CursorIcon::ResizeVertical)
+    p.rect_filled(bar, 3.0, PANEL);
+    let fill = Rect::from_min_max(bar.min, pos2(bar.left() + bar.width() * *value, bar.bottom()));
+    p.rect_filled(fill, 3.0, color);
+    if hot {
+        p.circle_filled(pos2(fill.right(), bar.center().y), 6.0, TEXT);
+    }
+    resp.on_hover_cursor(egui::CursorIcon::ResizeHorizontal)
 }
 
 /// Small pill toggle (chips)
@@ -119,7 +102,8 @@ fn chip_shaped(ui: &mut Ui, text: &str, on: bool, color: Color32, width: Option<
     let p = ui.painter();
     let hot = resp.hovered();
     if on {
-        p.rect_filled(rect, r, alpha(color, 0.16));
+        // Opaque: a translucent colour reads washed out on the concrete
+        p.rect_filled(rect, r, mix(PANEL, color, 0.2));
         p.rect_stroke(rect, r, stroke(1.2, color), egui::StrokeKind::Inside);
     } else {
         p.rect_filled(rect, r, if hot { PANEL_HI } else { Color32::TRANSPARENT });
@@ -164,7 +148,7 @@ pub fn fx_button(ui: &Ui, rect: Rect, resp: &Response, icon: &str, name: &str, k
         stroke(1.0, if active { color } else { alpha(color, if hot { 0.8 } else { 0.4 }) }),
         egui::StrokeKind::Inside,
     );
-    let fg = if active { BG } else { color };
+    let fg = if active { SPACE } else { color };
     let compact = rect.height() < 46.0;
     if compact {
         p.text(
