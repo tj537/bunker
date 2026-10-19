@@ -14,7 +14,7 @@ use crate::song::{Song, Step, Track, Vibe, Voice, MOODS, STEPS, TRACKS};
 use crate::theme::*;
 use crate::update::{self, Release};
 use crate::visual;
-use crate::widgets::{self, chip, chip_sized, chip_small, glow, heading, knob};
+use crate::widgets::{self, chip, chip_sized, chip_small, concrete, glow, heading, knob};
 use eframe::egui::{self, pos2, vec2, Align2, Color32, Key, Rect, Sense, Ui};
 use egui_phosphor::regular as ph;
 use std::path::PathBuf;
@@ -2357,7 +2357,7 @@ impl BunkerApp {
 
         let frame = |fill: Color32, margin: f32| egui::Frame::new().fill(fill).inner_margin(margin);
         if self.visual {
-            egui::CentralPanel::default().frame(frame(BG, 0.0)).show(ctx, |ui| {
+            egui::CentralPanel::default().frame(frame(SPACE, 0.0)).show(ctx, |ui| {
                 let rect = ui.max_rect();
                 visual::visual(ui, rect, &self.song, &live, now);
                 // Double-click anywhere goes back
@@ -2369,28 +2369,69 @@ impl BunkerApp {
             self.finish_frame(now);
             return;
         }
+        // Bunker concrete behind everything; the panels sit on it
+        concrete(&ctx.layer_painter(egui::LayerId::background()), ctx.screen_rect());
+        let clear = Color32::TRANSPARENT;
         egui::TopBottomPanel::top("top")
             .exact_height(58.0)
-            .frame(frame(BG, 6.0))
+            .frame(frame(clear, 6.0))
             .show(ctx, |ui| self.top_bar(ui, &live, now));
         egui::SidePanel::left("tracks")
             .exact_width(266.0)
             .resizable(false)
-            .frame(frame(BG, 14.0))
+            .frame(frame(clear, 14.0))
             .show(ctx, |ui| self.tracks_panel(ui, &live, now));
         egui::SidePanel::right("live")
             .exact_width(286.0)
             .resizable(false)
-            .frame(frame(BG, 14.0))
+            .frame(frame(clear, 14.0))
             .show(ctx, |ui| self.live_panel(ui, &live, now));
-        egui::CentralPanel::default().frame(frame(BG, 10.0)).show(ctx, |ui| {
+        egui::CentralPanel::default().frame(frame(clear, 10.0)).show(ctx, |ui| {
             let area = ui.available_rect_before_wrap();
             let scenes_h = 100.0;
             let song_h = if self.song_form.is_some() { 34.0 } else { 0.0 };
             let rect = Rect::from_min_max(area.min, pos2(area.right(), area.bottom() - scenes_h - song_h - 6.0));
-            // Concrete slab behind the main view
-            ui.painter().rect_filled(rect, 22.0, PANEL);
-            ui.painter().rect_stroke(rect, 22.0, stroke(1.0, LINE), egui::StrokeKind::Inside);
+            // A window into deep space, cut into the concrete: a soft nebula, stars drifting past
+            {
+                let p = ui.painter_at(rect);
+                p.rect_filled(rect, 22.0, SPACE);
+                let (w, h) = (rect.width(), rect.height());
+                widgets::nebula(
+                    &p,
+                    rect.left_top() + vec2(w * 0.2, h * 0.28),
+                    w * 0.42,
+                    track_color(Voice::Ride),
+                    0.16,
+                );
+                widgets::nebula(
+                    &p,
+                    rect.right_bottom() - vec2(w * 0.18, h * 0.25),
+                    w * 0.4,
+                    track_color(Voice::OpenHat),
+                    0.12,
+                );
+                widgets::nebula(
+                    &p,
+                    rect.center() + vec2(w * 0.3, -h * 0.34),
+                    w * 0.24,
+                    track_color(Voice::Bass),
+                    0.1,
+                );
+                let speed = if live.playing { 0.6 + self.song.macros.energy * 0.9 } else { 0.3 };
+                widgets::star_field(ui, &p, rect.shrink(10.0), "space", speed, 1.0);
+                if !live.playing {
+                    ui.ctx().request_repaint_after(std::time::Duration::from_millis(40));
+                }
+            }
+            // The cut edge: a dark rim and a faint light edge below it
+            ui.painter()
+                .rect_stroke(rect, 22.0, stroke(2.0, alpha(Color32::BLACK, 0.6)), egui::StrokeKind::Inside);
+            ui.painter().rect_stroke(
+                rect.expand(1.5),
+                23.0,
+                stroke(1.0, alpha(Color32::WHITE, 0.06)),
+                egui::StrokeKind::Outside,
+            );
             let inner = rect.shrink(18.0);
             match self.view {
                 View::Orbit => {

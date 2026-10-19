@@ -209,7 +209,7 @@ pub fn orbit(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mut 
     // ── Drawing ──
     let kick = live.flash(0);
     // The floor breathes with the kick
-    p.circle_filled(g.c, g.r_out + 12.0, alpha(BG, 0.55));
+    p.circle_filled(g.c, g.r_out + 12.0, alpha(SPACE, 0.55));
     p.circle_stroke(g.c, g.r_out + 12.0, stroke(1.0, LINE));
     let kc = track_color(Voice::Kick);
     for i in 0..8 {
@@ -309,7 +309,11 @@ pub fn orbit(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mut 
         if live.playing { RED } else { ACID },
         0.18 + pulse * 0.35 + if hot { 0.12 } else { 0.0 },
     );
-    p.circle_filled(g.c, rb * (1.0 + pulse * 0.04), if hot { mix(PANEL_HI, BG, 0.1) } else { PANEL });
+    p.circle_filled(
+        g.c,
+        rb * (1.0 + pulse * 0.04),
+        if hot { mix(PANEL_HI, SPACE, 0.4) } else { mix(PANEL, SPACE, 0.6) },
+    );
     p.circle_stroke(g.c, rb, stroke(2.0, if live.playing { alpha(RED, 0.8) } else { alpha(ACID, 0.8) }));
     let icon = if live.playing { ph::STOP } else { ph::PLAY };
     p.text(

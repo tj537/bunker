@@ -370,6 +370,101 @@ fn energy_shown(ui: &mut Ui, value: f32, width: f32, height: f32, who: &str) -> 
     }
 }
 
+/// A soft round glow that fades smoothly to nothing (no rings): for nebulae in space
+pub fn nebula(p: &egui::Painter, c: Pos2, r: f32, color: Color32, strength: f32) {
+    let mut mesh = egui::Mesh::default();
+    let n = 48u32;
+    mesh.colored_vertex(c, alpha(color, strength));
+    // A middle ring keeps the falloff soft instead of a cone
+    for k in 0..n {
+        let a = k as f32 / n as f32 * std::f32::consts::TAU;
+        let dir = vec2(a.cos(), a.sin());
+        mesh.colored_vertex(c + dir * r * 0.45, alpha(color, strength * 0.55));
+        mesh.colored_vertex(c + dir * r, Color32::TRANSPARENT);
+    }
+    for k in 0..n {
+        let (i0, o0) = (1 + 2 * k, 2 + 2 * k);
+        let (i1, o1) = (1 + 2 * ((k + 1) % n), 2 + 2 * ((k + 1) % n));
+        mesh.add_triangle(0, i0, i1);
+        mesh.add_triangle(i0, o0, o1);
+        mesh.add_triangle(i0, o1, i1);
+    }
+    p.add(Shape::mesh(mesh));
+}
+
+/// A stable pseudo-random number 0…1
+fn hash(i: u32) -> f32 {
+    let mut x = i.wrapping_mul(0x9E37_79B9) ^ 0x85EB_CA6B;
+    x ^= x >> 15;
+    x = x.wrapping_mul(0x2C1B_3C6D);
+    x ^= x >> 12;
+    (x & 0xFF_FFFF) as f32 / 0xFF_FFFF as f32
+}
+
+/// Bunker concrete: grey, a fine grain, the joints of the formwork boards and the round
+/// holes of the form ties, like a cast concrete wall
+pub fn concrete(p: &egui::Painter, rect: Rect) {
+    p.rect_filled(rect, 0.0, BG);
+    // Grain
+    let n = (rect.area() / 650.0) as u32;
+    for i in 0..n {
+        let at = pos2(rect.left() + hash(i) * rect.width(), rect.top() + hash(i + 50_000) * rect.height());
+        let light = hash(i + 90_000) > 0.5;
+        let c = if light { Color32::WHITE } else { Color32::BLACK };
+        p.circle_filled(at, 0.5 + hash(i + 70_000) * 0.8, alpha(c, if light { 0.025 } else { 0.05 }));
+    }
+    // Formwork boards: a joint every board, a tie hole twice a board apart, shifted per row
+    let board = 128.0;
+    let rows = (rect.height() / board).ceil() as u32 + 1;
+    for row in 0..rows {
+        let y = rect.top() + board * (row + 1) as f32;
+        if y < rect.bottom() {
+            p.line_segment(
+                [pos2(rect.left(), y), pos2(rect.right(), y)],
+                stroke(1.0, alpha(Color32::BLACK, 0.07)),
+            );
+            p.line_segment(
+                [pos2(rect.left(), y + 1.0), pos2(rect.right(), y + 1.0)],
+                stroke(1.0, alpha(Color32::WHITE, 0.015)),
+            );
+        }
+        let cy = rect.top() + board * (row as f32 + 0.5);
+        let mut x = rect.left() + if row % 2 == 0 { 64.0 } else { 192.0 };
+        while x < rect.right() {
+            p.circle_filled(pos2(x, cy), 3.5, alpha(Color32::BLACK, 0.11));
+            p.circle_stroke(pos2(x, cy + 0.8), 3.5, stroke(1.0, alpha(Color32::WHITE, 0.02)));
+            x += 256.0;
+        }
+    }
+}
+
+/// A star field drifting past in three layers (parallax): far stars small, dim and slow,
+/// near ones bigger, brighter and faster, all twinkling a little. `speed` scales the drift
+/// (it's integrated per frame, so changing it never makes the stars jump); `strength` 0…1.
+pub fn star_field(ui: &Ui, p: &egui::Painter, rect: Rect, id: &str, speed: f32, strength: f32) {
+    let (t, dt) = ui.input(|i| (i.time as f32, i.stable_dt.min(0.1)));
+    let key = egui::Id::new(("stars", id));
+    let travel = ui.data_mut(|d| {
+        let o = d.get_temp_mut_or(key, 0.0f32);
+        *o += dt * speed * 16.0;
+        *o
+    });
+    let cool = Color32::from_rgb(140, 200, 255);
+    let (w, h) = (rect.width().max(1.0), rect.height().max(1.0));
+    for (li, &(depth, n)) in [(0.3f32, 80u32), (0.6, 45), (1.0, 20)].iter().enumerate() {
+        for k in 0..n {
+            let i = li as u32 * 1000 + k;
+            // Drifting left and a little up, wrapping around
+            let x = rect.left() + (hash(i) * w - travel * depth).rem_euclid(w);
+            let y = rect.top() + (hash(i + 7_777) * h - travel * depth * 0.25).rem_euclid(h);
+            let twinkle = 0.65 + 0.35 * (t * (0.7 + hash(i + 33) * 1.8) + hash(i + 99) * std::f32::consts::TAU).sin();
+            let col = if k % 7 == 0 { cool } else { TEXT };
+            let a = (0.1 + 0.45 * depth) * twinkle * strength;
+            p.circle_filled(pos2(x, y), 0.5 + depth * 1.1, alpha(col, a));
+        }
+    }
+}
+
 /// Thin horizontal value bar (track volume, swing, master)
 pub fn bar_slider(ui: &mut Ui, value: &mut f32, width: f32, color: Color32) -> Response {
     let (rect, mut resp) = ui.allocate_exact_size(vec2(width, 14.0), Sense::click_and_drag());

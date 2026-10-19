@@ -1,15 +1,20 @@
-//! Colours, fonts and the egui style: dark concrete, neon track colours.
+//! Colours, fonts and the egui style: bunker concrete around, deep space in the middle,
+//! neon track colours.
 
 use crate::song::Voice;
 use eframe::egui::{self, Color32, FontFamily, FontId, Stroke};
 
-pub const BG: Color32 = Color32::from_rgb(9, 9, 11);
-pub const PANEL: Color32 = Color32::from_rgb(17, 17, 21);
-pub const PANEL_HI: Color32 = Color32::from_rgb(26, 26, 32);
-pub const LINE: Color32 = Color32::from_rgb(38, 38, 46);
-pub const TEXT: Color32 = Color32::from_rgb(236, 236, 241);
-pub const DIM: Color32 = Color32::from_rgb(140, 140, 154);
-pub const FAINT: Color32 = Color32::from_rgb(78, 78, 90);
+/// Concrete: the walls around everything
+pub const BG: Color32 = Color32::from_rgb(46, 46, 49);
+/// Recessed into the concrete (cards, fields)
+pub const PANEL: Color32 = Color32::from_rgb(36, 36, 39);
+pub const PANEL_HI: Color32 = Color32::from_rgb(58, 58, 63);
+pub const LINE: Color32 = Color32::from_rgb(72, 72, 78);
+pub const TEXT: Color32 = Color32::from_rgb(238, 238, 242);
+pub const DIM: Color32 = Color32::from_rgb(168, 168, 176);
+pub const FAINT: Color32 = Color32::from_rgb(118, 118, 126);
+/// Deep space: the window in the middle and the visualizer
+pub const SPACE: Color32 = Color32::from_rgb(5, 6, 13);
 pub const RED: Color32 = Color32::from_rgb(255, 59, 70);
 pub const ACID: Color32 = Color32::from_rgb(200, 255, 61);
 
@@ -94,8 +99,8 @@ pub fn install(ctx: &egui::Context) {
     for (w, fill) in [
         (&mut v.widgets.noninteractive, PANEL),
         (&mut v.widgets.inactive, PANEL_HI),
-        (&mut v.widgets.hovered, Color32::from_rgb(36, 36, 44)),
-        (&mut v.widgets.active, Color32::from_rgb(46, 46, 56)),
+        (&mut v.widgets.hovered, Color32::from_rgb(68, 68, 74)),
+        (&mut v.widgets.active, Color32::from_rgb(80, 80, 88)),
         (&mut v.widgets.open, PANEL_HI),
     ] {
         w.bg_fill = fill;

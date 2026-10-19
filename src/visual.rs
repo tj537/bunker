@@ -8,7 +8,7 @@
 use crate::orbit::Live;
 use crate::song::{Song, Voice, STEPS};
 use crate::theme::*;
-use crate::widgets::glow;
+use crate::widgets::{glow, star_field};
 use eframe::egui::{pos2, vec2, Color32, Rect, Ui};
 use std::f32::consts::{PI, TAU};
 
@@ -42,7 +42,9 @@ pub fn visual(ui: &mut Ui, rect: Rect, song: &Song, live: &Live, t: f64) {
     let tint = if live.build.is_some() { mix(tint, RED, 0.6) } else { tint };
     let t = t as f32;
 
-    p.rect_filled(rect, 0.0, BG);
+    p.rect_filled(rect, 0.0, SPACE);
+    // Far behind: stars drifting past in layers
+    star_field(ui, &p, rect, "visual", 0.8 + energy * 2.0, 0.8);
     // Breathing floor
     glow(&p, c, big * 0.45, tint, 0.06 + kick * 0.22 + live.level * 0.06);
 
@@ -114,7 +116,7 @@ pub fn visual(ui: &mut Ui, rect: Rect, song: &Song, live: &Live, t: f64) {
 
     // Centre: a quiet ring that beats with the kick
     let rb = r0 * 0.82;
-    p.circle_filled(c, rb, alpha(BG, 0.85));
+    p.circle_filled(c, rb, alpha(SPACE, 0.85));
     p.circle_stroke(c, rb, stroke(2.0, alpha(tint, 0.6 + kick * 0.4)));
 
     // Build-up: the whole screen gets hot

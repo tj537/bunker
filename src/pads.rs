@@ -142,7 +142,7 @@ pub fn pads(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mut P
         }
     }
     let p = ui.painter_at(grid_area.expand(2.0));
-    p.rect_filled(grid_area.expand(2.0), 12.0, alpha(BG, 0.6));
+    p.rect_filled(grid_area.expand(2.0), 12.0, alpha(SPACE, 0.6));
     for (t, voice) in Voice::ALL.into_iter().enumerate() {
         let track = &song.tracks[t];
         let color = track_color(voice);
