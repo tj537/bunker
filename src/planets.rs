@@ -8,12 +8,22 @@ use crate::face::{additive, halo};
 use crate::orbit::{scroll_notches, step_context_menu, Live, OrbitOut, Paint};
 use crate::song::{Song, Voice, STEPS, TRACKS};
 use crate::theme::*;
+use crate::widgets::glow;
 use eframe::egui::{self, pos2, vec2, Align2, Color32, Mesh, Pos2, Rect, Sense, Ui};
 use egui_phosphor::regular as ph;
 use std::f32::consts::{PI, TAU};
 
 /// How flat the orbits look: 1 = from straight above, 0 = edge-on
 const TILT: f32 = 0.42;
+
+/// A repeatable random number 0…1
+fn hash01(i: u32) -> f32 {
+    let mut x = i.wrapping_mul(0x9E37_79B9) ^ 0x85EB_CA6B;
+    x ^= x >> 15;
+    x = x.wrapping_mul(0x2C1B_3C6D);
+    x ^= x >> 12;
+    (x & 0xFF_FFFF) as f32 / 0xFF_FFFF as f32
+}
 
 pub struct System {
     pub c: Pos2,
@@ -291,30 +301,40 @@ pub fn planets(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mu
     }
 
     // ── The sun: the play button ──
-    // A soft glowing ball: lime while it waits, warming slowly to orange when the beat
-    // starts, red through a build-up
+    // A solid ball of fire with rings of light around it: lime while it waits, warming
+    // slowly to orange when the beat starts, red through a build-up
     let heat = ui.ctx().animate_bool_with_time(egui::Id::new("sun_heat"), live.playing, 1.5);
     let rs = sys.sun() * (1.0 + 0.06 * kick + 0.2 * build);
     let warm = mix(ACID, mix(mix(RED, track_color(Voice::Clap), 0.55), RED, build), heat);
-    halo(
+    glow(
         &p,
         sys.c,
-        rs * 3.0,
+        rs * 1.3,
         warm,
-        0.3 + 0.35 * kick + 0.4 * build + if on_sun { 0.15 } else { 0.0 },
+        0.16 + 0.3 * kick + 0.45 * build + if on_sun { 0.1 } else { 0.0 },
     );
-    // Bright where the light catches it, deeper towards the edge
-    let shine = sys.c - vec2(rs, rs) * 0.3;
-    let mut ball = Mesh::default();
-    ball.colored_vertex(shine, mix(warm, Color32::WHITE, 0.7 + 0.2 * kick));
-    let n = 64;
-    for i in 0..n {
-        let a = i as f32 / n as f32 * TAU;
-        ball.colored_vertex(sys.c + vec2(a.cos(), a.sin()) * rs, mix(warm, SPACE, 0.15));
-        ball.add_triangle(0, 1 + i, 1 + (i + 1) % n);
+    let skin = mix(warm, Color32::WHITE, 0.08 + 0.12 * kick);
+    p.circle_filled(sys.c, rs, skin);
+    // Its surface: a few hotter and cooler patches, turning slowly with the sun
+    let time = ui.input(|i| i.time) as f32;
+    for k in 0..9u32 {
+        let r = rs * (0.12 + 0.12 * hash01(k * 3 + 1));
+        let lat = (hash01(k * 3 + 2) - 0.5) * 1.5 * (rs - r);
+        let lon = hash01(k * 3) * TAU + time * 0.12;
+        // Round the back and out of sight again: only the visible half
+        if lon.cos() < -0.1 {
+            continue;
+        }
+        let w = (rs - r) * (1.0 - (lat / rs).powi(2)).max(0.0).sqrt();
+        let at = sys.c + vec2(w * lon.sin(), lat);
+        let hot = k % 3 != 0;
+        let col = if hot {
+            mix(warm, Color32::WHITE, 0.4)
+        } else {
+            mix(warm, SPACE, 0.3)
+        };
+        p.circle_filled(at, r * lon.cos().max(0.35).sqrt(), mix(skin, col, lon.cos().max(0.0) * 0.8));
     }
-    p.add(egui::Shape::mesh(ball));
-    p.circle_stroke(sys.c, rs, stroke(1.0, alpha(mix(warm, Color32::WHITE, 0.5), 0.6)));
     let icon = if live.playing { ph::STOP } else { ph::PLAY };
     let ink = mix(warm, SPACE, 0.8);
     p.text(sys.c - vec2(0.0, rs * 0.16), Align2::CENTER_CENTER, icon, body(rs * 0.6), ink);
