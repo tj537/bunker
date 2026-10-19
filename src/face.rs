@@ -296,7 +296,8 @@ pub fn face(ui: &mut Ui, rect: Rect, song: &Song, live: &Live, now: f64) {
     // Space
     p.rect_filled(rect, 0.0, SPACE);
     star_field(ui, &p, rect, "face", 0.8 + energy * 2.0 + build * 3.0, 0.8);
-    halo(&p, c, size * 1.6, tint, 0.12 + kick * 0.12 + build * 0.2 + rush * 0.2);
+    let glow_k = (0.12 + kick * 0.12 + build * 0.2 + rush * 0.2).min(1.0);
+    halo(&p, c, size * 1.6, tint, glow_k);
 
     // Glitch: a few horizontal bands shifted sideways, new ones ten times a second
     let seed = (t * 10.0) as u32;
@@ -509,20 +510,6 @@ pub fn face(ui: &mut Ui, rect: Rect, song: &Song, live: &Live, now: f64) {
         mix(RED, Color32::WHITE, 0.3),
         (build * 1.6 - 0.6).max(laser).clamp(0.0, 1.0),
     );
-    // A blink every few seconds: the lids meet for a moment
-    let phase = (t / 9.0).fract();
-    let blink = if phase < 0.02 {
-        ((phase - 0.01).abs() / 0.01).min(1.0)
-    } else {
-        1.0
-    };
-    // The pupils snap from place to place every so often – and often stare right at you
-    let look = (t / 1.7) as u32;
-    let gaze = if hash(look * 7 + 3) < 0.45 {
-        vec2(0.0, 0.0)
-    } else {
-        vec2(hash(look * 7) - 0.5, (hash(look * 7 + 1) - 0.5) * 0.4) * size * 0.06
-    };
     // The eyes go out as the head breaks and come back once it's whole
     let seen = (1.0 - fly * 6.0).clamp(0.0, 1.0);
     // Lasers: charging late in the build-up, full blast on the drop, sweeping slowly
@@ -536,33 +523,78 @@ pub fn face(ui: &mut Ui, rect: Rect, song: &Song, live: &Live, now: f64) {
             project(rotate([x, y, z + 0.015], yaw, pitch)).0
         };
         let eye = on_face(0.0, 0.0);
-        halo(&p, eye, size * (0.09 + 0.05 * eye_glow.min(3.0)), eye_col, 0.2 * eye_glow * seen);
-        // The eye: wide open and staring – a low-poly oval with a pale white, a glowing
-        // iris and a huge black pupil that widens on the kick. It hardly ever blinks,
-        // never while it screams.
-        let open = if since < BACK { 1.0 } else { blink } * (1.0 + 0.2 * build.max(laser) + 0.15 * gape);
-        let oval: Vec<Pos2> = (0..10)
-            .map(|k| {
-                let a = k as f32 / 10.0 * std::f32::consts::TAU;
-                // A little pointed at the inner corner
-                let rx = if a.cos() < -0.9 { 0.13 } else { 0.115 };
-                on_face(rx * a.cos(), 0.088 * a.sin() * open)
-            })
-            .collect();
-        let lit = (eye_glow / 2.5).min(1.0);
-        let white = mix(SPACE, mix(TEXT, tint, 0.35), 0.5);
+        let lit = ((eye_glow - 0.8) / 1.7).clamp(0.0, 1.0);
+        halo(
+            &p,
+            eye,
+            size * (0.09 + 0.05 * eye_glow.min(3.0)),
+            eye_col,
+            0.3 * eye_glow * lit * seen,
+        );
+        // The eye: an empty, angular hole like in a mask – you look right through it
+        // into space. It burns with light in the build-up and on the drop.
+        let open = 1.0 + 0.15 * build.max(laser) + 0.1 * gape;
+        let hole: Vec<Pos2> = [
+            (-0.13, 0.015),
+            (-0.08, -0.035),
+            (-0.01, -0.055),
+            (0.07, -0.05),
+            (0.12, -0.02),
+            (0.1, 0.03),
+            (0.02, 0.045),
+            (-0.07, 0.04),
+        ]
+        .iter()
+        .map(|&(dx, dy)| on_face(dx * 1.2 * open, dy * 1.25 * open))
+        .collect();
+        // What's behind: the dark of space and the glow around the head…
+        let behind = |q: Pos2| {
+            let d = (q - c).length() / (size * 1.6);
+            let f = if d < 0.25 {
+                1.0 - 1.8 * d
+            } else if d < 0.55 {
+                0.55 - (d - 0.25) * 1.23
+            } else {
+                (0.18 - (d - 0.55) * 0.4).max(0.0)
+            };
+            let k = glow_k * f;
+            Color32::from_rgb(
+                (SPACE.r() as f32 + tint.r() as f32 * k).min(255.0) as u8,
+                (SPACE.g() as f32 + tint.g() as f32 * k).min(255.0) as u8,
+                (SPACE.b() as f32 + tint.b() as f32 * k).min(255.0) as u8,
+            )
+        };
         p.add(egui::Shape::convex_polygon(
-            oval,
-            mix(white, eye_col, lit * lit).gamma_multiply(seen),
-            stroke(1.2, alpha(mix(SPACE, tint, 0.2), seen)),
+            hole.clone(),
+            mix(behind(eye), eye_col, lit * lit).gamma_multiply(seen),
+            stroke(1.2, alpha(mix(tint, Color32::WHITE, 0.35), 0.5 * seen)),
         ));
-        if open > 0.45 && seen > 0.05 {
-            let at = eye + gaze * (1.0 - lit) * 0.5;
-            let r = size * 0.07 * open.min(1.0);
-            halo(&p, at, r * 1.6, eye_col, (0.35 + 0.3 * kick) * seen);
-            p.circle_filled(at, r, mix(eye_col, Color32::WHITE, 0.2 + 0.5 * lit).gamma_multiply(seen));
-            p.circle_filled(at, r * (0.74 + 0.12 * kick), mix(VOID, eye_col, 0.5 * lit).gamma_multiply(seen));
-            p.circle_filled(at + vec2(-0.35, -0.4) * r, r * 0.16, alpha(Color32::WHITE, 0.85 * seen));
+        // …and the stars, fixed on the screen, so the head moves in front of them
+        let inside = |q: Pos2| {
+            (0..hole.len()).all(|i| {
+                let (a, b) = (hole[i], hole[(i + 1) % hole.len()]);
+                (b - a).x * (q - a).y - (b - a).y * (q - a).x >= 0.0
+            }) || (0..hole.len()).all(|i| {
+                let (a, b) = (hole[i], hole[(i + 1) % hole.len()]);
+                (b - a).x * (q - a).y - (b - a).y * (q - a).x <= 0.0
+            })
+        };
+        let bounds = Rect::from_points(&hole);
+        let cell = 9.0;
+        let (gx0, gy0) = ((bounds.left() / cell).floor() as i32, (bounds.top() / cell).floor() as i32);
+        let (gx1, gy1) = ((bounds.right() / cell).ceil() as i32, (bounds.bottom() / cell).ceil() as i32);
+        for gy in gy0..gy1 {
+            for gx in gx0..gx1 {
+                let k = (gx as u32).wrapping_mul(7919) ^ (gy as u32).wrapping_mul(104_729);
+                if hash(k) > 0.2 {
+                    continue;
+                }
+                let q = egui::pos2((gx as f32 + hash(k + 1)) * cell, (gy as f32 + hash(k + 2)) * cell);
+                if inside(q) {
+                    let twinkle = 0.4 + 0.6 * hash(k + 3);
+                    p.circle_filled(q, 0.7 + 1.1 * hash(k + 4), alpha(TEXT, twinkle * seen * (1.0 - lit)));
+                }
+            }
         }
         if blast > 0.01 {
             let a = side * (0.55 + 0.2 * (t * 1.3 + side).sin());
