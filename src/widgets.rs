@@ -1,7 +1,7 @@
 //! Custom controls: knobs, glowing buttons, the bipolar filter slider.
 
 use crate::theme::*;
-use eframe::egui::{self, pos2, vec2, Align2, Color32, Pos2, Rect, Response, Sense, Shape, Stroke, Ui, Vec2};
+use eframe::egui::{self, pos2, vec2, Align2, Color32, Pos2, Rect, Response, Sense, Shape, Stroke, Ui};
 use std::f32::consts::PI;
 
 /// Soft glow: stacked translucent circles
@@ -94,51 +94,6 @@ pub fn knob(ui: &mut Ui, value: &mut f32, default: f32, label: &str, color: Colo
         DIM,
     );
     resp.on_hover_cursor(egui::CursorIcon::ResizeVertical)
-}
-
-/// A chunky button with an icon and an optional glow when active
-pub fn big_button(ui: &mut Ui, size: Vec2, icon: &str, text: &str, color: Color32, active: bool) -> Response {
-    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
-    paint_big_button(ui, rect, &resp, icon, text, color, active);
-    resp
-}
-
-pub fn paint_big_button(ui: &Ui, rect: Rect, resp: &Response, icon: &str, text: &str, color: Color32, active: bool) {
-    let p = ui.painter();
-    let hot = resp.hovered();
-    let down = resp.is_pointer_button_down_on();
-    let rect = if down { rect.shrink(1.5) } else { rect };
-    if active {
-        p.rect_filled(rect.expand(4.0), 14.0, alpha(color, 0.12));
-    }
-    let fill = if active {
-        color
-    } else if hot {
-        PANEL_HI
-    } else {
-        mix(PANEL, PANEL_HI, 0.5)
-    };
-    p.rect_filled(rect, 12.0, fill);
-    p.rect_stroke(
-        rect,
-        12.0,
-        stroke(
-            1.0,
-            if active {
-                color
-            } else {
-                alpha(color, if hot { 0.7 } else { 0.35 })
-            },
-        ),
-        egui::StrokeKind::Inside,
-    );
-    let fg = if active { BG } else { color };
-    let label = if text.is_empty() {
-        icon.to_string()
-    } else {
-        format!("{icon}  {text}")
-    };
-    p.text(rect.center(), Align2::CENTER_CENTER, label, bold(15.0), fg);
 }
 
 /// Small pill toggle (chips)
@@ -281,22 +236,47 @@ pub fn filter_slider(ui: &mut Ui, value: &mut f32, width: f32, height: f32) -> R
 pub struct EnergyOut {
     pub changed: bool,
     pub curve_clicked: bool,
+    pub rise_clicked: bool,
 }
 
 /// The energy fader: drag to strip the groove down or build it up. Dots below show
 /// where each track comes in. `curve`: None = auto mode off, Some(on) = the auto
-/// mode's energy curve is (not) driving it – the pill switches it.
-pub fn energy_fader(ui: &mut Ui, value: &mut f32, width: f32, height: f32, curve: Option<bool>) -> EnergyOut {
+/// mode's energy curve is (not) driving it – the pill switches it. `rise`: the RISE pill,
+/// a slow push up from low energy builds up and drops.
+pub fn energy_fader(ui: &mut Ui, value: &mut f32, width: f32, height: f32, curve: Option<bool>, rise: bool) -> EnergyOut {
     use crate::engine::LAYERS;
     use crate::song::Voice;
     let (rect, resp) = ui.allocate_exact_size(vec2(width, height), Sense::click_and_drag());
     let mut out = EnergyOut {
         changed: false,
         curve_clicked: false,
+        rise_clicked: false,
     };
     let p = ui.painter();
     let top = rect.top() + 8.0;
     p.text(pos2(rect.left(), top), Align2::LEFT_CENTER, "ENERGY", bold(10.5), DIM);
+    // The rise pill
+    let rise_pill = Rect::from_min_size(pos2(rect.left() + 54.0, top - 9.0), vec2(50.0, 18.0));
+    let rise_hot = ui.rect_contains_pointer(rise_pill);
+    p.rect_filled(
+        rise_pill,
+        9.0,
+        if rise {
+            alpha(RED, 0.18)
+        } else if rise_hot {
+            PANEL_HI
+        } else {
+            Color32::TRANSPARENT
+        },
+    );
+    p.rect_stroke(rise_pill, 9.0, stroke(1.0, if rise { RED } else { LINE }), egui::StrokeKind::Inside);
+    p.text(
+        rise_pill.center(),
+        Align2::CENTER_CENTER,
+        "RISE",
+        bold(9.5),
+        if rise { RED } else { DIM },
+    );
     // The curve pill
     let pill = Rect::from_min_size(pos2(rect.right() - 62.0, top - 9.0), vec2(62.0, 18.0));
     if let Some(on) = curve {
@@ -331,10 +311,13 @@ pub fn energy_fader(ui: &mut Ui, value: &mut f32, width: f32, height: f32, curve
     );
     let track = Rect::from_min_size(pos2(rect.left() + 6.0, top + 14.0), vec2(width - 12.0, 10.0));
     let on_pill = curve.is_some() && resp.interact_pointer_pos().is_some_and(|p| pill.contains(p));
+    let on_rise = resp.interact_pointer_pos().is_some_and(|p| rise_pill.contains(p));
     if resp.clicked() && on_pill {
         out.curve_clicked = true;
+    } else if resp.clicked() && on_rise {
+        out.rise_clicked = true;
     } else if let Some(pos) = resp.interact_pointer_pos() {
-        if (resp.dragged() || resp.is_pointer_button_down_on()) && !on_pill {
+        if (resp.dragged() || resp.is_pointer_button_down_on()) && !on_pill && !on_rise {
             let v = ((pos.x - track.left()) / track.width()).clamp(0.0, 1.0);
             if (v - *value).abs() > 1e-4 {
                 *value = v;
@@ -370,6 +353,7 @@ pub fn energy_fader(ui: &mut Ui, value: &mut f32, width: f32, height: f32, curve
         "Energy: turn it down and the groove strips down to hats and synth, turn it up and kick, bass, clap, \
          open hat and ride come back (the dots), plus extra hats and drive at the top. ← → on the keyboard.\n\
          Then hit DROP – the energy comes back with it.\n\
+         RISE: pull it down, then push it up slowly – the push turns into a build-up and drops. A quick push stays just energy.\n\
          In auto mode CURVE lets Bunker move it through the set; touching the fader takes over by hand.",
     );
     out

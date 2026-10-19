@@ -40,7 +40,7 @@ Written in Rust, every sound synthesized live – no samples, no account, no tra
 <td width="50%" valign="top">
 
 ### 🎛️ Ten vibes
-**Dub · Minimal · Melodic · Hypnotic · Electro · Peak time · Acid · Rave · Industrial · Hard** – one click rolls a new groove that follows the rules of the genre: four on the floor (or broken electro kicks), claps on 2 and 4, a bassline that dodges the kick, chords that agree with the bass. Each vibe brings its own tempo, key, swing and sounds. **SHUFFLE** (<kbd>Enter</kbd>) rolls again.
+**Dub · Minimal · Melodic · Hypnotic · Electro · Peak time · Acid · Rave · Industrial · Hard** – pick one from the **VIBE** dropdown at the top and it rolls a new groove that follows the rules of the genre: four on the floor (or broken electro kicks), claps on 2 and 4, a bassline that dodges the kick, chords that agree with the bass. Each vibe brings its own tempo, key, swing and sounds. **SHUFFLE** (<kbd>Enter</kbd>) rolls again.
 
 ### 🥁 A sound for every track
 Click the coloured pill under a track name (or scroll on it):
@@ -69,14 +69,16 @@ Under the list: **Tune** (±12 semitones) and **Decay** (shorter or longer) for 
 <td width="50%" valign="top">
 
 ### 📈 Energy & drop
-The **ENERGY** fader is the big lever: pull it down and the groove strips to hats and synth, push it up and kick, bass, clap, open hat and ride come back one by one (the coloured dots show where), with extra hats and drive at the top. Pull it down, hit **DROP** – build-up, clap roll, noise riser – and the next bar hits with everything back. <kbd>←</kbd> <kbd>→</kbd> on the keyboard.
+The **ENERGY** fader is the big lever: pull it down and the groove strips to hats and synth, push it up and kick, bass, clap, open hat and ride come back one by one (the coloured dots show where), with extra hats and drive at the top. Pull it down, hit **DROP** – from the next bar on two bars of build-up (kick and bass fade out, clap roll, noise riser), half a beat of silence, and then everything hits at once. <kbd>←</kbd> <kbd>→</kbd> on the keyboard.
+
+Switch on **RISE** next to the fader and the fader drops by itself: pull it down, then push it up slowly – the push turns into a build-up and a drop. A quick push stays just energy, so you can still bring a track in by hand.
 
 ### ♾️ Auto mode
 Bunker plays a whole set on its own. Every **2, 4 or 8 bars** it changes one thing – a new pattern, another sound, new notes, a polyrhythm, a track in or out. Every 8 bars a **fill**. Every 32 bars a **breakdown** – a different kind each time – a build-up and the drop. After some drops a **new chapter** starts: new bassline, new sounds, sometimes a new key. The **energy curve** (CURVE) moves the energy through the set; touch the fader and it's yours.
 
 ### 🔥 Live effects
 Hold them, combine them:
-**STUTTER** <kbd>Q</kbd> · **ECHO** <kbd>W</kbd> · **WASH** <kbd>E</kbd> · **CRUSH** <kbd>X</kbd> · **GATE** <kbd>C</kbd> · **TAPE STOP** <kbd>V</kbd> – plus a **filter** that springs back.
+**STUTTER** <kbd>Q</kbd> · **ECHO** <kbd>W</kbd> · **WASH** <kbd>E</kbd> (the beat drowns in a huge reverb that rings out when you let go) · **CRUSH** <kbd>X</kbd> · **GATE** <kbd>C</kbd> · **TAPE STOP** <kbd>V</kbd> – plus a **filter** that springs back.
 
 ### 🎚️ Sound & master
 **SOUND:** **DARK** closes the sound and adds rumble · **ACID** squeezes the synth filter · **SPACE** reverb and echo · **PUMP** everything ducks under the kick.

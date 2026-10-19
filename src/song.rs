@@ -395,6 +395,8 @@ pub struct Song {
     pub auto_bars: u8,
     /// Auto mode moves the energy itself (off once you take the energy fader)
     pub curve: bool,
+    /// A slow push of the energy fader from low up builds up and drops
+    pub rise: bool,
     /// Index into `PROGRESSIONS`
     pub prog: u8,
     pub eq: MasterEq,
@@ -429,6 +431,7 @@ impl Song {
             auto: false,
             auto_bars: 8,
             curve: true,
+            rise: false,
             prog: 0,
             eq: MasterEq::default(),
         }

@@ -1,4 +1,4 @@
-//! The window: top bar, vibe bar, track list, the orbit (or pads) with the scenes
+//! The window: top bar with the vibes, track list, the orbit (or pads) with the scenes
 //! below, sound knobs, auto mode and live effects.
 
 use crate::audio::{self, Audio};
@@ -13,7 +13,7 @@ use crate::song::{Scale, Song, Track, Vibe, Voice, PROGRESSIONS, STEPS, TRACKS};
 use crate::theme::*;
 use crate::update::{self, Release};
 use crate::visual;
-use crate::widgets::{self, big_button, chip, chip_sized, glow, heading, knob};
+use crate::widgets::{self, chip, chip_sized, glow, heading, knob};
 use eframe::egui::{self, pos2, vec2, Align2, Color32, Key, Rect, Sense, Ui};
 use egui_phosphor::regular as ph;
 use std::path::PathBuf;
@@ -33,6 +33,7 @@ fn keep_live_settings(mut song: Song, now: &Song) -> Song {
     song.auto = now.auto;
     song.auto_bars = now.auto_bars;
     song.curve = now.curve;
+    song.rise = now.rise;
     song.eq = now.eq;
     song
 }
@@ -756,6 +757,8 @@ impl BunkerApp {
                     .font(body(11.0))
                     .color(FAINT),
             );
+            ui.add_space(18.0);
+            self.vibe_picker(ui, now);
             ui.add_space(10.0);
             if let Some(r) = &self.new_version {
                 let text = format!("{}  Update to {}", ph::ARROW_CIRCLE_UP, r.version);
@@ -858,39 +861,50 @@ impl BunkerApp {
         });
     }
 
-    /// The presets: one chip per vibe, and SHUFFLE to roll again in the current one
-    fn vibe_bar(&mut self, ui: &mut Ui, now: f64) {
-        ui.horizontal_centered(|ui| {
-            ui.add_space(8.0);
-            ui.add_sized(
-                vec2(40.0, 30.0),
-                egui::Label::new(egui::RichText::new("VIBE").font(bold(11.0)).color(FAINT).extra_letter_spacing(1.6)),
-            )
-            .on_hover_text("Pick a style – every click rolls a new groove in it");
-            let shuffle_w = 132.0;
-            let gap = ui.spacing().item_spacing.x;
-            let n = Vibe::ALL.len() as f32;
-            let w = ((ui.available_width() - shuffle_w - 18.0 - gap * n) / n).clamp(60.0, 116.0);
-            for vibe in Vibe::ALL {
-                let on = self.song.vibe == vibe;
-                let (lo, hi) = vibe.bpm();
-                if chip_sized(ui, vibe.name(), on, ACID, Some(w))
-                    .on_hover_text(format!("{} · {lo:.0}–{hi:.0} BPM\nClick: roll a new groove", vibe.blurb()))
-                    .clicked()
-                {
-                    self.shuffle(vibe, now);
+    /// The presets: a dropdown of vibes (picking one rolls a new groove in it) and SHUFFLE
+    fn vibe_picker(&mut self, ui: &mut Ui, now: f64) {
+        ui.label(egui::RichText::new("VIBE").font(bold(11.0)).color(FAINT).extra_letter_spacing(1.6))
+            .on_hover_text("Pick a style – every pick rolls a new groove in it");
+        let vibe = self.song.vibe;
+        let (lo, hi) = vibe.bpm();
+        let resp = chip_sized(ui, &format!("{}  {}", vibe.name(), ph::CARET_DOWN), true, ACID, Some(140.0)).on_hover_text(format!(
+            "{} · {lo:.0}–{hi:.0} BPM\nClick for the list – picking a vibe rolls a new groove in it",
+            vibe.blurb()
+        ));
+        let popup = ui.make_persistent_id("vibes");
+        if resp.clicked() {
+            ui.memory_mut(|m| m.toggle_popup(popup));
+        }
+        egui::popup_below_widget(ui, popup, &resp, egui::PopupCloseBehavior::CloseOnClick, |ui| {
+            ui.set_min_width(320.0);
+            for v in Vibe::ALL {
+                let (lo, hi) = v.bpm();
+                let mut job = egui::text::LayoutJob::default();
+                let fmt = |font, color| egui::TextFormat {
+                    font_id: font,
+                    color,
+                    ..Default::default()
+                };
+                job.append(v.name(), 0.0, fmt(bold(13.5), if v == vibe { ACID } else { TEXT }));
+                job.append(&format!("   {lo:.0}–{hi:.0} BPM\n"), 0.0, fmt(body(11.0), FAINT));
+                job.append(v.blurb(), 0.0, fmt(body(11.5), DIM));
+                if ui.selectable_label(v == vibe, job).clicked() {
+                    self.shuffle(v, now);
                 }
             }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add_space(8.0);
-                if big_button(ui, vec2(shuffle_w, 32.0), ph::SHUFFLE, "SHUFFLE", ACID, false)
-                    .on_hover_text("Roll a whole new groove in this vibe (Enter)")
-                    .clicked()
-                {
-                    self.shuffle(self.song.vibe, now);
-                }
-            });
         });
+        // Short on room (small window plus an update notice): just the icon
+        let text = if ui.available_width() > 620.0 {
+            format!("{}  SHUFFLE", ph::SHUFFLE)
+        } else {
+            ph::SHUFFLE.to_string()
+        };
+        if chip(ui, &text, false, ACID)
+            .on_hover_text("Roll a whole new groove in this vibe (Enter)")
+            .clicked()
+        {
+            self.shuffle(self.song.vibe, now);
+        }
     }
 
     fn bpm_box(&mut self, ui: &mut Ui) {
@@ -1452,9 +1466,20 @@ impl BunkerApp {
         // Energy: the big lever of the arrangement
         let mut e = self.song.macros.energy;
         let curve = self.song.auto.then_some(self.song.curve);
-        let out = widgets::energy_fader(ui, &mut e, w, if tall { 58.0 } else { 50.0 }, curve);
+        let out = widgets::energy_fader(ui, &mut e, w, if tall { 58.0 } else { 50.0 }, curve, self.song.rise);
         if out.changed {
             self.set_energy(e);
+        }
+        if out.rise_clicked {
+            self.song.rise = !self.song.rise;
+            self.say(
+                if self.song.rise {
+                    "Rise: pull the energy down, push it up slowly – it builds up and drops"
+                } else {
+                    "Rise off: the energy fader is just energy"
+                },
+                now,
+            );
         }
         if out.curve_clicked {
             if self.song.auto {
@@ -1542,7 +1567,7 @@ impl BunkerApp {
         p.text(
             r.center() + vec2(0.0, if big { 17.0 } else { 13.0 }),
             Align2::CENTER_CENTER,
-            "build-up → drop on the next bar (B)",
+            "two bars build-up from the next bar (B)",
             body(10.5),
             alpha(TEXT, 0.6),
         );
@@ -1884,7 +1909,7 @@ impl BunkerApp {
                     row(ui, ph::STACK, "Scenes", "Four memory slots under the orbit. Click + to keep what you hear, click a full scene to switch – the lit one keeps your changes. The number is its length in song mode, the lightning builds up and drops into it. SONG plays them one after another.");
                     row(ui, ph::INFINITY, "Auto mode", "Bunker changes something every 2, 4 or 8 bars – patterns, sounds, notes, fills – and every 32 bars plays a breakdown, a build-up and a drop. Sometimes the drop starts a new chapter with a new bassline or key. With CURVE on the energy fader it also moves the energy; touch the fader to take over.");
                     row(ui, ph::SLIDERS, "Sound & master", "DARK closes the sound and adds rumble. ACID opens the synth filter. SPACE: reverb and echo. PUMP ducks everything under the kick. MASTER: low, mid and high EQ and drive for the whole mix.");
-                    row(ui, ph::LIGHTNING, "Live effects", "ENERGY strips the groove down or builds it up (← →) – pull it down, hit DROP and everything comes back. FILTER springs back when you let go. Hold STUTTER (Q), ECHO (W), WASH (E), CRUSH (X), GATE (C) or TAPE STOP (V) – combine them.");
+                    row(ui, ph::LIGHTNING, "Live effects", "ENERGY strips the groove down or builds it up (← →) – pull it down, hit DROP and everything comes back. With RISE on, a slow push up from low energy builds up and drops by itself. FILTER springs back when you let go. Hold STUTTER (Q), ECHO (W), WASH (E), CRUSH (X), GATE (C) or TAPE STOP (V) – combine them.");
                     row(ui, ph::MONITOR_PLAY, "Visualizer", "P turns the window into a fullscreen light show – all keys keep working. Esc goes back.");
                     row(ui, ph::FOLDER_SIMPLE, "Files", "File → Save as .bunker keeps the groove, the scenes and the song in one file. Open it from the menu or drag it onto the window. File → Export audio writes a WAV.");
                     row(ui, ph::GRID_FOUR, "Pads", "Tab switches to big pads and a classic grid. Hit RECORD and play along – your hits land on the beat.");
@@ -1975,10 +2000,6 @@ impl BunkerApp {
             .exact_height(58.0)
             .frame(frame(BG, 6.0))
             .show(ctx, |ui| self.top_bar(ui, &live, now));
-        egui::TopBottomPanel::top("vibes")
-            .exact_height(44.0)
-            .frame(frame(BG, 4.0))
-            .show(ctx, |ui| self.vibe_bar(ui, now));
         egui::TopBottomPanel::bottom("hints")
             .exact_height(28.0)
             .frame(frame(BG, 2.0))

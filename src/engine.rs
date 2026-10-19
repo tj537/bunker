@@ -166,6 +166,28 @@ struct Build {
     len: u64,
 }
 
+/// How much of the mix goes into the reverb at full wash
+const WASH_SEND: f32 = 1.2;
+
+/// Steps of silence before a drop lands (half a beat)
+const DROP_GAP: u64 = 2;
+
+/// Energy rise that ends in a drop (with `Song::rise` on): from below `RISE_LOW`
+/// slowly up past `RISE_HIGH`. A quick push is just energy.
+const RISE_LOW: f32 = 0.4;
+const RISE_HIGH: f32 = 0.75;
+/// Steps the rise from `RISE_LOW` to `RISE_HIGH` has to take at least
+const RISE_STEPS: u64 = 8;
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Rise {
+    Idle,
+    /// The energy is low, a rise may follow
+    Low,
+    /// Rising since this step
+    Rising(u64),
+}
+
 /// How the auto mode arranges one 32-bar cycle
 #[derive(Clone, Copy)]
 struct Plan {
@@ -285,6 +307,10 @@ pub struct Engine {
     /// Echo throw from a fill, fades out by itself
     throw: f32,
     wash: f32,
+    /// The wash's room: grows with it, shrinks slowly after, so the tail rings out
+    wash_room: f32,
+    /// Keeps kick and bass out of the wash, so it drowns instead of booming
+    wash_hp: Svf,
     crush: f32,
     crush_count: f32,
     crush_hold: (f32, f32),
@@ -307,6 +333,10 @@ pub struct Engine {
     band_peak: [f32; 8],
     stutter: Option<u64>,
     build: Option<Build>,
+    /// Build-up filter amount; it lets go quickly after the drop instead of jumping
+    build_cut: f32,
+    riser_gain: f32,
+    rise: Rise,
     transpose: i8,
     limiter: f32,
     peak: f32,
@@ -358,6 +388,8 @@ impl Engine {
             echo_amount: 0.0,
             throw: 0.0,
             wash: 0.0,
+            wash_room: 0.0,
+            wash_hp: Svf::new(280.0, 0.7, sr),
             crush: 0.0,
             crush_count: 0.0,
             crush_hold: (0.0, 0.0),
@@ -377,6 +409,9 @@ impl Engine {
             band_peak: [0.0; 8],
             stutter: None,
             build: None,
+            build_cut: 0.0,
+            riser_gain: 0.0,
+            rise: Rise::Idle,
             transpose: 0,
             limiter: 1.0,
             peak: 0.0,
@@ -393,6 +428,8 @@ impl Engine {
                 self.song = *s;
                 if self.song.auto && self.song.curve {
                     self.song.macros.energy = energy;
+                } else {
+                    self.watch_rise();
                 }
                 self.song.sanitize();
                 // Auto mode switched off in the middle of a breakdown: bring the beat back
@@ -492,21 +529,49 @@ impl Engine {
     }
 
     fn start_build(&mut self) {
-        // Build-up until the end of the next bar, the drop lands on the bar after
+        // Two bars of build-up from the next bar on, so it always starts and lands on the one
         let next = self.last_fired.map_or(0, |s| s + 1);
-        let bar_end = (next / STEPS as u64 + 1) * STEPS as u64;
-        let end = bar_end + STEPS as u64;
         self.build = Some(Build {
-            start: next,
-            len: end - next,
+            start: next.div_ceil(STEPS as u64) * STEPS as u64,
+            len: 2 * STEPS as u64,
         });
         self.send_song(Some(Change::Build));
     }
 
+    /// 0…1 through the build-up; None before it starts
     fn build_progress(&self, idx: f64) -> Option<f32> {
         self.build
             .as_ref()
+            .filter(|b| idx >= b.start as f64)
             .map(|b| ((idx - b.start as f64) / b.len as f64).clamp(0.0, 1.0) as f32)
+    }
+
+    /// The breath before the drop: the last half beat of the build-up
+    fn in_drop_gap(&self, idx: f64) -> bool {
+        self.build.as_ref().is_some_and(|b| idx >= (b.start + b.len - DROP_GAP) as f64)
+    }
+
+    /// Energy by hand with RISE on: a slow push up from low energy builds up and drops
+    fn watch_rise(&mut self) {
+        let e = self.song.macros.energy;
+        if !self.song.rise {
+            self.rise = Rise::Idle;
+            return;
+        }
+        let now = self.last_fired.unwrap_or(0);
+        self.rise = match self.rise {
+            _ if e < RISE_LOW => Rise::Low,
+            // Straight from low to high in one move: too quick
+            Rise::Low if e >= RISE_HIGH => Rise::Idle,
+            Rise::Low => Rise::Rising(now),
+            Rise::Rising(from) if e >= RISE_HIGH => {
+                if now >= from + RISE_STEPS && self.playing && self.build.is_none() {
+                    self.start_build();
+                }
+                Rise::Idle
+            }
+            r => r,
+        };
     }
 
     fn start_breakdown(&mut self, idx: u64) {
@@ -541,6 +606,7 @@ impl Engine {
 
     fn drop_now(&mut self) {
         self.build = None;
+        self.rise = Rise::Idle;
         self.restore_breakdown();
         self.shared.build.store(0, Ordering::Relaxed);
         self.song.track_mut(Voice::Kick).mute = false;
@@ -584,6 +650,7 @@ impl Engine {
             s.auto = false;
             s.auto_bars = self.song.auto_bars;
             s.eq = self.song.eq;
+            s.rise = self.song.rise;
             s.sanitize();
             self.song = s;
             self.scene_start = bar;
@@ -668,6 +735,7 @@ impl Engine {
         }
         self.shared.step.store(idx, Ordering::Relaxed);
         let build = self.build_progress(idx as f64);
+        let gap = self.in_drop_gap(idx as f64);
         let play_idx = match self.stutter {
             Some(origin) if idx >= origin => origin + (idx - origin) % 2,
             _ => idx,
@@ -681,7 +749,13 @@ impl Engine {
             if track.mute || energy < LAYERS[ti] {
                 continue;
             }
-            if build.is_some() && matches!(voice, Voice::Kick | Voice::Bass | Voice::OpenHat) {
+            // Build-up: kick, bass and open hat fade out over the first bar, then nothing in the gap
+            let fade = match build {
+                Some(_) if gap => 0.0,
+                Some(p) if matches!(voice, Voice::Kick | Voice::Bass | Voice::OpenHat) => 1.0 - p * 2.0,
+                _ => 1.0,
+            };
+            if fade < 0.15 {
                 continue;
             }
             if fill == Some(Fill::Gap) && in_bar >= 12 && matches!(voice, Voice::Kick | Voice::Bass) {
@@ -689,7 +763,7 @@ impl Engine {
             }
             let si = track.step_at(play_idx);
             let step = track.steps[si];
-            let mut vel = track.volume * if step.accent { 1.0 } else { 0.72 };
+            let mut vel = track.volume * if step.accent { 1.0 } else { 0.72 } * fade;
             // Energy thins out the percussion (below 45) or adds ghost hats (above 60);
             // the choice changes every two bars
             let perc = matches!(voice, Voice::Hat | Voice::Ride | Voice::Rim | Voice::OpenHat);
@@ -711,7 +785,7 @@ impl Engine {
             self.trigger(voice, vel, step.accent, step.note, gate as u32, step.slide && step.on);
         }
         // Build-up: a clap roll that gets faster and louder
-        if let Some(p) = build {
+        if let Some(p) = build.filter(|_| !gap) {
             if p < 0.5 && idx.is_multiple_of(2) || p >= 0.5 {
                 let v = 0.35 + 0.55 * p;
                 self.clap_hit(v, 0.08);
@@ -867,6 +941,7 @@ impl Engine {
         let (g_low, g_mid, g_high) = (db(eq.low), db(eq.mid), db(eq.high));
         let eq_on = g_low.abs() + g_mid.abs() + g_high.abs() > 0.01;
         let band_coef = (-1.0 / (0.03 * sr)).exp();
+        let wash_release = (-1.0 / (2.5 * sr)).exp();
 
         for frame in out.as_chunks_mut::<2>().0 {
             // ── Clock ──
@@ -879,10 +954,11 @@ impl Engine {
                     self.last_fired = Some(idx);
                     self.fire(idx);
                 }
-                // Last quarter of the build-up: 32nd-note rolls
-                if let Some(p) = self.build_progress(self.phase) {
+                // Last quarter of the build-up: 32nd-note rolls (waiting for its bar shows as just begun)
+                if self.build.is_some() {
+                    let p = self.build_progress(self.phase).unwrap_or(0.0);
                     self.shared.build.store((p * 1000.0).max(1.0) as u32, Ordering::Relaxed);
-                    if p > 0.75 && frac >= 0.5 && self.half_fired != Some(idx) {
+                    if p > 0.75 && frac >= 0.5 && self.half_fired != Some(idx) && !self.in_drop_gap(self.phase) {
                         self.half_fired = Some(idx);
                         self.clap_hit(0.5 + 0.4 * p, 0.06);
                     }
@@ -932,12 +1008,24 @@ impl Engine {
                 r += self.rng.noise() * self.crash * 0.12;
                 self.crash *= 0.99995;
             }
-            // Build-up: a noise riser sweeping up
+            // Build-up: a noise riser sweeping up, fading out in the gap before the drop
             let build = self.build_progress(self.phase).filter(|_| self.playing);
-            if let Some(p) = build {
+            let riser_want = if build.is_some() && !self.in_drop_gap(self.phase) {
+                1.0
+            } else {
+                0.0
+            };
+            self.riser_gain += (riser_want - self.riser_gain) * 0.0015;
+            match build {
+                Some(p) => self.build_cut = p,
+                // After the drop the build-up filter lets go within a few milliseconds
+                None => self.build_cut *= 0.998,
+            }
+            if self.riser_gain > 1e-4 {
+                let p = self.build_cut;
                 self.riser.set(400.0 * 30f32.powf(p), 2.5, sr);
                 let noise = self.rng.noise();
-                let n = self.riser.run(noise).bp * p * p * 0.5;
+                let n = self.riser.run(noise).bp * p * p * 0.5 * self.riser_gain;
                 l += n;
                 r += n;
                 rv += n;
@@ -951,11 +1039,18 @@ impl Engine {
             let (el, er) = self.delay.run(dl, dr, delay_time, fb.min(0.85));
             // Wash: everything into the reverb, the dry beat steps back
             self.wash += ((if wash_on { 1.0 } else { 0.0 }) - self.wash) * 0.0008;
-            rv += (l + r) * 0.5 * self.wash * 1.2;
+            self.wash_room = if self.wash > self.wash_room {
+                self.wash
+            } else {
+                self.wash_room * wash_release
+            };
+            if self.wash > 1e-4 {
+                rv += self.wash_hp.run((l + r) * 0.5).hp * self.wash * WASH_SEND;
+            }
             let duck_dry = 1.0 - self.wash * 0.55;
             l = l * duck_dry + el * pg;
             r = r * duck_dry + er * pg;
-            let size = (0.5 + space * 0.46 + self.wash * 0.5).min(0.98);
+            let size = (0.5 + space * 0.46 + self.wash_room * 0.5).min(0.98);
             let (rl, rr) = self.reverb.run(rv, size, 0.3 + dark * 0.5);
             l += rl * pg;
             r += rr * pg;
@@ -989,8 +1084,8 @@ impl Engine {
                 l = self.filter_l.run(l).hp;
                 r = self.filter_r.run(r).hp;
             }
-            if let Some(p) = build {
-                let fc = 20.0 * 80f32.powf(p);
+            if self.build_cut > 0.002 {
+                let fc = 20.0 * 80f32.powf(self.build_cut);
                 self.build_hp_l.set(fc, 0.9, sr);
                 self.build_hp_r.set(fc, 0.9, sr);
                 l = self.build_hp_l.run(l).hp;
@@ -1196,7 +1291,7 @@ mod tests {
     }
 
     #[test]
-    fn manual_drop_waits_for_the_bar_after_next() {
+    fn manual_drop_builds_two_bars_from_the_next_bar() {
         let (tx, rx) = std::sync::mpsc::channel();
         let shared = Shared::new();
         let mut e = Engine::new(22_050.0, Song::default(), shared.clone(), Some(tx), 2);
@@ -1206,14 +1301,107 @@ mod tests {
         e.render(&mut buf); // into bar 0
         e.handle(Cmd::Drop);
         assert!(e.build.is_some());
-        let mut buf = vec![0.0; 2 * step * 26];
+        // Waiting for bar 1: the beat plays on, the button already shows it
+        let kicks = |s: &Shared| s.hits[Voice::Kick.index()].load(Ordering::Relaxed);
+        let before = kicks(&shared);
+        let mut buf = vec![0.0; 2 * step * 10];
         e.render(&mut buf);
+        assert!(kicks(&shared) > before, "kick until the bar is over");
         assert!(shared.build_progress().is_some());
+        assert_eq!(e.build_progress(e.phase), None);
+        // Build-up through bars 1 and 2, the drop on bar 3
+        let mut buf = vec![0.0; 2 * step * 32];
+        e.render(&mut buf);
+        assert!(e.build.is_some(), "still building on step 47");
         let mut buf = vec![0.0; 2 * step * 2];
         e.render(&mut buf);
-        assert!(e.build.is_none(), "drop on step 32");
+        assert!(e.build.is_none(), "drop on step 48");
         let changes: Vec<Change> = rx.try_iter().filter_map(|Event::Song(_, c)| c).collect();
         assert_eq!(changes, vec![Change::Build, Change::Drop]);
+    }
+
+    #[test]
+    fn build_up_fades_the_kick_and_breathes_before_the_drop() {
+        let mut song = gen::generate(Vibe::Peak, &Default::default(), &mut Rng::new(4));
+        song.macros.energy = 0.9;
+        for v in Voice::ALL {
+            song.track_mut(v).mute = false;
+        }
+        let shared = Shared::new();
+        let mut e = Engine::new(22_050.0, song, shared.clone(), None, 1);
+        e.handle(Cmd::Play);
+        let step = e.step_len() as usize;
+        let hits = |v: Voice| shared.hits[v.index()].load(Ordering::Relaxed);
+        let mut buf = vec![0.0; 2 * step * 15 + 20];
+        e.render(&mut buf);
+        e.handle(Cmd::Drop);
+        // First bar of the build-up: the kick is still there, fading
+        let k0 = hits(Voice::Kick);
+        let mut buf = vec![0.0; 2 * step * 8];
+        e.render(&mut buf);
+        assert!(hits(Voice::Kick) > k0, "kick fades, it doesn't vanish");
+        // Second bar: no kick
+        let mut buf = vec![0.0; 2 * step * 16];
+        e.render(&mut buf);
+        let k1 = hits(Voice::Kick);
+        let mut buf = vec![0.0; 2 * step * 6];
+        e.render(&mut buf); // up to step 45
+        assert_eq!(hits(Voice::Kick), k1, "no kick late in the build-up");
+        // The gap: nothing new starts in the last half beat
+        let all = || Voice::ALL.map(hits);
+        let mut buf = vec![0.0; 2 * step * 2 + 10];
+        e.render(&mut buf); // steps 46, 47
+        let before = all();
+        let mut buf = vec![0.0; 2 * step - 40];
+        e.render(&mut buf);
+        assert_eq!(all(), before, "silence before the drop");
+        let mut buf = vec![0.0; 2 * step * 4];
+        e.render(&mut buf);
+        assert!(e.build.is_none() && hits(Voice::Kick) > k1, "the drop brings the kick back");
+        assert!(buf.iter().all(|x| x.is_finite() && x.abs() <= 1.0));
+    }
+
+    #[test]
+    fn a_slow_energy_rise_drops_a_quick_one_does_not() {
+        let mut song = gen::generate(Vibe::Peak, &Default::default(), &mut Rng::new(4));
+        song.rise = true;
+        song.macros.energy = 0.2;
+        let mut e = Engine::new(22_050.0, song, Shared::new(), None, 1);
+        e.handle(Cmd::Play);
+        let step = e.step_len() as usize;
+        let mut buf = vec![0.0; 2 * step];
+        let set = |e: &mut Engine, v: f32| {
+            let mut s = e.song;
+            s.macros.energy = v;
+            e.handle(Cmd::Song(Box::new(s)));
+        };
+        e.render(&mut buf);
+        set(&mut e, 0.2);
+        // Quick: low to high within two steps
+        set(&mut e, 0.5);
+        e.render(&mut buf);
+        set(&mut e, 0.8);
+        assert!(e.build.is_none(), "a quick push is just energy");
+        // Slow: down again, then up over two bars
+        set(&mut e, 0.1);
+        for i in 0..16 {
+            e.render(&mut buf);
+            e.render(&mut buf);
+            set(&mut e, 0.1 + 0.05 * i as f32);
+        }
+        assert!(e.build.is_some(), "a slow rise builds up");
+        // Without RISE the fader is just energy
+        let mut e = Engine::new(22_050.0, song, Shared::new(), None, 1);
+        e.song.rise = false;
+        e.handle(Cmd::Play);
+        let mut s = e.song;
+        s.rise = false;
+        for i in 0..16 {
+            e.render(&mut buf);
+            s.macros.energy = 0.1 + 0.05 * i as f32;
+            e.handle(Cmd::Song(Box::new(s)));
+        }
+        assert!(e.build.is_none());
     }
 
     #[test]
@@ -1435,6 +1623,31 @@ mod tests {
                 assert!(peak <= 1.0, "{v:?} {s}: {peak}");
             }
         }
+    }
+
+    #[test]
+    fn wash_drowns_without_booming_and_rings_out() {
+        let song = gen::generate(Vibe::Peak, &Default::default(), &mut Rng::new(3));
+        let mut e = Engine::new(22_050.0, song, Shared::new(), None, 1);
+        e.handle(Cmd::Play);
+        let bar = (e.step_len() * STEPS as f64) as usize;
+        let mut buf = vec![0.0; 2 * bar];
+        let db = |b: &[f32]| 20.0 * stats(b).1.log10();
+        e.render(&mut buf);
+        e.render(&mut buf);
+        let dry = db(&buf);
+        e.handle(Cmd::Fx(Fx::Wash, true));
+        e.render(&mut buf);
+        e.render(&mut buf);
+        let wet = db(&buf);
+        assert!(buf.iter().all(|x| x.is_finite() && x.abs() <= 1.0));
+        assert!(wet < dry + 2.5, "the wash doesn't pile up: {dry:.1} → {wet:.1} dB");
+        // Let go and stop: the room keeps ringing for a while
+        e.handle(Cmd::Fx(Fx::Wash, false));
+        e.handle(Cmd::Stop);
+        e.render(&mut buf);
+        e.render(&mut buf);
+        assert!(db(&buf) > -45.0, "the tail rings out: {:.1} dB", db(&buf));
     }
 
     #[test]
