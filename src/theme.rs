@@ -5,14 +5,14 @@ use crate::song::Voice;
 use eframe::egui::{self, Color32, FontFamily, FontId, Stroke};
 
 /// Concrete: the walls around everything
-pub const BG: Color32 = Color32::from_rgb(46, 46, 49);
+pub const BG: Color32 = Color32::from_rgb(57, 57, 59);
 /// Recessed into the concrete (cards, fields)
-pub const PANEL: Color32 = Color32::from_rgb(36, 36, 39);
-pub const PANEL_HI: Color32 = Color32::from_rgb(58, 58, 63);
-pub const LINE: Color32 = Color32::from_rgb(72, 72, 78);
-pub const TEXT: Color32 = Color32::from_rgb(238, 238, 242);
-pub const DIM: Color32 = Color32::from_rgb(168, 168, 176);
-pub const FAINT: Color32 = Color32::from_rgb(118, 118, 126);
+pub const PANEL: Color32 = Color32::from_rgb(44, 44, 47);
+pub const PANEL_HI: Color32 = Color32::from_rgb(70, 70, 74);
+pub const LINE: Color32 = Color32::from_rgb(84, 84, 90);
+pub const TEXT: Color32 = Color32::from_rgb(240, 240, 243);
+pub const DIM: Color32 = Color32::from_rgb(180, 180, 187);
+pub const FAINT: Color32 = Color32::from_rgb(130, 130, 138);
 /// Deep space: the window in the middle and the visualizer
 pub const SPACE: Color32 = Color32::from_rgb(5, 6, 13);
 pub const RED: Color32 = Color32::from_rgb(255, 59, 70);
@@ -99,8 +99,8 @@ pub fn install(ctx: &egui::Context) {
     for (w, fill) in [
         (&mut v.widgets.noninteractive, PANEL),
         (&mut v.widgets.inactive, PANEL_HI),
-        (&mut v.widgets.hovered, Color32::from_rgb(68, 68, 74)),
-        (&mut v.widgets.active, Color32::from_rgb(80, 80, 88)),
+        (&mut v.widgets.hovered, Color32::from_rgb(80, 80, 86)),
+        (&mut v.widgets.active, Color32::from_rgb(92, 92, 100)),
         (&mut v.widgets.open, PANEL_HI),
     ] {
         w.bg_fill = fill;

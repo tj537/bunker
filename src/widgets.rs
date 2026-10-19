@@ -370,16 +370,19 @@ fn energy_shown(ui: &mut Ui, value: f32, width: f32, height: f32, who: &str) -> 
     }
 }
 
-/// A soft round glow that fades smoothly to nothing (no rings): for nebulae in space
-pub fn nebula(p: &egui::Painter, c: Pos2, r: f32, color: Color32, strength: f32) {
+/// A soft round spot that fades smoothly to nothing (no rings) – the clouds in the concrete.
+/// `centre` is premultiplied (see `shade`).
+pub fn soft_spot(p: &egui::Painter, c: Pos2, r: f32, centre: Color32) {
     let mut mesh = egui::Mesh::default();
     let n = 48u32;
-    mesh.colored_vertex(c, alpha(color, strength));
+    let [cr, cg, cb, ca] = centre.to_array();
+    let mid = Color32::from_rgba_premultiplied(cr / 2, cg / 2, cb / 2, ca / 2);
+    mesh.colored_vertex(c, centre);
     // A middle ring keeps the falloff soft instead of a cone
     for k in 0..n {
         let a = k as f32 / n as f32 * std::f32::consts::TAU;
         let dir = vec2(a.cos(), a.sin());
-        mesh.colored_vertex(c + dir * r * 0.45, alpha(color, strength * 0.55));
+        mesh.colored_vertex(c + dir * r * 0.45, mid);
         mesh.colored_vertex(c + dir * r, Color32::TRANSPARENT);
     }
     for k in 0..n {
@@ -392,6 +395,19 @@ pub fn nebula(p: &egui::Painter, c: Pos2, r: f32, color: Color32, strength: f32)
     p.add(Shape::mesh(mesh));
 }
 
+/// A light or dark shade of exactly `k` levels for the concrete. (`alpha` blends white in
+/// linear light, so a nearly clear white comes out far brighter than its number – too much
+/// for a texture this subtle.)
+fn shade(light: bool, k: u8) -> Color32 {
+    if light {
+        Color32::from_rgba_premultiplied(k, k, k, k)
+    } else {
+        // Darkens the concrete by about k levels
+        let a = ((k as f32 * 255.0 / BG.r() as f32) as u32).min(255) as u8;
+        Color32::from_rgba_premultiplied(0, 0, 0, a)
+    }
+}
+
 /// A stable pseudo-random number 0…1
 fn hash(i: u32) -> f32 {
     let mut x = i.wrapping_mul(0x9E37_79B9) ^ 0x85EB_CA6B;
@@ -401,40 +417,37 @@ fn hash(i: u32) -> f32 {
     (x & 0xFF_FFFF) as f32 / 0xFF_FFFF as f32
 }
 
-/// Bunker concrete: grey, a fine grain, the joints of the formwork boards and the round
-/// holes of the form ties, like a cast concrete wall
+/// Bunker concrete: grey, cloudy where it dried unevenly, a fine grain and small air pores
 pub fn concrete(p: &egui::Painter, rect: Rect) {
     p.rect_filled(rect, 0.0, BG);
-    // Grain
-    let n = (rect.area() / 650.0) as u32;
-    for i in 0..n {
-        let at = pos2(rect.left() + hash(i) * rect.width(), rect.top() + hash(i + 50_000) * rect.height());
-        let light = hash(i + 90_000) > 0.5;
-        let c = if light { Color32::WHITE } else { Color32::BLACK };
-        p.circle_filled(at, 0.5 + hash(i + 70_000) * 0.8, alpha(c, if light { 0.025 } else { 0.05 }));
+    let at = |i: u32| pos2(rect.left() + hash(i) * rect.width(), rect.top() + hash(i + 50_000) * rect.height());
+    let area = rect.area();
+    // Big soft clouds, a few levels lighter or darker
+    for i in 0..(area / 40_000.0) as u32 {
+        let light = hash(i + 7) > 0.5;
+        soft_spot(
+            p,
+            at(i + 1_000),
+            90.0 + hash(i + 3) * 220.0,
+            shade(light, 6 + (hash(i + 5) * 5.0) as u8),
+        );
     }
-    // Formwork boards: a joint every board, a tie hole twice a board apart, shifted per row
-    let board = 128.0;
-    let rows = (rect.height() / board).ceil() as u32 + 1;
-    for row in 0..rows {
-        let y = rect.top() + board * (row + 1) as f32;
-        if y < rect.bottom() {
-            p.line_segment(
-                [pos2(rect.left(), y), pos2(rect.right(), y)],
-                stroke(1.0, alpha(Color32::BLACK, 0.07)),
-            );
-            p.line_segment(
-                [pos2(rect.left(), y + 1.0), pos2(rect.right(), y + 1.0)],
-                stroke(1.0, alpha(Color32::WHITE, 0.015)),
-            );
-        }
-        let cy = rect.top() + board * (row as f32 + 0.5);
-        let mut x = rect.left() + if row % 2 == 0 { 64.0 } else { 192.0 };
-        while x < rect.right() {
-            p.circle_filled(pos2(x, cy), 3.5, alpha(Color32::BLACK, 0.11));
-            p.circle_stroke(pos2(x, cy + 0.8), 3.5, stroke(1.0, alpha(Color32::WHITE, 0.02)));
-            x += 256.0;
-        }
+    // Mottling
+    for i in 0..(area / 3_000.0) as u32 {
+        let light = hash(i + 11) > 0.5;
+        p.circle_filled(at(i + 20_000), 3.0 + hash(i + 13) * 10.0, shade(light, 2));
+    }
+    // Fine grain
+    for i in 0..(area / 260.0) as u32 {
+        let light = hash(i + 90_000) > 0.5;
+        p.circle_filled(at(i + 200_000), 0.5 + hash(i + 70_000) * 0.6, shade(light, 5));
+    }
+    // Air pores: small dark holes with a faint light lower rim
+    for i in 0..(area / 6_000.0) as u32 {
+        let c = at(i + 400_000);
+        let r = 0.7 + hash(i + 17) * hash(i + 19) * 2.0;
+        p.circle_filled(c + vec2(0.0, r * 0.45), r, shade(true, 4));
+        p.circle_filled(c, r, shade(false, 16));
     }
 }
 

@@ -1892,7 +1892,7 @@ impl BunkerApp {
              • AUTO SONG plays a whole track from favorite 1 (and favorite 2 after the first drop).",
         );
 
-        let song_w = 104.0;
+        let song_w = 84.0;
         let cards = Rect::from_min_max(
             pos2(rect.left() + left_w, rect.top()),
             pos2(rect.right() - song_w - 10.0, rect.bottom()),
@@ -2003,7 +2003,9 @@ impl BunkerApp {
         }
 
         // AUTO SONG: a whole track out of favorites 1–4
-        let cr = Rect::from_min_size(pos2(rect.right() - song_w, rect.top() + 4.0), vec2(song_w, rect.height() - 8.0));
+        // A smaller button, centred next to the favorites
+        let song_h = ((rect.height() - 8.0) * 0.62).max(44.0);
+        let cr = Rect::from_center_size(pos2(rect.right() - song_w / 2.0, rect.center().y), vec2(song_w, song_h));
         let resp = ui.allocate_rect(cr, Sense::click());
         let on = self.song_form.is_some();
         widgets::fx_button(ui, cr, &resp, if on { ph::STOP } else { ph::PLAY_PAUSE }, "AUTO SONG", "", ACID, on);
@@ -2373,15 +2375,18 @@ impl BunkerApp {
         concrete(&ctx.layer_painter(egui::LayerId::background()), ctx.screen_rect());
         let clear = Color32::TRANSPARENT;
         egui::TopBottomPanel::top("top")
+            .show_separator_line(false)
             .exact_height(58.0)
             .frame(frame(clear, 6.0))
             .show(ctx, |ui| self.top_bar(ui, &live, now));
         egui::SidePanel::left("tracks")
+            .show_separator_line(false)
             .exact_width(266.0)
             .resizable(false)
             .frame(frame(clear, 14.0))
             .show(ctx, |ui| self.tracks_panel(ui, &live, now));
         egui::SidePanel::right("live")
+            .show_separator_line(false)
             .exact_width(286.0)
             .resizable(false)
             .frame(frame(clear, 14.0))
@@ -2391,34 +2396,13 @@ impl BunkerApp {
             let scenes_h = 100.0;
             let song_h = if self.song_form.is_some() { 34.0 } else { 0.0 };
             let rect = Rect::from_min_max(area.min, pos2(area.right(), area.bottom() - scenes_h - song_h - 6.0));
-            // A window into deep space, cut into the concrete: a soft nebula, stars drifting past
+            // A window into deep space, cut into the concrete: stars drifting past
             {
                 let p = ui.painter_at(rect);
                 p.rect_filled(rect, 22.0, SPACE);
-                let (w, h) = (rect.width(), rect.height());
-                widgets::nebula(
-                    &p,
-                    rect.left_top() + vec2(w * 0.2, h * 0.28),
-                    w * 0.42,
-                    track_color(Voice::Ride),
-                    0.16,
-                );
-                widgets::nebula(
-                    &p,
-                    rect.right_bottom() - vec2(w * 0.18, h * 0.25),
-                    w * 0.4,
-                    track_color(Voice::OpenHat),
-                    0.12,
-                );
-                widgets::nebula(
-                    &p,
-                    rect.center() + vec2(w * 0.3, -h * 0.34),
-                    w * 0.24,
-                    track_color(Voice::Bass),
-                    0.1,
-                );
                 let speed = if live.playing { 0.6 + self.song.macros.energy * 0.9 } else { 0.3 };
-                widgets::star_field(ui, &p, rect.shrink(10.0), "space", speed, 1.0);
+                // (kept clear of the rounded corners)
+                widgets::star_field(ui, &p, rect.shrink(18.0), "space", speed, 1.0);
                 if !live.playing {
                     ui.ctx().request_repaint_after(std::time::Duration::from_millis(40));
                 }
