@@ -592,10 +592,10 @@ impl Change {
             Change::Build => "Build-up".into(),
             Change::Drop => "Drop!".into(),
             Change::NewChapter => "Drop! New chapter".into(),
-            Change::Scene(i) => format!("Pattern {}", ["A", "B", "C", "D"][i % 4]),
+            Change::Scene(i) => format!("Favorite {}", i + 1),
             Change::Part(Part::Peak, ..) => "Drop! Peak".into(),
             Change::Part(p, _, slot) => match slot {
-                Some(i) => format!("{} · pattern {}", p.name(), ["A", "B", "C", "D"][i % 4]),
+                Some(i) => format!("{} · favorite {}", p.name(), i + 1),
                 None => p.name().into(),
             },
             Change::SongEnd => "The end".into(),

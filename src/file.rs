@@ -1,6 +1,6 @@
-//! `.bunker` files: the groove and the four patterns in one readable text file
-//! (RON), to keep or to share. (Older files also carry scene lengths and drops –
-//! they're ignored.)
+//! `.bunker` files: the groove and the favorites (with their names) in one readable
+//! text file (RON), to keep or to share. Older files have four favorites ("scenes")
+//! and scene lengths and drops – they still open.
 
 use crate::app::SLOTS;
 use crate::song::Song;
@@ -14,8 +14,9 @@ pub struct BunkerFile {
     /// Raised when the format changes in a way older versions can't read
     pub format: u32,
     pub song: Song,
-    /// The patterns A–D
-    pub scenes: [Option<Song>; SLOTS],
+    /// The favorites 1–12 (the name "scenes" stays so older files open)
+    pub scenes: Vec<Option<Song>>,
+    pub names: Vec<String>,
 }
 
 impl Default for BunkerFile {
@@ -23,7 +24,8 @@ impl Default for BunkerFile {
         BunkerFile {
             format: 1,
             song: Song::default(),
-            scenes: [None; SLOTS],
+            scenes: vec![None; SLOTS],
+            names: vec![String::new(); SLOTS],
         }
     }
 }
@@ -38,6 +40,8 @@ impl BunkerFile {
     pub fn from_text(text: &str) -> Result<Self, String> {
         let mut f: BunkerFile = ron::from_str(text).map_err(|e| format!("not a Bunker file ({e})"))?;
         f.song.sanitize();
+        f.scenes.resize(SLOTS, None);
+        f.names.resize(SLOTS, String::new());
         for s in f.scenes.iter_mut().flatten() {
             s.sanitize();
         }
@@ -80,5 +84,10 @@ mod tests {
         // Missing fields fall back to defaults, broken values are repaired, old fields are ignored
         let f = BunkerFile::from_text("(song: (bpm: 999.0), scene_bars: (0, 8, 8, 200))").unwrap();
         assert_eq!(f.song.bpm, 180.0);
+        // A file from before 0.4.2 has four favorites: they come in as 1–4 of twelve
+        let old = BunkerFile::from_text("(scenes: [None, Some(()), None, None])").unwrap();
+        assert_eq!(old.scenes.len(), SLOTS);
+        assert!(old.scenes[1].is_some() && old.scenes[4..].iter().all(|s| s.is_none()));
+        assert_eq!(old.names.len(), SLOTS);
     }
 }

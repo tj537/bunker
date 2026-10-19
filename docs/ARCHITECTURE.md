@@ -5,9 +5,9 @@ Bunker is one Rust binary: an [egui](https://github.com/emilk/egui) window (efra
 ```
 src/
   main.rs       window setup
-  app.rs        BunkerApp: panels (top bar with the vibe dropdown, tracks, mood, sound|master/auto/live, patterns and song strip, volume on the speaker), keys, MIDI, files, song recording, help, persistence
+  app.rs        BunkerApp: panels (top bar with the vibe dropdown, tracks, mood, sound|master/auto/live, favorites (12, named) and song strip, volume on the speaker, the record button), keys, MIDI, files, recording, help, persistence
   visual.rs     the visualizer: spectrum ring, kick shockwaves, star field, a small energy bar, no text – drawn from `Live` only
-  file.rs       .bunker files (RON): song and patterns
+  file.rs       .bunker files (RON): song, favorites and their names
   form.rs       song forms (Short, Club, Hypnotic): parts, lengths, patterns, energy per part
   orbit.rs      the circular sequencer (drawing + mouse) and `Live`, the playback state the UI shows
   pads.rs       pads view: eight pads + step grid
@@ -74,8 +74,8 @@ Live effects are `Cmd::Fx(Fx, bool)` – held down / let go. The UI sends a chan
 - **Locks** – `Track::lock`: shuffle uses `gen::generate_keeping` with the locked tracks, the dice is disabled, `gen::evolve` and `gen::new_chapter` skip them.
 - **Files** – *File* menu: `.bunker` save/open (also by drag and drop). A loaded file is an ordinary edit, so undo goes back.
 - **Visualizer** – `visual: bool`; the window then shows only `visual::visual` in fullscreen, keys keep working, Esc leaves.
-- **Patterns A–D** – `slots: [Option<Song>; 4]` and `slot_now`, saved with the window state. A user edit also writes the song into the lit slot; a shuffle, undo or redo detaches it (`slot_now = None`) so a saved pattern is never overwritten by surprise. A click while playing sends `Cmd::Queue` and marks `queued_slot` (it blinks) until the engine reports `Change::Scene`; stopped, it switches at once. **Song** – `song_form` and `song_fallback`; every slot change sends `Cmd::Arrange` again (same form = patterns only), `Change::Part` tells the UI which pattern plays. Song and auto mode exclude each other; stopping ends the song.
-- **Record** – `record: Arc<AtomicBool>` (top bar, pads, R, shared with MIDI); a recorded hit (`Engine::record`) also lifts the energy to its track's layer unless Bunker steers it, so what you record is heard.
+- **Favorites 1–12** – `slots: [Option<Song>; 12]`, `names` and `slot_now`, saved with the window state (older states with four slots are padded). `slot_now` only stays while the engine's song is the same groove (`same_groove`); an auto-mode change makes it go dark. A user edit also writes the song into the lit slot; a shuffle, undo or redo detaches it (`slot_now = None`) so a saved pattern is never overwritten by surprise. A click while playing sends `Cmd::Queue` and marks `queued_slot` (it blinks) until the engine reports `Change::Scene`; stopped, it switches at once. **Song** – `song_form` and `song_fallback`; every slot change sends `Cmd::Arrange` again (same form = patterns only), `Change::Part` tells the UI which pattern plays. Song and auto mode exclude each other; stopping ends the song.
+- **Record** – the top-bar button and R record the session (`capture`, `Cmd::Capture`); there is no pattern recording in the UI any more (`record` stays false; a recorded hit through `Engine::record` would also lift the energy to its track's layer).
 - **Mood** – `song::MOODS`, nine of them (scale + progression); a new mood refits the bass and synth notes to it (`gen::refit_notes`) and unmutes the synth, which carries it. Swing comes from the vibe. **Custom** (`Vibe::Custom`) clears every unlocked track; shuffle and the auto mode then follow hypnotic rules (`Vibe::rules`).
 - **Orbit** – a loop whose length divides 16 is drawn repeated around its ring (`Geometry::shown`), so its light turns with the beam; a click on any copy edits the step it repeats.
 - **Sounds** – `Track::sound` indexes `Voice::sounds()`. Changing the synth between 303 / stab / pluck / hoover rolls a line written for the new sound (undo keeps the old one). Changing a sound while stopped plays a preview after the new song went out (`preview`).

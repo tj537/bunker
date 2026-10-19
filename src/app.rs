@@ -22,9 +22,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 
-pub const SLOTS: usize = 4;
+/// Favorites: saved grooves (the first four are the patterns of AUTO SONG)
+pub const SLOTS: usize = 12;
 const UNDO_LIMIT: usize = 60;
-const SLOT_NAMES: [&str; SLOTS] = ["A", "B", "C", "D"];
 const FX_KEYS: [Key; 6] = [Key::Q, Key::W, Key::E, Key::X, Key::C, Key::V];
 
 /// A stored song (undo step, saved slot) with the current volume and auto-mode settings –
@@ -37,6 +37,28 @@ fn keep_live_settings(mut song: Song, now: &Song) -> Song {
     song.auto_fx = now.auto_fx;
     song.eq = now.eq;
     song
+}
+
+/// The same groove, whatever the live settings (energy, volume …) are
+fn same_groove(a: &Song, b: &Song) -> bool {
+    a.tracks == b.tracks && a.root == b.root && a.scale == b.scale && a.prog == b.prog && a.vibe == b.vibe
+}
+
+/// `text` cut with "…" so it fits into `max_w`
+fn fit_text(p: &egui::Painter, text: &str, font: egui::FontId, max_w: f32) -> String {
+    let width = |t: &str| p.layout_no_wrap(t.to_string(), font.clone(), TEXT).size().x;
+    if width(text) <= max_w {
+        return text.to_string();
+    }
+    let mut chars: Vec<char> = text.chars().collect();
+    while !chars.is_empty() {
+        chars.pop();
+        let t: String = chars.iter().collect::<String>() + "…";
+        if width(&t) <= max_w {
+            return t;
+        }
+    }
+    String::new()
 }
 
 fn fx_icon(fx: Fx) -> &'static str {
@@ -131,6 +153,11 @@ pub struct BunkerApp {
     restoring: bool,
     /// Four patterns; the active one (`slot_now`) keeps every edit
     pub slots: [Option<Song>; SLOTS],
+    /// Names for the favorites (empty: the vibe's name is shown)
+    pub names: [String; SLOTS],
+    /// The favorite being renamed, and the name typed so far
+    renaming: Option<usize>,
+    rename_buf: String,
     pub slot_now: Option<usize>,
     /// A pattern picked while playing, waiting for the next bar
     pub queued_slot: Option<usize>,
@@ -163,11 +190,26 @@ impl BunkerApp {
         song.sanitize();
         let view = cc.storage.and_then(|s| eframe::get_value(s, "view")).unwrap_or(View::Orbit);
         let mut app = Self::headless(song, view, true);
-        if let Some(mut slots) = cc.storage.and_then(|s| eframe::get_value::<[Option<Song>; SLOTS]>(s, "slots")) {
+        // (Before 0.4.2 there were four slots)
+        let slots = cc.storage.and_then(|s| {
+            eframe::get_value::<[Option<Song>; SLOTS]>(s, "slots").or_else(|| {
+                eframe::get_value::<[Option<Song>; 4]>(s, "slots").map(|old| {
+                    let mut all = [None; SLOTS];
+                    all[..4].copy_from_slice(&old);
+                    all
+                })
+            })
+        });
+        if let Some(mut slots) = slots {
             for s in slots.iter_mut().flatten() {
                 s.sanitize();
             }
             app.slots = slots;
+        }
+        if let Some(names) = cc.storage.and_then(|s| eframe::get_value::<Vec<String>>(s, "fav_names")) {
+            for (slot, name) in app.names.iter_mut().zip(names) {
+                *slot = name;
+            }
         }
         app.slot_now = cc
             .storage
@@ -243,6 +285,9 @@ impl BunkerApp {
             last_edit: -10.0,
             restoring: false,
             slots: [None; SLOTS],
+            names: std::array::from_fn(|_| String::new()),
+            renaming: None,
+            rename_buf: String::new(),
             slot_now: None,
             queued_slot: None,
             song_form: None,
@@ -338,16 +383,16 @@ impl BunkerApp {
         if save || self.slots[i].is_none() {
             self.slots[i] = Some(self.song);
             self.slot_now = Some(i);
-            self.say(format!("Saved as pattern {} – changes now go into it", SLOT_NAMES[i]), now);
+            self.say(format!("Saved as favorite {} – changes now go into it", i + 1), now);
         } else if let Some(s) = self.slots[i] {
             if self.playing() {
                 self.queued_slot = Some(i);
                 self.send(Cmd::Queue(Box::new(keep_live_settings(s, &self.song)), i));
-                self.say(format!("Pattern {} on the next bar", SLOT_NAMES[i]), now);
+                self.say(format!("{} on the next bar", self.fav_name(i)), now);
             } else {
                 self.song = keep_live_settings(s, &self.song);
                 self.slot_now = Some(i);
-                self.say(format!("Pattern {}", SLOT_NAMES[i]), now);
+                self.say(format!("{} · {}", i + 1, self.fav_name(i)), now);
             }
         }
         if self.song_form.is_some() {
@@ -363,14 +408,61 @@ impl BunkerApp {
         if self.song_form.is_some() {
             self.send_arrangement();
         }
-        self.say(format!("Pattern {} cleared", SLOT_NAMES[i]), now);
+        self.names[i].clear();
+        self.say(format!("Favorite {} cleared", i + 1), now);
+    }
+
+    /// The name shown on a favorite: yours, or else its vibe
+    fn fav_name(&self, i: usize) -> String {
+        if !self.names[i].is_empty() {
+            self.names[i].clone()
+        } else {
+            self.slots[i].map_or(String::new(), |s| s.vibe.name().to_string())
+        }
+    }
+
+    /// The favorites AUTO SONG plays: 1–4
+    fn song_favorites(&self) -> [Option<Song>; 4] {
+        std::array::from_fn(|i| self.slots[i])
+    }
+
+    /// Naming a favorite
+    fn rename_window(&mut self, ctx: &egui::Context) {
+        let Some(i) = self.renaming else { return };
+        let mut done = None;
+        egui::Window::new(format!("Name favorite {}", i + 1))
+            .collapsible(false)
+            .resizable(false)
+            .anchor(Align2::CENTER_CENTER, vec2(0.0, 0.0))
+            .show(ctx, |ui| {
+                let field = ui.add(egui::TextEdit::singleline(&mut self.rename_buf).char_limit(24).desired_width(220.0));
+                field.request_focus();
+                let enter = ui.input(|i| i.key_pressed(Key::Enter));
+                let esc = ui.input(|i| i.key_pressed(Key::Escape));
+                ui.horizontal(|ui| {
+                    if ui.button(egui::RichText::new("Save").font(bold(13.0))).clicked() || enter {
+                        done = Some(true);
+                    }
+                    if ui.button("Cancel").clicked() || esc {
+                        done = Some(false);
+                    }
+                });
+            });
+        match done {
+            Some(true) => {
+                self.names[i] = self.rename_buf.trim().to_string();
+                self.renaming = None;
+            }
+            Some(false) => self.renaming = None,
+            None => {}
+        }
     }
 
     /// Tell the engine about the song (or that there is none)
     fn send_arrangement(&self) {
         let a = self.song_form.map(|form| {
             Box::new(Arrangement {
-                patterns: self.slots,
+                patterns: self.song_favorites(),
                 form,
                 fallback: self.song_fallback,
             })
@@ -573,7 +665,8 @@ impl BunkerApp {
         };
         let f = BunkerFile {
             song: self.song,
-            scenes: self.slots,
+            scenes: self.slots.to_vec(),
+            names: self.names.to_vec(),
             ..Default::default()
         };
         match f.save(&path) {
@@ -594,7 +687,10 @@ impl BunkerApp {
     fn load_file(&mut self, f: BunkerFile, name: &str, now: f64) {
         self.song = keep_live_settings(f.song, &self.song);
         self.song.auto = f.song.auto;
-        self.slots = f.scenes;
+        for i in 0..SLOTS {
+            self.slots[i] = f.scenes.get(i).copied().flatten();
+            self.names[i] = f.names.get(i).cloned().unwrap_or_default();
+        }
         self.slot_now = None;
         self.queued_slot = None;
         self.song_form = None;
@@ -637,6 +733,13 @@ impl BunkerApp {
             if ack >= self.songs_sent {
                 self.song = *song;
                 self.sent = self.song;
+                // The lit favorite only stays lit while the groove is exactly what's saved
+                let loaded = matches!(change, Some(gen::Change::Scene(_) | gen::Change::Part(..)));
+                if let Some(i) = self.slot_now.filter(|_| !loaded) {
+                    if !self.slots[i].is_some_and(|s| same_groove(&s, &self.song)) {
+                        self.slot_now = None;
+                    }
+                }
             }
             if let Some(c) = change {
                 match c {
@@ -651,7 +754,11 @@ impl BunkerApp {
                     gen::Change::SongEnd => self.song_form = None,
                     _ => {}
                 }
-                self.say(c.describe(), now);
+                let text = match c {
+                    gen::Change::Scene(i) => format!("{} · {}", i + 1, self.fav_name(i)),
+                    _ => c.describe(),
+                };
+                self.say(text, now);
             }
         }
         while let Ok(m) = self.midi_rx.try_recv() {
@@ -719,6 +826,10 @@ impl BunkerApp {
     }
 
     fn keys(&mut self, ctx: &egui::Context, now: f64) {
+        // Naming a favorite: the keys belong to the text field
+        if self.renaming.is_some() {
+            return;
+        }
         // No text fields here: never let a focused button eat Space or Enter
         ctx.memory_mut(|m| {
             if let Some(id) = m.focused() {
@@ -805,40 +916,24 @@ impl BunkerApp {
                 Key::P => self.toggle_visual(ctx),
                 Key::ArrowUp => self.song.bpm = (self.song.bpm + 1.0).min(180.0),
                 Key::ArrowDown => self.song.bpm = (self.song.bpm - 1.0).max(90.0),
-                Key::R => self.toggle_record(now),
+                Key::R => self.toggle_capture(now),
                 _ => {}
             }
         }
     }
 
     /// Record the session: everything you hear until it's switched off, then save it as a WAV
-    fn toggle_capture(&mut self, now: f64) {
+    fn toggle_capture(&mut self, _now: f64) {
         if self.capture {
             self.capture = false;
             self.send(Cmd::Capture(false));
-            self.say("Recording ends – then you can save it", now);
         } else {
             self.recording.clear();
             self.rec_live = true;
             self.rec_sr = self.audio.as_ref().map_or(44_100, |a| a.sample_rate);
             self.capture = true;
             self.send(Cmd::Capture(true));
-            self.say("Recording your set – everything you hear. Click again to stop and save", now);
         }
-    }
-
-    /// RECORD: pads, keys and MIDI write into the pattern while it plays
-    fn toggle_record(&mut self, now: f64) {
-        let r = !self.record.load(Ordering::Relaxed);
-        self.record.store(r, Ordering::Relaxed);
-        self.say(
-            if r {
-                "Recording – play the pads (A–K) and your hits land on the beat"
-            } else {
-                "Recording off"
-            },
-            now,
-        );
     }
 
     fn toggle_visual(&mut self, ctx: &egui::Context) {
@@ -977,29 +1072,22 @@ impl BunkerApp {
                     }
                 }
                 ui.add_space(8.0);
-                // Record the set: everything you hear, to a WAV
+                // Record: everything you hear, to a WAV (red with a timer while it runs)
                 let text = if self.capture {
                     let secs = self.recording.len() as u32 / 2 / self.rec_sr.max(1);
-                    format!("{}  {}:{:02}", ph::VINYL_RECORD, secs / 60, secs % 60)
+                    format!("{}  {}:{:02}", ph::RECORD, secs / 60, secs % 60)
                 } else {
-                    ph::VINYL_RECORD.to_string()
+                    ph::RECORD.to_string()
                 };
                 if chip(ui, &text, self.capture, RED)
                     .on_hover_text(if self.capture {
-                        "Recording your set – click to stop and save it as a WAV"
+                        "Recording – click to stop and save it as a WAV (R)"
                     } else {
-                        "Record your set: everything you hear – auto mode, jamming, songs, effects – until you click again, then save it as a WAV"
+                        "Record what you hear – auto mode, jamming, songs, effects – until you click again, then save it as a WAV (R)"
                     })
                     .clicked()
                 {
                     self.toggle_capture(now);
-                }
-                let rec = self.record.load(Ordering::Relaxed);
-                if chip(ui, ph::RECORD, rec, RED)
-                    .on_hover_text("Record: play the pads (A–K) or a MIDI keyboard and your hits land in the pattern, on the beat (R)")
-                    .clicked()
-                {
-                    self.toggle_record(now);
                 }
                 if chip(ui, ph::MONITOR_PLAY, self.visual, ACID)
                     .on_hover_text("Visualizer: the whole screen becomes a light show (P)")
@@ -1783,11 +1871,11 @@ impl BunkerApp {
         }
     }
 
-    /// The strip under the orbit: four patterns and SONG
+    /// The strip under the orbit: twelve favorites in two rows, and AUTO SONG
     fn patterns_ui(&mut self, ui: &mut Ui, rect: Rect, live: &Live, now: f64) {
         let p = ui.painter().clone();
         let left_w = 96.0;
-        p.text(rect.left_top() + vec2(4.0, 8.0), Align2::LEFT_TOP, "PATTERNS", bold(11.0), FAINT);
+        p.text(rect.left_top() + vec2(4.0, 8.0), Align2::LEFT_TOP, "FAVORITES", bold(11.0), FAINT);
         let sub = if self.slots.iter().all(|s| s.is_none()) {
             "+ keeps what\nyou hear"
         } else {
@@ -1796,104 +1884,117 @@ impl BunkerApp {
         p.text(rect.left_top() + vec2(4.0, 25.0), Align2::LEFT_TOP, sub, body(10.5), FAINT);
         let info = ui.allocate_rect(Rect::from_min_size(rect.min, vec2(left_w - 8.0, rect.height())), Sense::hover());
         info.on_hover_text(
-            "Patterns are four memory slots for grooves – build a song out of them.\n\
+            "Favorites are twelve memory slots for grooves.\n\
              • Click an empty one (+) to keep the groove you hear.\n\
              • Click a full one to switch to it – while playing it comes in on the next bar, with a clap roll.\n\
-             • The lit one keeps your changes.\n\
-             • SONG plays a whole track with your patterns: intro, groove, break, drop, outro.\n\
-             • Right-click a pattern to overwrite or clear it.",
+             • The lit one plays exactly as saved and keeps your changes; once the groove changes (auto mode) it goes dark.\n\
+             • Right-click: save over it, rename or clear it.\n\
+             • AUTO SONG plays a whole track with favorites 1–4.",
         );
 
-        let song_w = 92.0;
+        let song_w = 104.0;
         let cards = Rect::from_min_max(
             pos2(rect.left() + left_w, rect.top()),
             pos2(rect.right() - song_w - 10.0, rect.bottom()),
         );
-        let gap = 8.0;
-        let cw = (cards.width() - gap * 3.0) / SLOTS as f32;
-        for (i, name) in SLOT_NAMES.into_iter().enumerate() {
+        let (cols, gap) = (6, 6.0);
+        let cw = (cards.width() - gap * (cols - 1) as f32) / cols as f32;
+        let ch = (cards.height() - 8.0 - gap) / 2.0;
+        for i in 0..SLOTS {
+            let (row, col) = (i / cols, i % cols);
             let r = Rect::from_min_size(
-                pos2(cards.left() + i as f32 * (cw + gap), cards.top() + 4.0),
-                vec2(cw, rect.height() - 8.0),
+                pos2(cards.left() + col as f32 * (cw + gap), cards.top() + 4.0 + row as f32 * (ch + gap)),
+                vec2(cw, ch),
             );
             let resp = ui.allocate_rect(r, Sense::click());
-            let filled = self.slots[i];
+            let filled = self.slots[i].is_some();
             let current = self.slot_now == Some(i);
             let queued = self.queued_slot == Some(i);
             let hot = resp.hovered();
-            match filled {
-                Some(song) => {
-                    if current && live.playing {
-                        widgets::glow_rect(&p, r, 10.0, ACID, 0.15 + live.flash(0) * 0.35);
-                    }
-                    p.rect_filled(
-                        r,
-                        10.0,
-                        if current {
-                            mix(PANEL, ACID, 0.12)
-                        } else if hot {
-                            PANEL_HI
-                        } else {
-                            mix(PANEL, PANEL_HI, 0.6)
-                        },
-                    );
-                    // Waiting for the next bar: the border blinks
-                    let border = if queued {
-                        alpha(ACID, 0.4 + 0.6 * ((now * 8.0).sin() * 0.5 + 0.5) as f32)
-                    } else if current {
-                        ACID
-                    } else {
-                        LINE
-                    };
-                    p.rect_stroke(
-                        r,
-                        10.0,
-                        stroke(if current || queued { 1.5 } else { 1.0 }, border),
-                        egui::StrokeKind::Inside,
-                    );
-                    p.text(
-                        r.left_top() + vec2(9.0, 3.0),
-                        Align2::LEFT_TOP,
-                        name,
-                        display(18.0),
-                        if current { ACID } else { TEXT },
-                    );
-                    if cw > 110.0 {
-                        p.text(
-                            r.left_top() + vec2(28.0, 8.0),
-                            Align2::LEFT_TOP,
-                            if queued { "next bar…" } else { song.vibe.name() },
-                            bold(11.0),
-                            if current || queued { TEXT } else { DIM },
-                        );
-                    }
+            let num = (i + 1).to_string();
+            let name = self.fav_name(i);
+            if filled {
+                if current && live.playing {
+                    widgets::glow_rect(&p, r, 8.0, ACID, 0.12 + live.flash(0) * 0.25);
                 }
-                None => {
-                    p.rect_stroke(r, 10.0, stroke(1.0, if hot { FAINT } else { LINE }), egui::StrokeKind::Inside);
-                    let label = if cw > 80.0 {
-                        format!("{}  {name}", ph::PLUS)
+                p.rect_filled(
+                    r,
+                    8.0,
+                    if current {
+                        mix(PANEL, ACID, 0.12)
+                    } else if hot {
+                        PANEL_HI
                     } else {
-                        ph::PLUS.to_string()
-                    };
-                    p.text(r.center(), Align2::CENTER_CENTER, label, bold(13.0), if hot { TEXT } else { FAINT });
+                        mix(PANEL, PANEL_HI, 0.6)
+                    },
+                );
+                // Waiting for the next bar: the border blinks
+                let border = if queued {
+                    alpha(ACID, 0.4 + 0.6 * ((now * 8.0).sin() * 0.5 + 0.5) as f32)
+                } else if current {
+                    ACID
+                } else {
+                    LINE
+                };
+                p.rect_stroke(
+                    r,
+                    8.0,
+                    stroke(if current || queued { 1.5 } else { 1.0 }, border),
+                    egui::StrokeKind::Inside,
+                );
+                let label = if queued { "next bar…".to_string() } else { name.clone() };
+                let (num_col, name_col) = if current {
+                    (ACID, TEXT)
+                } else if queued {
+                    (TEXT, TEXT)
+                } else {
+                    (TEXT, DIM)
+                };
+                if cw >= 110.0 {
+                    // Wide: number and name side by side
+                    p.text(r.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, &num, display(15.0), num_col);
+                    let label = fit_text(&p, &label, bold(11.0), cw - 34.0);
+                    p.text(r.left_center() + vec2(28.0, 0.0), Align2::LEFT_CENTER, label, bold(11.0), name_col);
+                } else {
+                    // Narrow: number on top, the name below it with the whole width
+                    p.text(r.left_top() + vec2(7.0, 4.0), Align2::LEFT_TOP, &num, display(13.0), num_col);
+                    let label = fit_text(&p, &label, bold(10.0), cw - 12.0);
+                    p.text(r.left_bottom() + vec2(7.0, -5.0), Align2::LEFT_BOTTOM, label, bold(10.0), name_col);
                 }
+            } else {
+                p.rect_stroke(r, 8.0, stroke(1.0, if hot { FAINT } else { LINE }), egui::StrokeKind::Inside);
+                let label = if cw > 54.0 {
+                    format!("{}  {num}", ph::PLUS)
+                } else {
+                    ph::PLUS.to_string()
+                };
+                p.text(r.center(), Align2::CENTER_CENTER, label, bold(12.0), if hot { TEXT } else { FAINT });
             }
-            let tip = match (filled.is_some(), current) {
-                (false, _) => format!("Empty – click to keep the groove you hear now as pattern {name}"),
-                (true, true) => format!("Pattern {name} is playing – your changes are kept in it.\nRight-click: overwrite or clear"),
-                (true, false) => format!("Click: switch to pattern {name} (on the next bar)\nRight-click: overwrite or clear"),
+            let tip = match (filled, current) {
+                (false, _) => format!("Empty – click to keep the groove you hear now as favorite {num}"),
+                (true, true) => {
+                    format!("{num} · {name} is playing – your changes are kept in it.\nRight-click: save over it, rename or clear")
+                }
+                (true, false) => {
+                    format!("{num} · {name}\nClick: switch to it (on the next bar)\nRight-click: save over it, rename or clear")
+                }
             };
             let resp = resp.on_hover_text(tip).on_hover_cursor(egui::CursorIcon::PointingHand);
             if resp.clicked() {
                 self.slot_clicked(i, false, now);
             }
-            if filled.is_some() {
+            if filled {
                 resp.context_menu(|ui| {
                     if ui.button(format!("{}  Save what you hear here", ph::FLOPPY_DISK)).clicked() {
                         self.slot_clicked(i, true, now);
                         ui.close_menu();
                     }
-                    if ui.button(format!("{}  Clear pattern", ph::TRASH)).clicked() {
+                    if ui.button(format!("{}  Rename…", ph::PENCIL_SIMPLE)).clicked() {
+                        self.rename_buf = self.fav_name(i);
+                        self.renaming = Some(i);
+                        ui.close_menu();
+                    }
+                    if ui.button(format!("{}  Clear", ph::TRASH)).clicked() {
                         self.clear_slot(i, now);
                         ui.close_menu();
                     }
@@ -1901,17 +2002,17 @@ impl BunkerApp {
             }
         }
 
-        // SONG: a whole track out of the patterns
+        // AUTO SONG: a whole track out of favorites 1–4
         let cr = Rect::from_min_size(pos2(rect.right() - song_w, rect.top() + 4.0), vec2(song_w, rect.height() - 8.0));
         let resp = ui.allocate_rect(cr, Sense::click());
         let on = self.song_form.is_some();
-        widgets::fx_button(ui, cr, &resp, if on { ph::STOP } else { ph::PLAY_PAUSE }, "SONG", "", ACID, on);
+        widgets::fx_button(ui, cr, &resp, if on { ph::STOP } else { ph::PLAY_PAUSE }, "AUTO SONG", "", ACID, on);
         let popup = ui.make_persistent_id("forms");
         let resp = resp
             .on_hover_text(if on {
-                "Click: stop the song – the pattern keeps playing"
+                "Click: stop the song – the groove keeps playing"
             } else {
-                "Play a whole track with your patterns: intro, groove, break, drop, outro"
+                "Play a whole track with favorites 1–4: intro, groove, break, drop, outro"
             })
             .on_hover_cursor(egui::CursorIcon::PointingHand);
         if resp.clicked() {
@@ -1921,7 +2022,7 @@ impl BunkerApp {
                 ui.memory_mut(|m| m.toggle_popup(popup));
             }
         }
-        let full = self.slots.map(|s| s.is_some());
+        let full = self.song_favorites().map(|s| s.is_some());
         egui::popup::popup_above_or_below_widget(
             ui,
             popup,
@@ -1930,10 +2031,10 @@ impl BunkerApp {
             egui::PopupCloseBehavior::CloseOnClick,
             |ui| {
                 ui.set_min_width(360.0);
-                ui.label(egui::RichText::new("Play a song with your patterns").font(bold(13.0)).color(TEXT));
+                ui.label(egui::RichText::new("Play a song with favorites 1–4").font(bold(13.0)).color(TEXT));
                 ui.label(
                     egui::RichText::new(
-                        "Bunker steers energy, breaks and drops – you can jam along. Empty patterns are filled in from the others.",
+                        "Bunker steers energy, breaks and drops – you can jam along. Empty ones are filled in from the others.",
                     )
                     .font(body(11.0))
                     .color(FAINT),
@@ -1945,7 +2046,7 @@ impl BunkerApp {
                         .sections
                         .iter()
                         .map(|sec| {
-                            let letter = crate::form::pattern_slot(sec.pattern, full).map_or("·", |i| SLOT_NAMES[i]);
+                            let letter = crate::form::pattern_slot(sec.pattern, full).map_or("·".to_string(), |i| (i + 1).to_string());
                             format!("{} {letter}", sec.part.name())
                         })
                         .collect();
@@ -1981,7 +2082,7 @@ impl BunkerApp {
             bold(12.0),
             ACID,
         );
-        let full = self.slots.map(|s| s.is_some());
+        let full = self.song_favorites().map(|s| s.is_some());
         let area = Rect::from_min_max(pos2(rect.left() + left_w, rect.top()), rect.max);
         let gap = 3.0;
         let n = form.sections.len() as f32;
@@ -2031,7 +2132,7 @@ impl BunkerApp {
                 ),
                 egui::StrokeKind::Inside,
             );
-            let letter = crate::form::pattern_slot(sec.pattern, full).map_or("", |k| SLOT_NAMES[k]);
+            let letter = crate::form::pattern_slot(sec.pattern, full).map_or(String::new(), |k| (k + 1).to_string());
             // The longest label that fits: "Peak C", "Peak", smaller "Peak", "P"
             let name = sec.part.name();
             let fits = |text: &str, size: f32| p.layout_no_wrap(text.into(), bold(size), TEXT).size().x + 10.0 <= w;
@@ -2178,15 +2279,15 @@ impl BunkerApp {
                     row(ui, ph::CIRCLES_THREE, "The orbit", "Each ring is one sound, each dot one step. Click to switch a dot on or off, drag to paint. Right-click: accent (on the synth: slide). Scroll on bass/synth dots to change the note. Shift-click: chance.");
                     row(ui, ph::LIST, "Tracks", "S solos a track, the speaker mutes it, the dice rolls a new rhythm for just that track (right-click: clear), the lock keeps shuffle, vibes, dice and auto mode away from it. The coloured pill is its sound – click it for the list, tune and decay, or scroll on it. The number is the loop length: under 16 it drifts against the beat.");
                     row(ui, ph::MUSIC_NOTES, "Mood", "MOOD picks which notes and chords bass and synth play – from Dark and Hypnotic to Euphoric, Sunny or Mysterious – and gives them fitting new notes. Each has its own chords, so the bars move. Pitch moves them lower or higher. The speaker at the top sets the volume.");
-                    row(ui, ph::STACK, "Patterns & song", "Four memory slots under the orbit. Click + to keep what you hear, click a full pattern to switch – while playing it comes in on the next bar, with a clap roll. The lit one keeps your changes. SONG turns your patterns into a whole track (Short, Club or Hypnotic): intro, groove, break, drop, outro – Bunker steers the energy, you jam along. Click a part in the strip to jump there.");
+                    row(ui, ph::STACK, "Favorites & auto song", "Twelve slots under the orbit. Click + to keep what you hear, click a full one to switch – while playing it comes in on the next bar, with a clap roll. Right-click to rename, save over or clear. The lit one is exactly what plays. AUTO SONG turns favorites 1–4 into a whole track (Short, Club or Hypnotic): intro, groove, break, drop, outro – Bunker steers the energy, you jam along. Click a part in the strip to jump there.");
                     row(ui, ph::INFINITY, "Auto mode", "Bunker changes something every 2, 4 or 8 bars – patterns, sounds, notes, fills – and every few drops starts a new chapter. With AUTO FX on it arranges by itself: the energy glides, every 32 to 64 bars a breakdown, a build-up with effects and a drop. With AUTO FX off the energy bar is yours and it never takes a track out.");
                     row(ui, ph::SLIDERS, "Sound & master", "DARK closes the sound and adds rumble. ACID opens the synth filter. SPACE: reverb and echo. PUMP ducks everything under the kick. MASTER: low, mid and high EQ and drive for the whole mix.");
                     row(ui, ph::LIGHTNING, "Live effects", "ENERGY is the arrangement, not the volume (← →): under 30 a break, then the groove builds up, at 90 the build-up starts and two bars later it drops – a whole track with one fader. DROP does the same any time. FILTER springs back when you let go. Hold STUTTER (Q), ECHO (W), WASH (E), CRUSH (X), GATE (C) or TAPE STOP (V) – combine them.");
                     row(ui, ph::MONITOR_PLAY, "Visualizer", "P turns the window into a fullscreen light show – no text, just a small energy bar at the bottom. All keys keep working (← → energy). Esc goes back.");
-                    row(ui, ph::FOLDER_SIMPLE, "Files", "File → Save as .bunker keeps the groove and the four patterns in one file. Open it from the menu or drag it onto the window. A song played with SONG is recorded by itself; the red record button at the top records your whole set until you click it again. Then save it as a WAV wherever you like.");
-                    row(ui, ph::GRID_FOUR, "Pads", "Tab switches to big pads and a classic grid. Hit RECORD and play along – your hits land on the beat.");
+                    row(ui, ph::FOLDER_SIMPLE, "Files", "File → Save as .bunker keeps the groove and your favorites in one file. Open it from the menu or drag it onto the window. The record button at the top (R) records everything you hear until you click it again – then save it as a WAV wherever you like. An AUTO SONG records itself.");
+                    row(ui, ph::GRID_FOUR, "Pads", "Tab switches to big pads and a classic grid. Play the pads with the mouse or A–K.");
                     row(ui, ph::ARROW_COUNTER_CLOCKWISE, "Undo", "⌘/Ctrl + Z takes back any change – a shuffle too. ⌘/Ctrl + Shift + Z redoes it.");
-                    row(ui, ph::KEYBOARD, "Keyboard", "Space play · Enter shuffle · A–K pads · 1–8 mute · ← → energy · B drop · Q W E  X C V effects (hold) · R record · Tab orbit/pads · P visuals · ⌘/Ctrl Z undo");
+                    row(ui, ph::KEYBOARD, "Keyboard", "Space play · Enter shuffle · A–K pads · 1–8 mute · ← → energy · B drop · Q W E  X C V effects (hold) · R record your set · Tab orbit/pads · P visuals · ⌘/Ctrl Z undo");
                     row(ui, ph::PIANO_KEYS, "MIDI keyboard", "Keys below middle C play the sounds. Hold a key from middle C up to transpose bass and synth. Mod wheel = acid, pitch bend = filter, sustain = echo, knobs (CC 70–73) = sound knobs.");
                 });
                 ui.separator();
@@ -2211,6 +2312,7 @@ impl eframe::App for BunkerApp {
         eframe::set_value(storage, "song", &self.song);
         eframe::set_value(storage, "view", &self.view);
         eframe::set_value(storage, "slots", &self.slots);
+        eframe::set_value(storage, "fav_names", &self.names.to_vec());
         eframe::set_value(storage, "slot_now", &self.slot_now);
         eframe::set_value(storage, "check_updates", &self.check_updates);
         eframe::set_value(storage, "seen_help", &true);
@@ -2283,7 +2385,7 @@ impl BunkerApp {
             .show(ctx, |ui| self.live_panel(ui, &live, now));
         egui::CentralPanel::default().frame(frame(BG, 10.0)).show(ctx, |ui| {
             let area = ui.available_rect_before_wrap();
-            let scenes_h = 58.0;
+            let scenes_h = 100.0;
             let song_h = if self.song_form.is_some() { 34.0 } else { 0.0 };
             let rect = Rect::from_min_max(area.min, pos2(area.right(), area.bottom() - scenes_h - song_h - 6.0));
             // Concrete slab behind the main view
@@ -2298,13 +2400,9 @@ impl BunkerApp {
                     }
                 }
                 View::Pads => {
-                    let rec = self.record.load(Ordering::Relaxed);
-                    let out = pads::pads(ui, inner, &mut self.song, &live, &mut self.paint, rec, &self.key_down);
+                    let out = pads::pads(ui, inner, &mut self.song, &live, &mut self.paint, &self.key_down);
                     for v in out.hits {
                         self.hit(v);
-                    }
-                    if out.toggle_record {
-                        self.toggle_record(now);
                     }
                 }
             }
@@ -2317,6 +2415,7 @@ impl BunkerApp {
         });
 
         self.export_window(ctx, now);
+        self.rename_window(ctx);
         self.help_window(ctx);
         self.finish_frame(now);
     }
@@ -2450,6 +2549,65 @@ mod tests {
         assert_ne!(app.slots[1].unwrap().tracks[2], app.song.tracks[2]);
     }
 
+    /// The app wired to a real engine (no sound card): the engine renders on demand
+    fn with_engine() -> (BunkerApp, crate::engine::Engine, Receiver<Cmd>) {
+        let mut app = BunkerApp::headless(Song::default(), View::Orbit, false);
+        let (tx, rx) = channel();
+        let (ev_tx, events) = channel();
+        app.tx = tx;
+        app.events = events;
+        let engine = crate::engine::Engine::new(44_100.0, app.song, app.shared.clone(), Some(ev_tx), 1);
+        (app, engine, rx)
+    }
+
+    #[test]
+    fn a_set_recording_ends_in_the_save_dialog() {
+        let (mut app, mut e, rx) = with_engine();
+        let ctx = egui::Context::default();
+        let mut buf = vec![0.0; 2 * 44_100];
+        let mut tick = |app: &mut BunkerApp, e: &mut crate::engine::Engine, secs: usize| {
+            for _ in 0..secs {
+                e.drain(&rx);
+                e.render(&mut buf);
+                app.sync(&ctx, 0.0, 0.016);
+            }
+        };
+        app.toggle_capture(0.0);
+        app.toggle_play();
+        tick(&mut app, &mut e, 3);
+        app.toggle_play(); // stop the music, then the recording
+        tick(&mut app, &mut e, 1);
+        app.toggle_capture(0.0);
+        tick(&mut app, &mut e, 3);
+        assert!(matches!(app.export, Export::Recorded), "the save dialog is up");
+        let secs = app.recording.len() as f32 / 2.0 / app.rec_sr as f32;
+        assert!(secs > 5.0, "{secs} s recorded");
+    }
+
+    #[test]
+    fn a_favorite_goes_dark_once_the_groove_changes() {
+        let (mut app, mut e, rx) = with_engine();
+        let ctx = egui::Context::default();
+        app.slot_clicked(0, true, 0.0);
+        app.finish_frame(0.0);
+        e.drain(&rx);
+        assert_eq!(app.slot_now, Some(0));
+        // Only the energy moves: still the saved groove (a build-up makes the engine send its song)
+        e.handle(Cmd::Play);
+        e.song.macros.energy = 0.2;
+        e.handle(Cmd::Drop);
+        app.sync(&ctx, 0.1, 0.016);
+        assert!(app.song.macros.energy < 0.3, "the engine's song came in");
+        assert_eq!(app.slot_now, Some(0), "energy is not the groove");
+        // The auto mode changes a pattern: it's not the saved groove any more
+        e.handle(Cmd::Stop);
+        e.song.tracks[2].steps[5].on = !e.song.tracks[2].steps[5].on;
+        e.handle(Cmd::Play);
+        e.handle(Cmd::Drop);
+        app.sync(&ctx, 0.2, 0.016);
+        assert_eq!(app.slot_now, None);
+    }
+
     #[test]
     fn song_mode_and_auto_mode_take_turns() {
         let mut app = BunkerApp::headless(Song::default(), View::Orbit, false);
@@ -2515,11 +2673,13 @@ mod tests {
             ..Default::default()
         };
         f.scenes[1] = Some(gen::generate(Vibe::Dub, &Default::default(), &mut Rng::new(4)));
+        f.names[1] = "Sunday".into();
         app.song.master = 0.4;
         app.load_file(BunkerFile::from_text(&f.to_text()).unwrap(), "test.bunker", 0.0);
         assert_eq!(app.song.tracks, f.song.tracks);
         assert_eq!(app.song.master, 0.4, "volume belongs to the moment");
-        assert_eq!(app.slots, f.scenes);
+        assert_eq!(app.slots.to_vec(), f.scenes);
+        assert_eq!(app.names[1], "Sunday");
     }
 
     #[test]

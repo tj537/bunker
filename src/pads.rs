@@ -1,4 +1,4 @@
-//! The pad view: eight big pads to play live (and record), with a classic
+//! The pad view: eight big pads to play live, with a classic
 //! step grid underneath.
 
 use crate::orbit::{Live, Paint};
@@ -12,14 +12,10 @@ pub const KEYS: [&str; TRACKS] = ["A", "S", "D", "F", "G", "H", "J", "K"];
 
 pub struct PadsOut {
     pub hits: Vec<Voice>,
-    pub toggle_record: bool,
 }
 
-pub fn pads(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mut Paint, record: bool, pressed: &[bool; TRACKS]) -> PadsOut {
-    let mut out = PadsOut {
-        hits: Vec::new(),
-        toggle_record: false,
-    };
+pub fn pads(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mut Paint, pressed: &[bool; TRACKS]) -> PadsOut {
+    let mut out = PadsOut { hits: Vec::new() };
     let grid_h = (rect.height() * 0.38).clamp(190.0, 300.0);
     let pad_area = Rect::from_min_max(rect.min, pos2(rect.right(), rect.bottom() - grid_h - 16.0));
     let grid_area = Rect::from_min_max(pos2(rect.left(), rect.bottom() - grid_h), rect.max);
@@ -33,46 +29,13 @@ pub fn pads(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mut P
     let total_h = ph_ * 2.0 + gap;
     let top = pads_rect.top() + (pads_rect.height() - total_h) / 2.0;
 
-    // Record toggle in the header
-    let rec_rect = Rect::from_min_size(pos2(pad_area.left(), pad_area.top()), vec2(118.0, 32.0));
-    let rec = ui.allocate_rect(rec_rect, Sense::click());
-    {
-        let p = ui.painter();
-        let blink = record && live.playing && (live.pos.fract() < 0.5);
-        p.rect_filled(rec_rect, 16.0, if record { alpha(RED, 0.18) } else { PANEL_HI });
-        p.rect_stroke(
-            rec_rect,
-            16.0,
-            stroke(1.2, if record { RED } else { LINE }),
-            egui::StrokeKind::Inside,
-        );
-        p.circle_filled(
-            rec_rect.left_center() + vec2(18.0, 0.0),
-            6.0,
-            if record && !blink { RED } else { alpha(RED, 0.45) },
-        );
-        p.text(
-            rec_rect.left_center() + vec2(32.0, 0.0),
-            Align2::LEFT_CENTER,
-            if record { "RECORDING" } else { "RECORD" },
-            bold(12.5),
-            if record { RED } else { DIM },
-        );
-        p.text(
-            pos2(rec_rect.right() + 14.0, rec_rect.center().y),
-            Align2::LEFT_CENTER,
-            if record {
-                "Hit pads while it plays – they land on the nearest step"
-            } else {
-                "Play the pads with the mouse or keys A–K"
-            },
-            body(12.0),
-            FAINT,
-        );
-    }
-    if rec.clicked() {
-        out.toggle_record = true;
-    }
+    ui.painter().text(
+        pos2(pad_area.left(), pad_area.top() + 16.0),
+        Align2::LEFT_CENTER,
+        "Play the pads with the mouse or keys A–K",
+        body(12.0),
+        FAINT,
+    );
 
     for (i, voice) in Voice::ALL.into_iter().enumerate() {
         let (row, col) = (i / 4, i % 4);
