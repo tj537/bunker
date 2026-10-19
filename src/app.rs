@@ -1445,7 +1445,7 @@ impl BunkerApp {
                 self.toggle_solo(i, now);
             }
 
-            // Second line: sound, loop length, volume
+            // Second line: sound, volume
             let y = top + 23.0;
             let sound_rect = Rect::from_min_size(pos2(row.left() + 22.0, y), vec2(84.0, 18.0));
             let sound = ui.allocate_rect(sound_rect, Sense::click());
@@ -1549,34 +1549,8 @@ impl BunkerApp {
             if t.tune != 0 || (t.decay - 0.5).abs() > 0.02 {
                 p.circle_filled(sound_rect.right_top() + vec2(-3.0, 3.0), 3.0, ACID);
             }
-            // Loop length
-            let lr = Rect::from_min_size(pos2(sound_rect.right() + 6.0, y), vec2(30.0, 18.0));
-            let lresp = ui
-                .allocate_rect(lr, Sense::click())
-                .on_hover_text("Loop length: 16 = one bar, 8 = half a bar (plays twice), 4, 2, 1 …\nClick: shorter · right-click: longer – it always stays in step with the beat");
-            p.rect_stroke(
-                lr,
-                9.0,
-                stroke(1.0, if lresp.hovered() { FAINT } else { LINE }),
-                egui::StrokeKind::Inside,
-            );
-            let len = self.song.tracks[i].len;
-            p.text(
-                lr.center(),
-                Align2::CENTER_CENTER,
-                format!("{len}"),
-                bold(10.5),
-                if len < 16 { ACID } else { DIM },
-            );
-            let len = &mut self.song.tracks[i].len;
-            if lresp.clicked() {
-                *len = if *len <= 1 { 16 } else { *len / 2 };
-            }
-            if lresp.secondary_clicked() {
-                *len = if *len >= 16 { 1 } else { *len * 2 };
-            }
             // Volume
-            let vx = lr.right() + 8.0;
+            let vx = sound_rect.right() + 8.0;
             let vr = Rect::from_min_max(pos2(vx, y + 2.0), pos2(row.right() - 6.0, y + 16.0));
             let mut vol = self.song.tracks[i].volume;
             ui.allocate_new_ui(egui::UiBuilder::new().max_rect(vr), |ui| {
@@ -2353,7 +2327,7 @@ impl BunkerApp {
                     row(ui, ph::PLAY, "1 · Press play", "Space, or the button in the middle. Pick a vibe at the top – every pick rolls a new groove in that style (Custom starts empty). SHUFFLE (Enter) rolls again. ⌘/Ctrl + Z undoes anything, a shuffle too.");
                     row(ui, ph::CIRCLES_THREE, "2 · Read the orbit", "Each ring is one sound, once round is one bar of 16 steps, the numbers 1–4 are the beats and the beam is where it plays. A hollow circle is a step that's off, a filled dot one that plays. A white core: accent (louder). A coloured ring around it: it only plays sometimes. An arc to the dot before: the synth slides into it. A white ring: playing right now. A faded ring: that track is muted.");
                     row(ui, ph::HAND_POINTING, "3 · Change the groove", "Click a dot to switch it on or off, drag to paint. Right-click a dot (or a tile in CLASSIC, the pads and step grid – Tab) for its menu: on, accent, slide, how often it plays and – on bass and synth – its note. The mouse wheel on a bass or synth dot moves its note too.");
-                    row(ui, ph::LIST, "4 · Tracks", "S solos a track, the speaker mutes it, the dice rolls a new rhythm for it (right-click: clear), the lock keeps shuffle and the auto mode away from it. The coloured pill is its sound – click it for the list, tune and decay. The number is the loop length: 16, 8, 4, 2 or 1 steps.");
+                    row(ui, ph::LIST, "4 · Tracks", "S solos a track, the speaker mutes it, the dice rolls a new rhythm for it (right-click: clear), the lock keeps shuffle and the auto mode away from it. The coloured pill is its sound – click it for the list, tune and decay.");
                     row(ui, ph::MUSIC_NOTES, "5 · Mood & pitch", "MOOD picks the notes and chords of bass and synth – from Dark and Hypnotic to Euphoric, Sunny or Mysterious. Pitch moves them lower or higher.");
                     row(ui, ph::LIGHTNING, "6 · Energy & drop", "The energy bar is the arrangement, not the volume (← →): under 30 a break with no kick and bass, then the tracks come in one by one, from 70 everything plays (a track the energy takes out says OUT next to its name), at 90 the build-up starts and two bars later it drops. DROP (B) does the same any time.");
                     row(ui, ph::WAVEFORM, "7 · Effects & sound", "Hold STUTTER (Q), ECHO (W), WASH (E), CRUSH (X), GATE (C) or TAPE STOP (V) and combine them; FILTER springs back when you let go. SOUND: DARK, ACID, SPACE and PUMP. MASTER: low, mid, high and drive.");

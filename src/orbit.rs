@@ -395,7 +395,7 @@ pub fn orbit(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mut 
     if let Some((t, s)) = hovered {
         let v = Voice::ALL[t];
         let step = song.tracks[t].steps[s];
-        let mut text = format!("{} · step {} of {}", v.name().to_uppercase(), s + 1, song.tracks[t].len);
+        let mut text = format!("{} · step {}", v.name().to_uppercase(), s + 1);
         if step.on && v.is_synth() {
             text += &format!(" · note {:+}", step.note);
         }

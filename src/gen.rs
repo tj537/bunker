@@ -384,6 +384,7 @@ fn open_hat(vibe: Vibe, e: f32, rng: &mut Rng) -> Track {
     } else if rng.chance(0.2) {
         t = from_mask(euclid(3, 8, 2));
         t.len = 8;
+        t.expand();
     }
     if e > 0.75 && rng.chance(0.3) {
         t.steps[15] = Step::hit();
@@ -681,14 +682,18 @@ pub fn evolve(song: &mut Song, rng: &mut Rng, mutes: bool) -> Option<Change> {
         }
         Some(Change::NewNotes(v))
     } else if !loops.is_empty() {
-        // A loop gets half a bar long (or back to a full bar) – always in step with the beat
+        // The second half of the bar repeats the first – a half-bar loop
         let v = *rng.pick(&loops);
         let t = song.track_mut(v);
-        t.len = if t.len < 16 { 16 } else { 8 };
+        if t.steps[..8] == t.steps[8..] {
+            return Some(rotate(song, v, rng));
+        }
+        t.steps.copy_within(..8, 8);
         if t.hits() == 0 {
             t.steps[2] = Step::hit();
+            t.steps[10] = Step::hit();
         }
-        Some(Change::Length(v, t.len))
+        Some(Change::Length(v, 8))
     } else {
         Some(rotate(song, v, rng))
     }
@@ -899,7 +904,7 @@ mod tests {
                 }
                 // Loops are a full bar or half a bar – always in step with the beat
                 for t in &s.tracks {
-                    assert!([8, 16].contains(&t.len), "{vibe:?} {}", t.len);
+                    assert_eq!(t.len, 16, "{vibe:?}");
                 }
                 // Every generated step always plays – "sometimes" is only for you to set (shift-click)
                 for t in &s.tracks {

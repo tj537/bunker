@@ -153,6 +153,16 @@ impl Default for Track {
 }
 
 impl Track {
+    /// A whole bar: a shorter loop (from older files) written out as its repeats. Every
+    /// track is 16 steps – an 8-step loop sounds the same as its two copies in a bar.
+    pub fn expand(&mut self) {
+        let len = fit_len(self.len) as usize;
+        for i in len..STEPS {
+            self.steps[i] = self.steps[i % len];
+        }
+        self.len = STEPS as u8;
+    }
+
     pub fn hits(&self) -> usize {
         self.steps[..self.len as usize].iter().filter(|s| s.on).count()
     }
@@ -483,7 +493,7 @@ impl Song {
     /// Repair values that would break the app (old or hand-edited saved state)
     pub fn sanitize(&mut self) {
         for (t, v) in self.tracks.iter_mut().zip(Voice::ALL) {
-            t.len = fit_len(t.len);
+            t.expand();
             if t.sound as usize >= v.sounds().len() {
                 t.sound = 0;
             }
@@ -575,7 +585,8 @@ mod tests {
         s.tracks[2].len = 0;
         s.tracks[4].len = 12;
         s.tracks[5].len = 6;
-        s.tracks[6].len = 15;
+        s.tracks[5].steps = [Step::default(); STEPS];
+        s.tracks[5].steps[1] = Step::hit();
         s.tracks[3].volume = f32::NAN;
         s.bpm = 9999.0;
         s.root = 3;
@@ -586,13 +597,14 @@ mod tests {
         s.prog = 200;
         s.eq.low = f32::NAN;
         s.sanitize();
-        // Loops always fit the bar
-        assert_eq!([s.tracks[2].len, s.tracks[4].len, s.tracks[5].len, s.tracks[6].len], [1, 16, 8, 16]);
+        // Every track is a whole bar; a shorter loop is written out as its repeats (6 → 8)
+        assert!(s.tracks.iter().all(|t| t.len == 16));
+        let on: Vec<usize> = (0..16).filter(|&i| s.tracks[5].steps[i].on).collect();
+        assert_eq!(on, [1, 9]);
         assert_eq!(s.tracks[1].decay, 0.5);
         assert_eq!(s.tracks[1].tune, 12);
         assert_eq!(s.prog, 0);
         assert_eq!(s.eq.low, 0.5);
-        assert_eq!(s.tracks[2].len, 1);
         assert_eq!(s.tracks[3].volume, 0.8);
         assert_eq!(s.bpm, 180.0);
         assert_eq!(s.root, 36);

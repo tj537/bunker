@@ -78,8 +78,6 @@ mod tests {
         render("orbit_stopped", 1360.0, 860.0, |_| {});
         render("orbit_playing", 1360.0, 860.0, |app| {
             app.song.auto = true;
-            // An 8-step loop drawn twice round, in step with the beam
-            app.song.tracks[4].len = 8;
             app.slots[0] = Some(app.song);
             app.slots[1] = Some(crate::gen::generate(
                 crate::song::Vibe::Acid,
