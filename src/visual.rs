@@ -9,7 +9,7 @@ use crate::orbit::Live;
 use crate::song::{Song, Voice, STEPS};
 use crate::theme::*;
 use crate::widgets::glow;
-use eframe::egui::{pos2, vec2, Align2, Color32, Rect, Ui};
+use eframe::egui::{pos2, vec2, Color32, Rect, Ui};
 use std::f32::consts::{PI, TAU};
 
 /// A stable pseudo-random number 0…1
@@ -32,7 +32,7 @@ fn mood(energy: f32) -> Color32 {
     }
 }
 
-pub fn visual(ui: &mut Ui, rect: Rect, song: &Song, live: &Live, scene: Option<usize>, t: f64) {
+pub fn visual(ui: &mut Ui, rect: Rect, song: &Song, live: &Live, t: f64) {
     let p = ui.painter_at(rect);
     let c = rect.center();
     let big = rect.width().min(rect.height()) * 0.5;
@@ -112,63 +112,31 @@ pub fn visual(ui: &mut Ui, rect: Rect, song: &Song, live: &Live, scene: Option<u
         p.circle_filled(at, 3.5 + flash * 4.0, mix(col, Color32::WHITE, flash * 0.5));
     }
 
-    // Centre: tempo and vibe
+    // Centre: a quiet ring that beats with the kick
     let rb = r0 * 0.82;
     p.circle_filled(c, rb, alpha(BG, 0.85));
     p.circle_stroke(c, rb, stroke(2.0, alpha(tint, 0.6 + kick * 0.4)));
-    p.text(
-        c - vec2(0.0, rb * 0.12),
-        Align2::CENTER_CENTER,
-        format!("{:.0}", song.bpm),
-        display(rb * 0.62),
-        TEXT,
-    );
-    p.text(
-        c + vec2(0.0, rb * 0.42),
-        Align2::CENTER_CENTER,
-        song.vibe.name().to_uppercase(),
-        bold((rb * 0.14).clamp(10.0, 18.0)),
-        alpha(tint, 0.9),
-    );
 
     // Build-up: the whole screen gets hot
     if let Some(b) = live.build {
         p.rect_filled(rect, 0.0, alpha(RED, b * b * 0.18));
-        p.text(
-            c - vec2(0.0, big * 0.62),
-            Align2::CENTER_CENTER,
-            format!("BUILD {}%", (b * 100.0) as u32),
-            display(28.0),
-            alpha(TEXT, 0.8),
-        );
     }
 
-    // What just happened, big
-    if let Some((text, age)) = &live.caption {
-        let a = (1.0 - (age - 2.5).max(0.0) / 1.5).clamp(0.0, 1.0);
-        p.text(
-            pos2(c.x, rect.bottom() - 90.0),
-            Align2::CENTER_CENTER,
-            text.to_uppercase(),
-            display(34.0),
-            alpha(TEXT, a * 0.9),
-        );
-    }
-
-    // Status and keys, quiet in the corners
-    let scene = scene.map_or(String::new(), |s| format!("  ·  SCENE {}", ["A", "B", "C", "D"][s]));
-    p.text(
-        rect.left_top() + vec2(24.0, 20.0),
-        Align2::LEFT_TOP,
-        format!("BAR {}  ·  ENERGY {:.0}{scene}", live.bar + 1, energy * 100.0),
-        bold(12.0),
-        FAINT,
+    // No text – just the energy, small at the bottom: where you are (← → move it)
+    let w = (rect.width() * 0.22).clamp(160.0, 320.0);
+    let bar = Rect::from_center_size(pos2(c.x, rect.bottom() - 28.0), vec2(w, 4.0));
+    let at = |e: f32| bar.left() + bar.width() * e;
+    p.rect_filled(bar, 2.0, alpha(TEXT, 0.08));
+    p.rect_filled(
+        Rect::from_min_max(bar.min, pos2(at(crate::engine::BREAK_ZONE), bar.bottom())),
+        2.0,
+        alpha(track_color(Voice::OpenHat), 0.18),
     );
-    p.text(
-        rect.left_bottom() + vec2(24.0, -18.0),
-        Align2::LEFT_BOTTOM,
-        "Esc back  ·  Space play  ·  B drop  ·  ← → energy  ·  Q W E  X C V effects",
-        body(12.0),
-        FAINT,
+    p.rect_filled(
+        Rect::from_min_max(pos2(at(crate::engine::DROP_ZONE), bar.top()), bar.max),
+        2.0,
+        alpha(RED, 0.25),
     );
+    p.rect_filled(Rect::from_min_max(bar.min, pos2(at(energy), bar.bottom())), 2.0, alpha(tint, 0.55));
+    p.circle_filled(pos2(at(energy), bar.center().y), 3.5, alpha(TEXT, 0.7));
 }

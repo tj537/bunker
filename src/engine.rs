@@ -1070,15 +1070,18 @@ impl Engine {
         }
         let b = bar - self.cycle_start;
         let at = self.breakdown_at();
-        // With the curve on, Bunker arranges: energy, breakdown, build-up, drop. With the
-        // energy by hand, those are yours (low = break, 90 = drop) – the groove still evolves.
-        if self.song.curve {
+        // With the curve and AUTO FX on, Bunker arranges: energy, breakdown, build-up, drop.
+        // Without AUTO FX the curve only sways through the groove; with the energy by hand,
+        // breaks and drops are yours (low = break, 90 = drop) – the groove still evolves.
+        if self.song.curve && self.song.auto_fx {
             self.energy_goal = self.curve_target(b);
             if b == at && self.build.is_none() {
                 self.start_breakdown(idx);
             } else if b == self.cycle_len - 2 && self.build.is_none() {
                 self.auto_build(idx);
             }
+        } else if self.song.curve {
+            self.energy_goal = self.curve_target(b.min(at.saturating_sub(1)));
         }
         if b < at && bar.is_multiple_of(self.song.auto_bars.max(1) as u64) {
             if let Some(change) = gen::evolve(&mut self.song, &mut self.auto_rng) {
@@ -1907,6 +1910,31 @@ mod tests {
         let changes: Vec<Change> = rx.try_iter().filter_map(Event::change).collect();
         assert!(changes.iter().any(|c| matches!(c, Change::NewSound(..))), "{changes:?}");
         assert!(changes.iter().filter(|c| matches!(c, Change::Drop | Change::NewChapter)).count() >= 5);
+    }
+
+    #[test]
+    fn without_auto_fx_the_auto_mode_never_drops_by_itself() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut song = gen::generate(Vibe::Peak, &Default::default(), &mut Rng::new(8));
+        song.auto = true;
+        song.auto_fx = false;
+        song.bpm = 180.0;
+        let mut e = Engine::new(11_025.0, song, Shared::new(), Some(tx), 4);
+        e.handle(Cmd::Play);
+        let bar = (e.step_len() * STEPS as f64) as usize;
+        let mut buf = vec![0.0; 2 * bar * 70];
+        e.render(&mut buf);
+        let changes: Vec<Change> = rx.try_iter().filter_map(Event::change).collect();
+        assert!(
+            !changes
+                .iter()
+                .any(|c| matches!(c, Change::Breakdown | Change::Build | Change::Drop)),
+            "{changes:?}"
+        );
+        assert!(changes
+            .iter()
+            .any(|c| matches!(c, Change::NewPattern(_) | Change::NewSound(..) | Change::Shifted(_))));
+        assert!(e.song.macros.energy > BREAK_ZONE, "the groove sways, it doesn't break");
     }
 
     #[test]

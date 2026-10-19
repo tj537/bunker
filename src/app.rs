@@ -1555,18 +1555,19 @@ impl BunkerApp {
                 let on = self.song.auto_fx;
                 if chip_small(ui, "AUTO FX", on, ACID, 74.0)
                     .on_hover_text(
-                        "On: automatic build-ups use the effects (low-pass, gate, echo), and now and then \
-                         Bunker throws in a stutter, gate, crush or echo at the end of a phrase.\n\
-                         Off: classic build-ups and plain fills – the effects are all yours.",
+                        "On: in auto mode Bunker plays breakdowns, build-ups and drops by itself – with effects \
+                         (low-pass, gate, echo) – and now and then throws in a stutter, gate, crush or echo \
+                         at the end of a phrase.\n\
+                         Off: no automatic drops and plain fills – the drops are yours (DROP, or energy to 90).",
                     )
                     .clicked()
                 {
                     self.song.auto_fx = !on;
                     self.say(
                         if on {
-                            "Auto FX off – the effects are all yours"
+                            "Auto FX off – drops and effects are all yours"
                         } else {
-                            "Auto FX on – Bunker throws in effects now and then"
+                            "Auto FX on – Bunker drops and throws in effects by itself"
                         },
                         now,
                     );
@@ -2074,7 +2075,7 @@ impl BunkerApp {
                     row(ui, ph::INFINITY, "Auto mode", "Bunker changes something every 2, 4 or 8 bars – patterns, sounds, notes, fills – and every 32 to 64 bars plays a breakdown, a build-up (each time a bit different) and a drop. Every few drops a new chapter brings a bigger change. With CURVE on the energy fader it moves the energy and plays breaks and drops; touch the fader and they're yours. AUTO FX lets it use the effects too.");
                     row(ui, ph::SLIDERS, "Sound & master", "DARK closes the sound and adds rumble. ACID opens the synth filter. SPACE: reverb and echo. PUMP ducks everything under the kick. MASTER: low, mid and high EQ and drive for the whole mix.");
                     row(ui, ph::LIGHTNING, "Live effects", "ENERGY is the arrangement, not the volume (← →): under 30 a break, then the groove builds up, at 90 the build-up starts and two bars later it drops – a whole track with one fader. DROP does the same any time. FILTER springs back when you let go. Hold STUTTER (Q), ECHO (W), WASH (E), CRUSH (X), GATE (C) or TAPE STOP (V) – combine them.");
-                    row(ui, ph::MONITOR_PLAY, "Visualizer", "P turns the window into a fullscreen light show – all keys keep working. Esc goes back.");
+                    row(ui, ph::MONITOR_PLAY, "Visualizer", "P turns the window into a fullscreen light show – no text, just a small energy bar at the bottom. All keys keep working (← → energy). Esc goes back.");
                     row(ui, ph::FOLDER_SIMPLE, "Files", "File → Save as .bunker keeps the groove and the four patterns in one file. Open it from the menu or drag it onto the window. A song played with SONG is recorded – when it ends (or you stop it), save it as a WAV.");
                     row(ui, ph::GRID_FOUR, "Pads", "Tab switches to big pads and a classic grid. Hit RECORD and play along – your hits land on the beat.");
                     row(ui, ph::ARROW_COUNTER_CLOCKWISE, "Undo", "⌘/Ctrl + Z takes back any change – a shuffle too. ⌘/Ctrl + Shift + Z redoes it.");
@@ -2149,7 +2150,7 @@ impl BunkerApp {
         if self.visual {
             egui::CentralPanel::default().frame(frame(BG, 0.0)).show(ctx, |ui| {
                 let rect = ui.max_rect();
-                visual::visual(ui, rect, &self.song, &live, self.slot_now, now);
+                visual::visual(ui, rect, &self.song, &live, now);
                 // Double-click anywhere goes back
                 if ui.interact(rect, ui.id().with("visual"), Sense::click()).double_clicked() {
                     self.toggle_visual(ctx);
