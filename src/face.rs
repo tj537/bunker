@@ -72,15 +72,15 @@ fn head(u: f32, v: f32, jaw: f32) -> [f32; 3] {
     let x = w * squared(a.sin());
     let mut z = d * squared(a.cos());
     for side in [-1.0f32, 1.0] {
-        z -= 0.11 * bump(x, y, 0.25 * side, -0.1, 0.11, 0.07); // eye sockets
-        z += 0.06 * bump(x, y, 0.24 * side, -0.24, 0.16, 0.05); // brows
+        z -= 0.13 * bump(x, y, 0.25 * side, -0.1, 0.12, 0.07); // eye sockets
+        z += 0.08 * bump(x, y, 0.24 * side, -0.23, 0.16, 0.05); // brows
         z += 0.06 * bump(x, y, 0.42 * side, 0.02, 0.12, 0.08); // cheekbones
         z -= 0.05 * bump(x, y, 0.4 * side, 0.35, 0.12, 0.12); // hollow cheeks
-        z += 0.04 * bump(x, y, 0.07 * side, 0.28, 0.04, 0.04); // nostrils
+        z += 0.07 * bump(x, y, 0.08 * side, 0.27, 0.05, 0.04); // nostrils
     }
     z += 0.03 * bump(x, y, 0.0, -0.2, 0.08, 0.05); // between the brows
-    z += 0.2 * bump(x, y, 0.0, 0.08, 0.065, 0.2); // nose
-    z += 0.07 * bump(x, y, 0.0, 0.24, 0.07, 0.05); // its tip
+    z += 0.3 * bump(x, y, 0.0, 0.07, 0.08, 0.21); // nose
+    z += 0.1 * bump(x, y, 0.0, 0.24, 0.08, 0.05); // its tip
     z += 0.04 * bump(x, y, 0.0, 0.37, 0.15, 0.035); // upper lip
     z += 0.05 * bump(x, y, 0.0, 0.47, 0.13, 0.04); // lower lip
     z += 0.06 * bump(x, y, 0.0, 0.82, 0.15, 0.08); // chin
@@ -472,13 +472,51 @@ pub fn face(ui: &mut Ui, rect: Rect, song: &Song, live: &Live, now: f64) {
         mix(RED, Color32::WHITE, 0.3),
         (build * 1.6 - 0.6).max(laser).clamp(0.0, 1.0),
     );
+    // A blink every few seconds: the lids meet for a moment
+    let phase = (t / 4.3).fract();
+    let blink = if phase < 0.04 {
+        ((phase - 0.02).abs() / 0.02).min(1.0)
+    } else {
+        1.0
+    };
     // Lasers: charging late in the build-up, full blast on the drop, sweeping slowly
     let blast = laser.max(((build - 0.75) / 0.25).clamp(0.0, 1.0) * 0.3) * (0.85 + 0.15 * kick);
     let reach = rect.width().hypot(rect.height());
     for side in [-1.0f32, 1.0] {
-        let [x, y, z] = head(column_at(0.25 * side, -0.1), -0.1, 0.0);
-        let (eye, _) = project(rotate([x, y, z + 0.02], yaw, pitch));
-        halo(&p, eye, size * (0.12 + 0.05 * eye_glow.min(3.0)), eye_col, 0.25 * eye_glow);
+        // A point on the face around the eye, lifted a hair off the skin
+        let on_face = |dx: f32, dy: f32| {
+            let (x, y) = (0.25 * side + dx * side, -0.1 + dy);
+            let [x, y, z] = head(column_at(x, y), y, 0.0);
+            project(rotate([x, y, z + 0.015], yaw, pitch)).0
+        };
+        let eye = on_face(0.0, 0.0);
+        halo(&p, eye, size * (0.09 + 0.05 * eye_glow.min(3.0)), eye_col, 0.2 * eye_glow);
+        // The eye: a low-poly almond (inner corner towards the nose), lids that blink now
+        // and then – but never while it screams – and a glowing iris
+        let open = if since < BACK { 1.0 } else { blink };
+        let almond: Vec<Pos2> = [
+            (-0.1, 0.0),
+            (-0.04, -0.045),
+            (0.05, -0.042),
+            (0.1, 0.004),
+            (0.04, 0.034),
+            (-0.05, 0.03),
+        ]
+        .iter()
+        .map(|&(dx, dy)| on_face(dx * 1.25, dy * 1.3 * open))
+        .collect();
+        let lit = (eye_glow / 2.5).min(1.0);
+        p.add(egui::Shape::convex_polygon(
+            almond.clone(),
+            mix(mix(SPACE, eye_col, 0.12), eye_col, lit * lit),
+            stroke(1.2, alpha(eye_col, 0.5 + 0.5 * lit)),
+        ));
+        if open > 0.3 {
+            let r = size * 0.038 * open.min(1.0);
+            p.circle_filled(eye, r, mix(eye_col, Color32::WHITE, 0.3 * lit));
+            p.circle_filled(eye, r * 0.45, mix(SPACE, eye_col, lit));
+            p.circle_filled(eye + vec2(-0.35, -0.35) * r, r * 0.22, alpha(Color32::WHITE, 0.8));
+        }
         if blast > 0.01 {
             let a = side * (0.55 + 0.2 * (t * 1.3 + side).sin());
             let dir = vec2(a.sin(), a.cos());
@@ -486,13 +524,8 @@ pub fn face(ui: &mut Ui, rect: Rect, song: &Song, live: &Live, now: f64) {
             beam(&p, eye, dir, reach, w * 5.0, size * 0.9, RED, 0.35 * blast);
             beam(&p, eye, dir, reach, w * 2.2, size * 0.4, mix(RED, hot, 0.5), 0.7 * blast);
             beam(&p, eye, dir, reach, w * 0.8, size * 0.1, mix(eye_col, Color32::WHITE, 0.6), blast);
-            // A flare across the eye
-            for flare in [vec2(1.0, 0.0), vec2(-1.0, 0.0)] {
-                beam(&p, eye, flare, size * 0.8 * blast, w * 0.5, 0.0, Color32::WHITE, 0.8 * blast);
-            }
             halo(&p, eye, size * 0.5 * blast, eye_col, blast);
         }
-        p.circle_filled(eye, size * 0.026 * (1.0 + eye_glow * 0.2), mix(eye_col, Color32::WHITE, 0.6));
     }
 
     crate::visual::energy_bar(&p, rect, energy, tint);
