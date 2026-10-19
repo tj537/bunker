@@ -4,6 +4,7 @@
 mod app;
 mod audio;
 mod engine;
+mod face;
 mod file;
 mod form;
 mod gen;

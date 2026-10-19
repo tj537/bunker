@@ -125,30 +125,106 @@ fn chip_shaped(ui: &mut Ui, text: &str, on: bool, color: Color32, width: Option<
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-/// A square effect button: icon on top, name below, its key in the corner
-#[allow(clippy::too_many_arguments)]
-pub fn fx_button(ui: &Ui, rect: Rect, resp: &Response, icon: &str, name: &str, key: &str, color: Color32, active: bool) {
+/// The record button: red even when idle, filled and pulsing while it records
+pub fn rec_chip(ui: &mut Ui, text: &str, on: bool, now: f64) -> Response {
+    let galley = ui.painter().layout_no_wrap(text.to_string(), bold(13.0), TEXT);
+    let size = vec2((galley.size().x + 22.0).max(40.0), 30.0);
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
     let p = ui.painter();
     let hot = resp.hovered();
+    if on {
+        let pulse = 0.5 + 0.5 * (now as f32 * 4.0).sin();
+        glow_rect(p, rect, 15.0, RED, 0.4 + 0.4 * pulse);
+        p.rect_filled(rect, 15.0, mix(PANEL, RED, 0.75 + 0.15 * pulse));
+        p.text(rect.center(), Align2::CENTER_CENTER, text, bold(13.0), TEXT);
+    } else {
+        p.rect_filled(rect, 15.0, mix(PANEL, RED, if hot { 0.3 } else { 0.14 }));
+        p.rect_stroke(rect, 15.0, stroke(1.2, RED), egui::StrokeKind::Inside);
+        p.text(rect.center(), Align2::CENTER_CENTER, text, bold(13.0), RED);
+    }
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// Side-by-side choices in one pill; the picked one is filled. Returns the one clicked.
+pub fn segmented(ui: &mut Ui, items: &[(String, &str)], picked: [bool; 2], color: Color32) -> Option<usize> {
+    let widths: Vec<f32> = items
+        .iter()
+        .map(|(t, _)| ui.painter().layout_no_wrap(t.clone(), bold(12.5), TEXT).size().x + 26.0)
+        .collect();
+    let (rect, _) = ui.allocate_exact_size(vec2(widths.iter().sum(), 30.0), Sense::hover());
+    ui.painter().rect_filled(rect, 15.0, mix(BG, SPACE, 0.35));
+    let mut x = rect.left();
+    let mut clicked = None;
+    for (i, ((text, tip), w)) in items.iter().zip(&widths).enumerate() {
+        let r = Rect::from_min_size(pos2(x, rect.top()), vec2(*w, 30.0));
+        x += w;
+        let resp = ui.interact(r, ui.id().with(("segment", i)), Sense::click()).on_hover_text(*tip);
+        let p = ui.painter();
+        let on = picked.get(i).copied().unwrap_or(false);
+        if on {
+            p.rect_filled(r.shrink(2.0), 13.0, color);
+        } else if resp.hovered() {
+            p.rect_filled(r.shrink(2.0), 13.0, PANEL_HI);
+        }
+        let ink = if on {
+            SPACE
+        } else if resp.hovered() {
+            TEXT
+        } else {
+            DIM
+        };
+        p.text(r.center(), Align2::CENTER_CENTER, text, bold(12.5), ink);
+        if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+            clicked = Some(i);
+        }
+    }
+    ui.painter().rect_stroke(rect, 15.0, stroke(1.0, LINE), egui::StrokeKind::Inside);
+    clicked
+}
+
+/// A square effect button: icon on top, name below, its key in the corner. `lit` 0…1
+/// lights it up without pressing it – when Bunker uses the effect by itself.
+#[allow(clippy::too_many_arguments)]
+pub fn fx_button(ui: &Ui, rect: Rect, resp: &Response, icon: &str, name: &str, key: &str, color: Color32, active: bool, lit: f32) {
+    let p = ui.painter();
+    let hot = resp.hovered();
+    let lit = if active { 0.0 } else { lit.clamp(0.0, 1.0) };
     let rect = if active { rect.shrink(1.5) } else { rect };
     if active {
         glow_rect(p, rect, 12.0, color, 0.9);
+    } else if lit > 0.0 {
+        glow_rect(p, rect, 12.0, color, 0.8 * lit);
     }
     let fill = if active {
         color
     } else if hot {
-        PANEL_HI
+        mix(PANEL_HI, color, 0.85 * lit)
     } else {
-        mix(PANEL, PANEL_HI, 0.5)
+        mix(mix(PANEL, PANEL_HI, 0.5), color, 0.85 * lit)
     };
     p.rect_filled(rect, 12.0, fill);
     p.rect_stroke(
         rect,
         12.0,
-        stroke(1.0, if active { color } else { alpha(color, if hot { 0.8 } else { 0.4 }) }),
+        stroke(
+            1.0,
+            if active || lit > 0.3 {
+                color
+            } else {
+                alpha(color, if hot { 0.8 } else { 0.4 })
+            },
+        ),
         egui::StrokeKind::Inside,
     );
-    let fg = if active { SPACE } else { color };
+    let fg = if active {
+        SPACE
+    } else {
+        if lit > 0.45 {
+            SPACE
+        } else {
+            color
+        }
+    };
     let compact = rect.height() < 46.0;
     if compact {
         p.text(

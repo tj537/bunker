@@ -23,6 +23,36 @@ mod tests {
         snap.save(&shapes, Path::new(&format!("target/snapshots/{name}.png")));
     }
 
+    /// The face over time: frames at these seconds, a build-up (or none) in each
+    fn render_face(name: &str, frames: &[(f64, Option<f32>)]) {
+        let mut snap = Offscreen::retina(1360.0, 860.0, 2.0);
+        crate::theme::install(&snap.ctx);
+        let mut app = BunkerApp::headless(Song::default(), View::Orbit, false);
+        app.visual = true;
+        app.face = true;
+        app.song.macros.energy = 0.8;
+        let mut shapes = Vec::new();
+        for &(t, build) in frames {
+            app.fake_live = Some(Live {
+                build,
+                caption: None,
+                ..playing(t * 8.0, &[0, 3])
+            });
+            shapes = snap.frame(t, |ctx| app.ui(ctx));
+        }
+        snap.save(&shapes, Path::new(&format!("target/snapshots/{name}.png")));
+    }
+
+    #[test]
+    #[ignore]
+    fn render_face_frames() {
+        render_face("face", &[(10.0, None), (10.02, None)]);
+        render_face("face_build", &[(10.0, Some(0.85)), (10.02, Some(0.85))]);
+        render_face("face_drop", &[(10.0, Some(0.99)), (10.02, None), (10.6, None)]);
+        render_face("face_burst", &[(10.0, Some(0.99)), (10.02, None), (11.1, None)]);
+        render_face("face_back", &[(10.0, Some(0.99)), (10.02, None), (12.4, None)]);
+    }
+
     fn playing(pos: f64, recent: &[usize]) -> Live {
         let mut hit_age = [2.0; TRACKS];
         for &t in recent {

@@ -22,7 +22,7 @@ fn hash(i: u32) -> f32 {
 }
 
 /// The colour of the moment: cool when calm, red hot at full energy
-fn mood(energy: f32) -> Color32 {
+pub fn mood(energy: f32) -> Color32 {
     let cool = track_color(Voice::OpenHat);
     let mid = track_color(Voice::Bass);
     if energy < 0.5 {
@@ -125,6 +125,12 @@ pub fn visual(ui: &mut Ui, rect: Rect, song: &Song, live: &Live, t: f64) {
     }
 
     // No text – just the energy, small at the bottom: where you are (← → move it)
+    energy_bar(&p, rect, energy, tint);
+}
+
+/// The energy as a small bar at the bottom of a visualizer, with its break and drop zones
+pub fn energy_bar(p: &eframe::egui::Painter, rect: Rect, energy: f32, tint: Color32) {
+    let c = rect.center();
     let w = (rect.width() * 0.22).clamp(160.0, 320.0);
     let bar = Rect::from_center_size(pos2(c.x, rect.bottom() - 28.0), vec2(w, 4.0));
     let at = |e: f32| bar.left() + bar.width() * e;

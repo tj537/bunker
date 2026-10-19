@@ -61,6 +61,18 @@ fn fit_text(p: &egui::Painter, text: &str, font: egui::FontId, max_w: f32) -> St
     String::new()
 }
 
+/// How much Bunker uses an effect by itself right now: every build-up runs the gate,
+/// harder towards the drop – the button lights up and flickers with the chop
+fn auto_fx(fx: Fx, live: &Live) -> f32 {
+    match (fx, live.build) {
+        (Fx::Gate, Some(p)) if live.playing => {
+            let chop = if live.pos.fract() < 0.5 { 1.0 } else { 0.55 };
+            (p * 1.3).clamp(0.25, 1.0) * chop
+        }
+        _ => 0.0,
+    }
+}
+
 fn fx_icon(fx: Fx) -> &'static str {
     match fx {
         Fx::Stutter => ph::REPEAT,
@@ -169,6 +181,8 @@ pub struct BunkerApp {
     pub settings: bool,
     /// Visualizer: the whole window is a light show
     pub visual: bool,
+    /// …and it's the face, not the lights
+    pub face: bool,
     /// The right panel shows the master section instead of the sound knobs
     pub master_tab: bool,
     last_preview: f64,
@@ -295,6 +309,7 @@ impl BunkerApp {
             song_form: None,
             song_fallback: song,
             visual: false,
+            face: false,
             settings: false,
             master_tab: false,
             last_preview: -1.0,
@@ -926,7 +941,8 @@ impl BunkerApp {
                 Key::B => self.drop_now(now),
                 Key::ArrowRight => self.set_energy(self.song.macros.energy + 0.05, now),
                 Key::ArrowLeft => self.set_energy(self.song.macros.energy - 0.05, now),
-                Key::P => self.toggle_visual(ctx),
+                Key::P => self.show(ctx, false),
+                Key::O => self.show(ctx, true),
                 Key::ArrowUp => self.song.bpm = (self.song.bpm + 1.0).min(180.0),
                 Key::ArrowDown => self.song.bpm = (self.song.bpm - 1.0).max(90.0),
                 Key::R => self.toggle_capture(now),
@@ -946,6 +962,16 @@ impl BunkerApp {
             self.rec_sr = self.audio.as_ref().map_or(44_100, |a| a.sample_rate);
             self.capture = true;
             self.send(Cmd::Capture(true));
+        }
+    }
+
+    /// LIGHTS or FACE: opens that visualizer, switches to it, or closes it if it's on
+    fn show(&mut self, ctx: &egui::Context, face: bool) {
+        if self.visual && self.face != face {
+            self.face = face;
+        } else {
+            self.face = face;
+            self.toggle_visual(ctx);
         }
     }
 
@@ -1073,7 +1099,7 @@ impl BunkerApp {
                 } else {
                     ph::RECORD.to_string()
                 };
-                if chip(ui, &text, self.capture, RED)
+                if widgets::rec_chip(ui, &text, self.capture, now)
                     .on_hover_text(if self.capture {
                         "Recording – click to stop and save it as a WAV (R)"
                     } else {
@@ -1083,22 +1109,31 @@ impl BunkerApp {
                 {
                     self.toggle_capture(now);
                 }
-                if chip(ui, ph::MONITOR_PLAY, self.visual, ACID)
-                    .on_hover_text("Visualizer: the whole screen becomes a light show (P)")
+                ui.add_space(4.0);
+                // Two visualizers for a projector: double-click or Esc comes back
+                if chip(ui, ph::MASK_HAPPY, self.visual && self.face, RED)
+                    .on_hover_text("FACE: a low-poly head that lives with the music – it screams on the drop (O)")
                     .clicked()
                 {
                     let ctx = ui.ctx().clone();
-                    self.toggle_visual(&ctx);
+                    self.show(&ctx, true);
                 }
-                // View switch
-                for (v, icon, tip) in [
-                    (View::Pads, ph::GRID_FOUR, "Pads & grid (Tab)"),
-                    (View::Orbit, ph::CIRCLES_THREE, "Orbit (Tab)"),
-                ] {
-                    let on = self.view == v;
-                    if chip(ui, icon, on, TEXT).on_hover_text(tip).clicked() {
-                        self.view = v;
-                    }
+                if chip(ui, ph::SPARKLE, self.visual && !self.face, ACID)
+                    .on_hover_text("LIGHTS: the whole screen becomes a light show (P)")
+                    .clicked()
+                {
+                    let ctx = ui.ctx().clone();
+                    self.show(&ctx, false);
+                }
+                ui.add_space(4.0);
+                // The view: ORBIT or CLASSIC (pads and grid)
+                let views = [
+                    (format!("{}  ORBIT", ph::CIRCLES_THREE), "Orbit: the tracks as rings (Tab)"),
+                    (format!("{}  CLASSIC", ph::GRID_FOUR), "Classic: pads and a step grid (Tab)"),
+                ];
+                let picked = [self.view == View::Orbit, self.view == View::Pads];
+                if let Some(i) = widgets::segmented(ui, &views, picked, ACID) {
+                    self.view = if i == 0 { View::Orbit } else { View::Pads };
                 }
                 ui.add_space(12.0);
                 self.bpm_box(ui);
@@ -1148,7 +1183,7 @@ impl BunkerApp {
             }
         });
         // Short on room (small window plus an update notice): just the icon
-        let text = if ui.available_width() > 620.0 {
+        let text = if ui.available_width() > 760.0 {
             format!("{}  SHUFFLE", ph::SHUFFLE)
         } else {
             ph::SHUFFLE.to_string()
@@ -1811,7 +1846,8 @@ impl BunkerApp {
                     let (r, resp) = ui.allocate_exact_size(vec2(bw, bh), Sense::click_and_drag());
                     self.fx_mouse[i] = resp.is_pointer_button_down_on();
                     let active = self.fx_mouse[i] || self.fx_key[i];
-                    widgets::fx_button(ui, r, &resp, fx_icon(fx), fx.name(), fx.key(), fx_color(fx), active);
+                    let lit = auto_fx(fx, live);
+                    widgets::fx_button(ui, r, &resp, fx_icon(fx), fx.name(), fx.key(), fx_color(fx), active, lit);
                     resp.on_hover_text(format!("{} – hold ({})", fx.blurb(), fx.key()))
                         .on_hover_cursor(egui::CursorIcon::PointingHand);
                 }
@@ -2010,7 +2046,17 @@ impl BunkerApp {
         let cr = Rect::from_center_size(pos2(rect.right() - song_w / 2.0, rect.center().y), vec2(song_w, song_h));
         let resp = ui.allocate_rect(cr, Sense::click());
         let on = self.song_form.is_some();
-        widgets::fx_button(ui, cr, &resp, if on { ph::STOP } else { ph::PLAY_PAUSE }, "AUTO SONG", "", ACID, on);
+        widgets::fx_button(
+            ui,
+            cr,
+            &resp,
+            if on { ph::STOP } else { ph::PLAY_PAUSE },
+            "AUTO SONG",
+            "",
+            ACID,
+            on,
+            0.0,
+        );
         let popup = ui.make_persistent_id("forms");
         let resp = resp
             .on_hover_text(if on {
@@ -2282,17 +2328,17 @@ impl BunkerApp {
                 egui::ScrollArea::vertical().max_height(max_h).show(ui, |ui| {
                     row(ui, ph::PLAY, "1 · Press play", "Space, or the button in the middle. Pick a vibe at the top – every pick rolls a new groove in that style (Custom starts empty). SHUFFLE (Enter) rolls again. ⌘/Ctrl + Z undoes anything, a shuffle too.");
                     row(ui, ph::CIRCLES_THREE, "2 · Read the orbit", "Each ring is one sound, once round is one bar of 16 steps, the numbers 1–4 are the beats and the beam is where it plays. A hollow circle is a step that's off, a filled dot one that plays. A white core: accent (louder). A coloured ring around it: it only plays sometimes. An arc to the dot before: the synth slides into it. A white ring: playing right now. A faded ring: that track is muted.");
-                    row(ui, ph::HAND_POINTING, "3 · Change the groove", "Click a dot to switch it on or off, drag to paint. Right-click a dot (or a tile in the grid) for its menu: on, accent, slide, how often it plays and – on bass and synth – its note. The mouse wheel on a bass or synth dot moves its note too.");
+                    row(ui, ph::HAND_POINTING, "3 · Change the groove", "Click a dot to switch it on or off, drag to paint. Right-click a dot (or a tile in CLASSIC, the pads and step grid – Tab) for its menu: on, accent, slide, how often it plays and – on bass and synth – its note. The mouse wheel on a bass or synth dot moves its note too.");
                     row(ui, ph::LIST, "4 · Tracks", "S solos a track, the speaker mutes it, the dice rolls a new rhythm for it (right-click: clear), the lock keeps shuffle and the auto mode away from it. The coloured pill is its sound – click it for the list, tune and decay. The number is the loop length: 16, 8, 4, 2 or 1 steps.");
                     row(ui, ph::MUSIC_NOTES, "5 · Mood & pitch", "MOOD picks the notes and chords of bass and synth – from Dark and Hypnotic to Euphoric, Sunny or Mysterious. Pitch moves them lower or higher.");
                     row(ui, ph::LIGHTNING, "6 · Energy & drop", "The energy bar is the arrangement, not the volume (← →): under 30 a break with no kick and bass, then the tracks come in one by one, from 70 everything plays, at 90 the build-up starts and two bars later it drops. DROP (B) does the same any time.");
                     row(ui, ph::WAVEFORM, "7 · Effects & sound", "Hold STUTTER (Q), ECHO (W), WASH (E), CRUSH (X), GATE (C) or TAPE STOP (V) and combine them; FILTER springs back when you let go. SOUND: DARK, ACID, SPACE and PUMP. MASTER: low, mid, high and drive.");
                     row(ui, ph::INFINITY, "8 · Auto mode", "Bunker keeps the groove moving: something changes every 2, 4 or 8 bars. With AUTO FX on it also steers the energy and plays breakdowns, build-ups and drops by itself. With AUTO FX off the energy bar is yours and no track is ever taken out.");
                     row(ui, ph::STACK, "9 · Favorites & auto song", "Click + under the orbit to keep what you hear (twelve slots), click a full one to switch on the next bar, right-click to rename, save over or clear. AUTO SONG makes a whole track from favorite 1 – a quiet intro, two or three drops, favorite 2 after the first – while you jam along. Click a part in the strip to jump there.");
-                    row(ui, ph::RECORD, "10 · Record", "The record button at the top (R) records everything you hear until you click it again – then save it as a WAV. An AUTO SONG records itself.");
-                    row(ui, ph::MONITOR_PLAY, "11 · Visualizer", "P: a fullscreen light show for a projector, with a small energy bar at the bottom. All keys keep working. Esc goes back.");
+                    row(ui, ph::RECORD, "10 · Record", "The red record button at the top (R) records everything you hear until you click it again – then save it as a WAV. An AUTO SONG records itself.");
+                    row(ui, ph::SPARKLE, "11 · Visualizers", "Two fullscreen shows for a projector, with a small energy bar at the bottom: LIGHTS (P) – a spectrum ring, shockwaves and stars – and FACE (O) – a low-poly head whose eyes glow with the beat, that warps and opens its mouth in a build-up, screams and bursts apart on the drop. All keys keep working. Esc or a double-click goes back.");
                     row(ui, ph::FOLDER_SIMPLE, "12 · Files & settings", "File → Save keeps the groove and your favorites in a .bunker file; open it from the menu or drag it onto the window. The gear holds volume, sound output, MIDI keyboard and the update check.");
-                    row(ui, ph::KEYBOARD, "Keys", "Space play · Enter shuffle · A–K pads · 1–8 mute · ← → energy · ↑ ↓ tempo · B drop · Q W E  X C V effects (hold) · R record · Tab orbit/pads · P visuals · ⌘/Ctrl Z undo · Esc close");
+                    row(ui, ph::KEYBOARD, "Keys", "Space play · Enter shuffle · A–K pads · 1–8 mute · ← → energy · ↑ ↓ tempo · B drop · Q W E  X C V effects (hold) · R record · Tab orbit/classic · P lights · O face · ⌘/Ctrl Z undo · Esc close");
                 });
             });
         self.help = open;
@@ -2355,7 +2401,11 @@ impl BunkerApp {
         if self.visual {
             egui::CentralPanel::default().frame(frame(SPACE, 0.0)).show(ctx, |ui| {
                 let rect = ui.max_rect();
-                visual::visual(ui, rect, &self.song, &live, now);
+                if self.face {
+                    crate::face::face(ui, rect, &self.song, &live, now);
+                } else {
+                    visual::visual(ui, rect, &self.song, &live, now);
+                }
                 // Double-click anywhere goes back
                 if ui.interact(rect, ui.id().with("visual"), Sense::click()).double_clicked() {
                     self.toggle_visual(ctx);
