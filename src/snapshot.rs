@@ -129,6 +129,21 @@ mod tests {
             app.song.macros.energy = 0.15;
             app.fake_live = Some(playing(4.2, &[3]));
         });
+        render("planets", 1360.0, 860.0, |app| {
+            app.view = View::Planets;
+            app.song.tracks[6].steps[3].slide = true;
+            app.fake_live = Some(playing(36.3, &[0, 3, 6]));
+        });
+        render("planets_build", 1360.0, 860.0, |app| {
+            app.view = View::Planets;
+            app.fake_live = Some(Live {
+                build: Some(0.6),
+                ..playing(50.5, &[1, 3])
+            });
+        });
+        render("planets_small", 1100.0, 700.0, |app| {
+            app.view = View::Planets;
+        });
         render("pads", 1360.0, 860.0, |app| {
             app.view = View::Pads;
             app.fake_live = Some(playing(9.4, &[2, 7]));

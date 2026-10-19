@@ -13,6 +13,7 @@ mod midi;
 mod offscreen;
 mod orbit;
 mod pads;
+mod planets;
 mod rng;
 #[cfg(test)]
 mod snapshot;

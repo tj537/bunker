@@ -104,6 +104,7 @@ fn synth_family(sound: u8) -> u8 {
 pub enum View {
     Orbit,
     Pads,
+    Planets,
 }
 
 /// The recording of a song (SONG): offered for saving when it ends
@@ -873,7 +874,12 @@ impl BunkerApp {
         }
         let tab = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Tab));
         if tab {
-            self.view = if self.view == View::Orbit { View::Pads } else { View::Orbit };
+            // Orbit → planets → classic → orbit
+            self.view = match self.view {
+                View::Orbit => View::Planets,
+                View::Planets => View::Pads,
+                View::Pads => View::Orbit,
+            };
         }
         let events = ctx.input(|i| i.events.clone());
         let pad_keys = [Key::A, Key::S, Key::D, Key::F, Key::G, Key::H, Key::J, Key::K];
@@ -1129,14 +1135,28 @@ impl BunkerApp {
                     self.show(&ctx, false);
                 }
                 ui.add_space(4.0);
-                // The view: ORBIT or CLASSIC (pads and grid)
+                // The view: ORBIT, PLANETS or CLASSIC (pads and grid)
+                let order = [View::Orbit, View::Planets, View::Pads];
+                let picked = order.map(|v| self.view == v);
+                // In a small window only the view you're in has its name
+                let compact = ui.ctx().screen_rect().width() < 1250.0;
+                let label = |i: usize, icon: &str, name: &str| {
+                    if compact && !picked[i] {
+                        icon.to_string()
+                    } else {
+                        format!("{icon}  {name}")
+                    }
+                };
                 let views = [
-                    (format!("{}  ORBIT", ph::CIRCLES_THREE), "Orbit: the tracks as rings (Tab)"),
-                    (format!("{}  CLASSIC", ph::GRID_FOUR), "Classic: pads and a step grid (Tab)"),
+                    (label(0, ph::CIRCLES_THREE, "ORBIT"), "Orbit: the tracks as rings (Tab)"),
+                    (
+                        label(1, ph::PLANET, "PLANETS"),
+                        "Planets: every track a planet going round the sun (Tab)",
+                    ),
+                    (label(2, ph::GRID_FOUR, "CLASSIC"), "Classic: pads and a step grid (Tab)"),
                 ];
-                let picked = [self.view == View::Orbit, self.view == View::Pads];
-                if let Some(i) = widgets::segmented(ui, &views, picked, ACID) {
-                    self.view = if i == 0 { View::Orbit } else { View::Pads };
+                if let Some(i) = widgets::segmented(ui, &views, &picked, ACID) {
+                    self.view = order[i];
                 }
                 ui.add_space(12.0);
                 self.bpm_box(ui);
@@ -2325,7 +2345,7 @@ impl BunkerApp {
                 let max_h = ctx.screen_rect().height() - 200.0;
                 egui::ScrollArea::vertical().max_height(max_h).show(ui, |ui| {
                     row(ui, ph::PLAY, "1 · Press play", "Space, or the button in the middle. Pick a vibe at the top – every pick rolls a new groove in that style (Custom starts empty). SHUFFLE (Enter) rolls again. ⌘/Ctrl + Z undoes anything, a shuffle too.");
-                    row(ui, ph::CIRCLES_THREE, "2 · Read the orbit", "Each ring is one sound, once round is one bar of 16 steps, the numbers 1–4 are the beats and the beam is where it plays. A hollow circle is a step that's off, a filled dot one that plays. A white core: accent (louder). A coloured ring around it: it only plays sometimes. An arc to the dot before: the synth slides into it. A white ring: playing right now. A faded ring: that track is muted.");
+                    row(ui, ph::CIRCLES_THREE, "2 · Read the orbit", "Each ring is one sound, once round is one bar of 16 steps, the numbers 1–4 are the beats and the beam is where it plays. A hollow circle is a step that's off, a filled dot one that plays. A white core: accent (louder). A coloured ring around it: it only plays sometimes. An arc to the dot before: the synth slides into it. A white ring: playing right now. A faded ring: that track is muted. PLANETS at the top shows the same groove as a solar system: every track a planet that plays the beads it passes, notes as stalks – the higher, the higher.");
                     row(ui, ph::HAND_POINTING, "3 · Change the groove", "Click a dot to switch it on or off, drag to paint. Right-click a dot (or a tile in CLASSIC, the pads and step grid – Tab) for its menu: on, accent, slide, how often it plays and – on bass and synth – its note. The mouse wheel on a bass or synth dot moves its note too.");
                     row(ui, ph::LIST, "4 · Tracks", "S solos a track, the speaker mutes it, the dice rolls a new rhythm for it (right-click: clear), the lock keeps shuffle and the auto mode away from it. The coloured pill is its sound – click it for the list, tune and decay.");
                     row(ui, ph::MUSIC_NOTES, "5 · Mood & pitch", "MOOD picks the notes and chords of bass and synth – from Dark and Hypnotic to Euphoric, Sunny or Mysterious. Pitch moves them lower or higher.");
@@ -2336,7 +2356,7 @@ impl BunkerApp {
                     row(ui, ph::RECORD, "10 · Record", "The red record button at the top (R) records everything you hear until you click it again – then save it as a WAV. An AUTO SONG records itself.");
                     row(ui, ph::SPARKLE, "11 · Visualizers", "Two fullscreen shows for a projector, with a small energy bar at the bottom: LIGHTS (P) – a spectrum ring, shockwaves and stars – and FACE (O) – a low-poly head that nods in time, glitches in a build-up, and on the drop screams with laser eyes, cracks and bursts apart. All keys keep working. Esc or a double-click goes back.");
                     row(ui, ph::FOLDER_SIMPLE, "12 · Files & settings", "File → Save keeps the groove and your favorites in a .bunker file; open it from the menu or drag it onto the window. The gear holds volume, sound output, MIDI keyboard and the update check.");
-                    row(ui, ph::KEYBOARD, "Keys", "Space play · Enter shuffle · A–K pads · 1–8 mute · ← → energy · ↑ ↓ tempo · B drop · Q W E  X C V effects (hold) · R record · Tab orbit/classic · P lights · O face · ⌘/Ctrl Z undo · Esc close");
+                    row(ui, ph::KEYBOARD, "Keys", "Space play · Enter shuffle · A–K pads · 1–8 mute · ← → energy · ↑ ↓ tempo · B drop · Q W E  X C V effects (hold) · R record · Tab orbit/planets/classic · P lights · O face · ⌘/Ctrl Z undo · Esc close");
                 });
             });
         self.help = open;
@@ -2476,6 +2496,12 @@ impl BunkerApp {
             match self.view {
                 View::Orbit => {
                     let out = orbit::orbit(ui, inner, &mut self.song, &live, &mut self.paint);
+                    if out.toggle_play {
+                        self.toggle_play();
+                    }
+                }
+                View::Planets => {
+                    let out = crate::planets::planets(ui, inner, &mut self.song, &live, &mut self.paint);
                     if out.toggle_play {
                         self.toggle_play();
                     }

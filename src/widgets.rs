@@ -146,7 +146,7 @@ pub fn rec_chip(ui: &mut Ui, text: &str, on: bool, now: f64) -> Response {
 }
 
 /// Side-by-side choices in one pill; the picked one is filled. Returns the one clicked.
-pub fn segmented(ui: &mut Ui, items: &[(String, &str)], picked: [bool; 2], color: Color32) -> Option<usize> {
+pub fn segmented(ui: &mut Ui, items: &[(String, &str)], picked: &[bool], color: Color32) -> Option<usize> {
     let widths: Vec<f32> = items
         .iter()
         .map(|(t, _)| ui.painter().layout_no_wrap(t.clone(), bold(12.5), TEXT).size().x + 26.0)
