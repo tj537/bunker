@@ -273,16 +273,16 @@ pub fn face(ui: &mut Ui, rect: Rect, song: &Song, live: &Live, now: f64) {
     let beat = live.pos / if build > 0.5 { 2.0 } else { 4.0 };
     let nod = if playing { (1.0 - beat.fract() as f32).powi(3) } else { 0.0 };
     let yaw = 0.3 * (t * 0.27).sin() + 0.08 * warp * (t * 7.0).sin();
-    // Now and then, out of nowhere, an evil grin for a few seconds (not while it builds
-    // up or breaks): the chin dips and the eyes narrow
+    // Now and then, out of nowhere, the mouth falls open for a few seconds, corners down
+    // (not while it builds up or breaks): the head tips back and the eyes go wider
     let slot = (t / 7.0).floor();
     let into = t - slot * 7.0;
-    let grin = if hash(slot as u32 * 13 + 5) < 0.35 && build < 0.2 && since > DONE {
+    let gape = if hash(slot as u32 * 13 + 5) < 0.35 && build < 0.2 && since > DONE {
         ease((into - 1.0) / 0.4) * (1.0 - ease((into - 3.6) / 0.6))
     } else {
         0.0
     };
-    let pitch = 0.06 * (t * 0.21).sin() - 0.02 - 0.13 * nod - 0.06 * grin;
+    let pitch = 0.06 * (t * 0.21).sin() - 0.02 - 0.13 * nod + 0.04 * gape;
     let jitter = 0.004 + 0.006 * hats + 0.05 * warp;
     let zoom = 1.0 + 0.035 * kick + 0.55 * rush;
     let size = rect.width().min(rect.height()) * 0.34 * zoom;
@@ -475,20 +475,20 @@ pub fn face(ui: &mut Ui, rect: Rect, song: &Song, live: &Live, now: f64) {
         p.line_segment([a, b], stroke(1.0 + crack, col));
     }
 
-    // The shut mouth: no lips – a thin black slit, like an alien's. Now and then it
-    // stretches into a crescent grin full of needle teeth.
+    // The shut mouth: no lips – a thin black slit, like an alien's. Now and then it falls
+    // open into a dark gape with the corners pulled down.
     if jaw <= 0.1 && fly < 0.02 {
         let at = |x: f32, y: f32| {
             let [hx, hy, hz] = head(column_at(x, y), y, 0.0);
             project(rotate([hx, hy, hz + 0.012], yaw, pitch)).0
         };
-        let w = 0.17 + 0.08 * grin;
+        let w = 0.17 - 0.03 * gape;
         let xs: Vec<f32> = (0..=12).map(|i| -w + 2.0 * w * i as f32 / 12.0).collect();
-        let seam = |x: f32| MOUTH_Y - grin * 0.1 * (x.abs() / w).powf(2.2);
-        let open = |x: f32| (0.008 + 0.035 * grin) * (1.0 - (x / w).powi(2)).max(0.0).powf(0.8);
-        // Opening downwards: a crescent when it grins
-        let top = |x: f32| seam(x) - open(x) * 0.5;
-        let bottom = |x: f32| seam(x) + open(x) * 1.5;
+        let edge = |x: f32| (1.0 - (x / w).powi(2)).max(0.0);
+        let seam = |x: f32| MOUTH_Y + gape * 0.05 * (x.abs() / w).powf(1.6);
+        let open = |x: f32| (0.008 + 0.075 * gape) * edge(x).powf(0.6);
+        let top = |x: f32| seam(x) - open(x) * 0.45 - gape * 0.015 * edge(x);
+        let bottom = |x: f32| seam(x) + open(x) * 0.9;
         let mut mesh = Mesh::default();
         for pair in xs.windows(2) {
             let (x0, x1) = (pair[0], pair[1]);
@@ -500,20 +500,6 @@ pub fn face(ui: &mut Ui, rect: Rect, song: &Song, live: &Live, now: f64) {
             mesh.add_triangle(base, base + 2, base + 3);
         }
         p.add(egui::Shape::mesh(mesh));
-        if grin > 0.15 {
-            // Needle teeth from both edges, top and bottom in turn
-            let bone = mix(SPACE, mix(TEXT, tint, 0.25), 0.85 * grin);
-            for (i, pair) in xs.windows(2).enumerate().skip(1).take(xs.len() - 3) {
-                let (x0, x1) = (pair[0], pair[1]);
-                let xm = (x0 + x1) / 2.0;
-                let reach = open(xm) * 1.6 * grin;
-                if i % 2 == 0 {
-                    fang_tooth(&p, at(x0, top(x0)), at(x1, top(x1)), at(xm, top(xm) + reach), bone);
-                } else {
-                    fang_tooth(&p, at(x0, bottom(x0)), at(x1, bottom(x1)), at(xm, bottom(xm) - reach), bone);
-                }
-            }
-        }
     }
 
     // Eyes: they glow with the beat, burn in the build-up and blaze on the drop
@@ -551,36 +537,32 @@ pub fn face(ui: &mut Ui, rect: Rect, song: &Song, live: &Live, now: f64) {
         };
         let eye = on_face(0.0, 0.0);
         halo(&p, eye, size * (0.09 + 0.05 * eye_glow.min(3.0)), eye_col, 0.2 * eye_glow * seen);
-        // The eye: a narrow, slanted almond – inner corner down, outer corner up, a heavy
-        // upper lid – hollow and dark, with a slit of a pupil that glows. It hardly ever
-        // blinks, and never while it screams.
-        let open = if since < BACK { 1.0 } else { blink } * (1.0 + 0.35 * build.max(laser)) * (1.0 - 0.4 * grin);
-        let almond: Vec<Pos2> = [
-            (-0.11, 0.03),
-            (-0.05, -0.012),
-            (0.05, -0.04),
-            (0.12, -0.035),
-            (0.06, 0.02),
-            (-0.04, 0.035),
-        ]
-        .iter()
-        .map(|&(dx, dy)| on_face(dx * 1.2, dy * 1.2 * open))
-        .collect();
+        // The eye: wide open and staring – a low-poly oval with a pale white, a glowing
+        // iris and a huge black pupil that widens on the kick. It hardly ever blinks,
+        // never while it screams.
+        let open = if since < BACK { 1.0 } else { blink } * (1.0 + 0.2 * build.max(laser) + 0.15 * gape);
+        let oval: Vec<Pos2> = (0..10)
+            .map(|k| {
+                let a = k as f32 / 10.0 * std::f32::consts::TAU;
+                // A little pointed at the inner corner
+                let rx = if a.cos() < -0.9 { 0.13 } else { 0.115 };
+                on_face(rx * a.cos(), 0.088 * a.sin() * open)
+            })
+            .collect();
         let lit = (eye_glow / 2.5).min(1.0);
+        let white = mix(SPACE, mix(TEXT, tint, 0.35), 0.5);
         p.add(egui::Shape::convex_polygon(
-            almond,
-            mix(mix(SPACE, Color32::BLACK, 0.6), eye_col, 0.08 + 0.9 * lit * lit).gamma_multiply(seen),
-            stroke(1.0, alpha(eye_col, (0.35 + 0.5 * lit) * seen)),
+            oval,
+            mix(white, eye_col, lit * lit).gamma_multiply(seen),
+            stroke(1.2, alpha(mix(SPACE, tint, 0.2), seen)),
         ));
-        if open > 0.3 && seen > 0.05 {
-            let at = eye + gaze * (1.0 - lit) + vec2(0.0, -size * 0.004);
-            let (w, h) = (size * 0.009, size * 0.034 * open.min(1.2));
-            halo(&p, at, size * 0.06, eye_col, (0.5 + 0.3 * kick) * seen);
-            p.add(egui::Shape::convex_polygon(
-                vec![at + vec2(0.0, -h), at + vec2(w, 0.0), at + vec2(0.0, h), at + vec2(-w, 0.0)],
-                mix(eye_col, Color32::WHITE, 0.4 + 0.4 * lit).gamma_multiply(seen),
-                stroke(0.0, eye_col),
-            ));
+        if open > 0.45 && seen > 0.05 {
+            let at = eye + gaze * (1.0 - lit) * 0.5;
+            let r = size * 0.07 * open.min(1.0);
+            halo(&p, at, r * 1.6, eye_col, (0.35 + 0.3 * kick) * seen);
+            p.circle_filled(at, r, mix(eye_col, Color32::WHITE, 0.2 + 0.5 * lit).gamma_multiply(seen));
+            p.circle_filled(at, r * (0.74 + 0.12 * kick), mix(VOID, eye_col, 0.5 * lit).gamma_multiply(seen));
+            p.circle_filled(at + vec2(-0.35, -0.4) * r, r * 0.16, alpha(Color32::WHITE, 0.85 * seen));
         }
         if blast > 0.01 {
             let a = side * (0.55 + 0.2 * (t * 1.3 + side).sin());
@@ -596,9 +578,9 @@ pub fn face(ui: &mut Ui, rect: Rect, song: &Song, live: &Live, now: f64) {
     crate::visual::energy_bar(&p, rect, energy, tint);
 }
 
-/// A moment when the face grins (for the screenshots)
+/// A moment when the face gapes (for the screenshots)
 #[cfg(test)]
-pub fn grin_at() -> f64 {
+pub fn gape_at() -> f64 {
     let slot = (1..).find(|&n: &u32| hash(n * 13 + 5) < 0.35).unwrap_or(1);
     slot as f64 * 7.0 + 2.5
 }
