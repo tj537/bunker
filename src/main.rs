@@ -16,6 +16,7 @@ mod snapshot;
 mod song;
 mod synth;
 mod theme;
+mod update;
 mod wav;
 mod widgets;
 

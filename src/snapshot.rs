@@ -50,7 +50,25 @@ mod tests {
                 &Default::default(),
                 &mut crate::rng::Rng::new(4),
             ));
+            app.slot_now = Some(0);
             app.fake_live = Some(playing(36.3, &[0, 3, 6]));
+        });
+        render("orbit_chain_update", 1360.0, 860.0, |app| {
+            for (i, vibe) in [crate::song::Vibe::Dub, crate::song::Vibe::Rave, crate::song::Vibe::Melodic]
+                .into_iter()
+                .enumerate()
+            {
+                app.slots[i] = Some(crate::gen::generate(
+                    vibe,
+                    &Default::default(),
+                    &mut crate::rng::Rng::new(i as u64 + 30),
+                ));
+            }
+            app.song = app.slots[1].unwrap();
+            app.slot_now = Some(1);
+            app.chain = Some(8);
+            app.new_version = Some(crate::update::Release { version: "0.3.0".into() });
+            app.fake_live = Some(playing(20.3, &[0, 7]));
         });
         render("orbit_build", 1360.0, 860.0, |app| {
             app.fake_live = Some(Live {
@@ -59,6 +77,8 @@ mod tests {
             });
         });
         render("orbit_small", 1100.0, 700.0, |app| {
+            app.slots[0] = Some(app.song);
+            app.slot_now = Some(0);
             app.fake_live = Some(playing(4.2, &[0]));
         });
         render("pads", 1360.0, 860.0, |app| {
@@ -70,6 +90,25 @@ mod tests {
         });
         render("help_small", 1100.0, 700.0, |app| {
             app.help = true;
+        });
+        // The pictures in the README (docs/images, see `readme_images` below)
+        render("readme_orbit", 1360.0, 860.0, |app| {
+            use crate::song::{Vibe, Voice};
+            let mut rng = crate::rng::Rng::new(77);
+            for (i, vibe) in [Vibe::Dub, Vibe::Acid, Vibe::Rave].into_iter().enumerate() {
+                let mut s = crate::gen::generate(vibe, &Default::default(), &mut rng);
+                s.track_mut(Voice::Acid).mute = false;
+                app.slots[i] = Some(s);
+            }
+            app.song = app.slots[1].unwrap();
+            app.song.auto = true;
+            app.song.auto_bars = 4;
+            app.slot_now = Some(1);
+            app.fx_key[2] = true;
+            app.fake_live = Some(Live {
+                caption: Some(("Hat sound: 808".into(), 0.5)),
+                ..playing(37.3, &[0, 3, 6, 7])
+            });
         });
     }
 }

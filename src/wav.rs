@@ -56,9 +56,8 @@ mod tests {
         std::fs::create_dir_all(dir).unwrap();
         for (i, vibe) in Vibe::ALL.into_iter().enumerate() {
             let mut song = crate::gen::generate(vibe, &Default::default(), &mut crate::rng::Rng::new(100 + i as u64));
-            if vibe == Vibe::Acid {
-                song.track_mut(crate::song::Voice::Acid).mute = false;
-            }
+            // Let every demo show off its synth line
+            song.track_mut(crate::song::Voice::Acid).mute = false;
             let buf = crate::engine::render_offline(&song, 8, 44_100, 7);
             write(
                 &dir.join(format!("{}.wav", vibe.name().to_lowercase().replace(' ', "-"))),
@@ -67,10 +66,11 @@ mod tests {
             )
             .unwrap();
         }
-        // Auto mode over a whole 32-bar cycle: breakdown, build-up, drop
+        // Auto mode over two 32-bar cycles: changes, fills, two kinds of breakdown, drops
         let mut song = crate::gen::generate(Vibe::Peak, &Default::default(), &mut crate::rng::Rng::new(5));
         song.auto = true;
-        let buf = crate::engine::render_offline(&song, 36, 44_100, 3);
-        write(&dir.join("auto-36-bars.wav"), &buf, 44_100).unwrap();
+        song.auto_bars = 4;
+        let buf = crate::engine::render_offline(&song, 68, 44_100, 3);
+        write(&dir.join("auto-68-bars.wav"), &buf, 44_100).unwrap();
     }
 }

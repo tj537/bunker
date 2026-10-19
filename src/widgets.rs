@@ -143,8 +143,13 @@ pub fn paint_big_button(ui: &Ui, rect: Rect, resp: &Response, icon: &str, text: 
 
 /// Small pill toggle (chips)
 pub fn chip(ui: &mut Ui, text: &str, on: bool, color: Color32) -> Response {
+    chip_sized(ui, text, on, color, None)
+}
+
+/// A chip with a fixed width (`None`: as wide as its text)
+pub fn chip_sized(ui: &mut Ui, text: &str, on: bool, color: Color32, width: Option<f32>) -> Response {
     let galley = ui.painter().layout_no_wrap(text.to_string(), bold(13.0), TEXT);
-    let size = vec2(galley.size().x + 22.0, 30.0);
+    let size = vec2(width.unwrap_or(galley.size().x + 22.0), 30.0);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
     let p = ui.painter();
     let hot = resp.hovered();
@@ -169,6 +174,52 @@ pub fn chip(ui: &mut Ui, text: &str, on: bool, color: Color32) -> Response {
         },
     );
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// A square effect button: icon on top, name below, its key in the corner
+#[allow(clippy::too_many_arguments)]
+pub fn fx_button(ui: &Ui, rect: Rect, resp: &Response, icon: &str, name: &str, key: &str, color: Color32, active: bool) {
+    let p = ui.painter();
+    let hot = resp.hovered();
+    let rect = if active { rect.shrink(1.5) } else { rect };
+    if active {
+        glow_rect(p, rect, 12.0, color, 0.9);
+    }
+    let fill = if active {
+        color
+    } else if hot {
+        PANEL_HI
+    } else {
+        mix(PANEL, PANEL_HI, 0.5)
+    };
+    p.rect_filled(rect, 12.0, fill);
+    p.rect_stroke(
+        rect,
+        12.0,
+        stroke(1.0, if active { color } else { alpha(color, if hot { 0.8 } else { 0.4 }) }),
+        egui::StrokeKind::Inside,
+    );
+    let fg = if active { BG } else { color };
+    let compact = rect.height() < 46.0;
+    if compact {
+        p.text(
+            rect.center() - vec2(4.0, 0.0),
+            Align2::CENTER_CENTER,
+            format!("{icon} {name}"),
+            bold(11.0),
+            fg,
+        );
+    } else {
+        p.text(rect.center() - vec2(0.0, 8.0), Align2::CENTER_CENTER, icon, body(18.0), fg);
+        p.text(rect.center() + vec2(0.0, 12.0), Align2::CENTER_CENTER, name, bold(11.0), fg);
+    }
+    p.text(
+        rect.right_top() + vec2(-7.0, 5.0),
+        Align2::RIGHT_TOP,
+        key,
+        bold(9.5),
+        if active { alpha(BG, 0.6) } else { alpha(TEXT, 0.35) },
+    );
 }
 
 /// Bipolar slider −1…1 that springs back to the middle when released

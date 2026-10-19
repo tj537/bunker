@@ -2,12 +2,12 @@
 //!
 //! It runs on the audio thread. The UI talks to it with [`Cmd`] messages and
 //! reads the playhead and hit lights from [`Shared`] atomics; when the engine
-//! itself changes the song (auto mode, recording) it sends the new song back
-//! as an [`Event`]. The same engine renders WAV exports offline.
+//! itself changes the song (auto mode, recording, scene chain) it sends the new
+//! song back as an [`Event`]. The same engine renders WAV exports offline.
 
 use crate::gen::{self, Change};
 use crate::rng::Rng;
-use crate::song::{Song, Voice, STEPS, TRACKS};
+use crate::song::{Song, Vibe, Voice, STEPS, TRACKS};
 use crate::synth::*;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
@@ -25,15 +25,79 @@ pub enum Cmd {
     },
     /// −1 (low-pass) … 0 (off) … +1 (high-pass)
     Filter(f32),
-    Echo(bool),
-    Stutter(bool),
+    /// A live effect held down (true) or let go
+    Fx(Fx, bool),
     Drop,
     /// Semitones for bass and acid (MIDI keyboard)
     Transpose(i8),
+    /// Play the saved scenes one after another (None: stop)
+    Chain(Option<Box<Chain>>),
 }
 
 pub enum Event {
     Song(Box<Song>, Option<Change>),
+}
+
+/// The live effects you hold down
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Fx {
+    Stutter,
+    Echo,
+    Wash,
+    Crush,
+    Gate,
+    Tape,
+}
+
+impl Fx {
+    pub const ALL: [Fx; 6] = [Fx::Stutter, Fx::Echo, Fx::Wash, Fx::Crush, Fx::Gate, Fx::Tape];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Fx::Stutter => "STUTTER",
+            Fx::Echo => "ECHO",
+            Fx::Wash => "WASH",
+            Fx::Crush => "CRUSH",
+            Fx::Gate => "GATE",
+            Fx::Tape => "TAPE STOP",
+        }
+    }
+
+    /// Keyboard key (shown on the button)
+    pub fn key(self) -> &'static str {
+        match self {
+            Fx::Stutter => "Q",
+            Fx::Echo => "W",
+            Fx::Wash => "E",
+            Fx::Crush => "X",
+            Fx::Gate => "C",
+            Fx::Tape => "V",
+        }
+    }
+
+    pub fn blurb(self) -> &'static str {
+        match self {
+            Fx::Stutter => "Repeats two steps over and over",
+            Fx::Echo => "Throws everything into a long echo",
+            Fx::Wash => "Drowns the beat in a huge reverb",
+            Fx::Crush => "Lo-fi: fewer bits, lower sample rate",
+            Fx::Gate => "Chops the sound into 16th notes",
+            Fx::Tape => "Slows down like a turntable switched off",
+        }
+    }
+
+    pub fn index(self) -> usize {
+        Fx::ALL.iter().position(|&f| f == self).unwrap_or(0)
+    }
+}
+
+/// Scenes to play in turn: the next filled one every `bars` bars
+#[derive(Clone)]
+pub struct Chain {
+    pub songs: [Option<Song>; 4],
+    pub bars: u8,
+    /// The scene playing now
+    pub at: usize,
 }
 
 /// Lock-free state the UI reads every frame
@@ -84,12 +148,86 @@ struct Build {
     len: u64,
 }
 
+/// How the auto mode arranges one 32-bar cycle
+#[derive(Clone, Copy)]
+struct Plan {
+    /// Bar of the cycle where the breakdown starts (it lasts until the build-up at bar 30)
+    breakdown_at: u64,
+    /// Tracks that leave for the breakdown
+    out: &'static [Voice],
+    /// A low-pass filter opens slowly through the breakdown
+    sweep: bool,
+}
+
+const PLANS: [Plan; 4] = [
+    // Classic: kick and bass out for six bars
+    Plan {
+        breakdown_at: 24,
+        out: &[Voice::Kick, Voice::Bass],
+        sweep: false,
+    },
+    // Short and filtered: only the kick leaves, for two bars
+    Plan {
+        breakdown_at: 28,
+        out: &[Voice::Kick],
+        sweep: true,
+    },
+    // Stripped: just hats, percussion and the synth line
+    Plan {
+        breakdown_at: 24,
+        out: &[Voice::Kick, Voice::Bass, Voice::Clap, Voice::Ride],
+        sweep: false,
+    },
+    // Filtered: no kick, everything else under a slowly opening filter
+    Plan {
+        breakdown_at: 24,
+        out: &[Voice::Kick],
+        sweep: true,
+    },
+];
+
+struct Breakdown {
+    start: u64,
+    len: u64,
+    out: &'static [Voice],
+    /// Mute state of every track before the breakdown
+    before: [bool; TRACKS],
+    sweep: bool,
+}
+
+/// A one-bar fill at the end of an 8-bar phrase (auto mode)
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Fill {
+    /// Clap roll into the next phrase
+    Roll,
+    /// Kick and bass drop out for the last beat
+    Gap,
+    /// Falling toms
+    Toms,
+    /// Open hats on every 8th
+    OpenHats,
+    /// The clap thrown into the echo
+    Throw,
+}
+
+const FILLS: [Fill; 5] = [Fill::Roll, Fill::Gap, Fill::Toms, Fill::OpenHats, Fill::Throw];
+
+/// A stable pseudo-random number 0…1 for a key – same key, same number
+fn hash01(key: u64) -> f32 {
+    let mut z = key.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    ((z ^ (z >> 31)) >> 40) as f32 / (1u64 << 24) as f32
+}
+
 pub struct Engine {
     sr: f32,
     pub song: Song,
     playing: bool,
-    /// Kick and bass were muted by the auto mode's breakdown
-    breakdown: bool,
+    breakdown: Option<Breakdown>,
+    plan: Plan,
+    fill: Option<(u64, Fill)>,
+    chain: Option<Box<Chain>>,
     phase: f64,
     last_fired: Option<u64>,
     half_fired: Option<u64>,
@@ -119,8 +257,23 @@ pub struct Engine {
     crash: f32,
     filter: f32,
     filter_target: f32,
-    echo: bool,
+    /// Held live effects, in `Fx::ALL` order
+    fx: [bool; 6],
     echo_amount: f32,
+    /// Echo throw from a fill, fades out by itself
+    throw: f32,
+    wash: f32,
+    crush: f32,
+    crush_count: f32,
+    crush_hold: (f32, f32),
+    gate: f32,
+    gate_env: f32,
+    /// Tape stop: the last two seconds of output, read back slower and slower
+    tape: Vec<f32>,
+    tape_w: usize,
+    tape_r: f64,
+    tape_rate: f32,
+    taping: bool,
     stutter: Option<u64>,
     build: Option<Build>,
     transpose: i8,
@@ -137,7 +290,10 @@ impl Engine {
             sr,
             song,
             playing: false,
-            breakdown: false,
+            breakdown: None,
+            plan: PLANS[0],
+            fill: None,
+            chain: None,
             phase: 0.0,
             last_fired: None,
             half_fired: None,
@@ -146,9 +302,9 @@ impl Engine {
             kick: Kick::new(),
             clap: Clap::new(sr),
             rim: Rim::new(sr),
-            hat: Hat::new(sr, HatKind::Closed),
-            open_hat: Hat::new(sr, HatKind::Open),
-            ride: Hat::new(sr, HatKind::Ride),
+            hat: Hat::new(sr, &HATS[0]),
+            open_hat: Hat::new(sr, &OPEN_HATS[0]),
+            ride: Hat::new(sr, &RIDES[0]),
             bass: Bass::new(sr),
             acid: Acid::new(sr),
             boom: Boom::default(),
@@ -165,8 +321,20 @@ impl Engine {
             crash: 0.0,
             filter: 0.0,
             filter_target: 0.0,
-            echo: false,
+            fx: [false; 6],
             echo_amount: 0.0,
+            throw: 0.0,
+            wash: 0.0,
+            crush: 0.0,
+            crush_count: 0.0,
+            crush_hold: (0.0, 0.0),
+            gate: 0.0,
+            gate_env: 1.0,
+            tape: vec![0.0; (sr * 2.0) as usize * 2],
+            tape_w: 0,
+            tape_r: 0.0,
+            tape_rate: 1.0,
+            taping: false,
             stutter: None,
             build: None,
             transpose: 0,
@@ -183,7 +351,7 @@ impl Engine {
                 self.song = *s;
                 self.song.sanitize();
                 // Auto mode switched off in the middle of a breakdown: bring the beat back
-                if self.breakdown && !self.song.auto {
+                if self.breakdown.is_some() && !self.song.auto {
                     self.end_breakdown();
                 }
             }
@@ -193,19 +361,22 @@ impl Engine {
                     self.phase = 0.0;
                     self.last_fired = None;
                     self.half_fired = None;
+                    self.fill = None;
+                    self.plan = PLANS[0];
                 }
             }
             Cmd::Stop => {
                 self.playing = false;
-                if self.breakdown {
+                if self.breakdown.is_some() {
                     self.end_breakdown();
                 }
                 self.build = None;
                 self.stutter = None;
+                self.fill = None;
                 self.shared.build.store(0, Ordering::Relaxed);
             }
             Cmd::Hit { voice, vel, record } => {
-                // Pads play the root – the acid one octave up, where its lines live
+                // Pads play the root – the synth one octave up, where its lines live
                 let note = if voice == Voice::Acid { 12 } else { 0 };
                 self.trigger(voice, vel, false, note, 0, false);
                 if record && self.playing {
@@ -213,9 +384,11 @@ impl Engine {
                 }
             }
             Cmd::Filter(x) => self.filter_target = x.clamp(-1.0, 1.0),
-            Cmd::Echo(on) => self.echo = on,
-            Cmd::Stutter(on) => {
-                self.stutter = if on { Some(self.last_fired.map_or(0, |s| s + 1)) } else { None };
+            Cmd::Fx(fx, on) => {
+                self.fx[fx.index()] = on;
+                if fx == Fx::Stutter {
+                    self.stutter = if on { Some(self.last_fired.map_or(0, |s| s + 1)) } else { None };
+                }
             }
             Cmd::Drop => {
                 if self.playing && self.build.is_none() {
@@ -225,6 +398,12 @@ impl Engine {
             Cmd::Transpose(t) => {
                 self.transpose = t;
                 self.shared.transpose.store(t as i32, Ordering::Relaxed);
+            }
+            Cmd::Chain(c) => {
+                if c.is_some() && self.breakdown.is_some() {
+                    self.end_breakdown();
+                }
+                self.chain = c;
             }
         }
     }
@@ -276,55 +455,113 @@ impl Engine {
             .map(|b| ((idx - b.start as f64) / b.len as f64).clamp(0.0, 1.0) as f32)
     }
 
+    fn start_breakdown(&mut self, idx: u64) {
+        let plan = self.plan;
+        let before = self.song.tracks.map(|t| t.mute);
+        for &v in plan.out {
+            self.song.track_mut(v).mute = true;
+        }
+        self.breakdown = Some(Breakdown {
+            start: idx,
+            len: (30 - plan.breakdown_at) * STEPS as u64,
+            out: plan.out,
+            before,
+            sweep: plan.sweep,
+        });
+        self.send_song(Some(Change::Breakdown));
+    }
+
+    /// Bring back what the breakdown took out
+    fn restore_breakdown(&mut self) {
+        if let Some(b) = self.breakdown.take() {
+            for &v in b.out {
+                self.song.track_mut(v).mute = b.before[v.index()];
+            }
+        }
+    }
+
     fn end_breakdown(&mut self) {
-        self.breakdown = false;
-        self.song.track_mut(Voice::Kick).mute = false;
-        self.song.track_mut(Voice::Bass).mute = false;
+        self.restore_breakdown();
         self.send_song(None);
     }
 
     fn drop_now(&mut self) {
         self.build = None;
-        self.breakdown = false;
+        self.restore_breakdown();
         self.shared.build.store(0, Ordering::Relaxed);
         self.song.track_mut(Voice::Kick).mute = false;
         self.song.track_mut(Voice::Bass).mute = false;
         self.boom.trigger();
         self.crash = 1.0;
+        let mut change = Change::Drop;
         if self.song.auto {
-            gen::evolve(&mut self.song, &mut self.auto_rng);
+            if self.auto_rng.chance(0.45) {
+                change = gen::new_chapter(&mut self.song, &mut self.auto_rng);
+            } else {
+                gen::evolve(&mut self.song, &mut self.auto_rng);
+            }
         }
-        self.send_song(Some(Change::Drop));
+        self.send_song(Some(change));
     }
 
-    /// Bar starts: drops, and in auto mode the arrangement
+    /// Scene chain: on to the next saved scene every few bars
+    fn next_scene(&mut self, bar: u64) {
+        let Some(c) = &mut self.chain else { return };
+        if bar == 0 || !bar.is_multiple_of(c.bars.max(1) as u64) {
+            return;
+        }
+        for k in 1..=4 {
+            let i = (c.at + k) % 4;
+            if let Some(mut s) = c.songs[i] {
+                c.at = i;
+                s.master = self.song.master;
+                s.auto = false;
+                s.auto_bars = self.song.auto_bars;
+                s.sanitize();
+                self.song = s;
+                self.send_song(Some(Change::Scene(i)));
+                return;
+            }
+        }
+    }
+
+    /// Bar starts: drops, the scene chain, and in auto mode the arrangement
     fn new_bar(&mut self, idx: u64) {
         let bar = idx / STEPS as u64;
+        // Each 32-bar cycle picks another kind of breakdown
+        if self.song.auto && bar > 0 && bar.is_multiple_of(32) {
+            self.plan = PLANS[self.auto_rng.below(PLANS.len() as u32) as usize];
+        }
         if let Some(b) = &self.build {
             if idx >= b.start + b.len {
                 self.drop_now();
                 return;
             }
         }
+        if self.chain.is_some() {
+            self.next_scene(bar);
+            return;
+        }
         if !self.song.auto || bar == 0 {
             return;
         }
-        // 32-bar cycle: 24 bars groove (changing every few bars), 6 bars breakdown, 2 bars build-up, drop
+        // 32-bar cycle: groove (changing every few bars, a fill every 8), breakdown, 2 bars build-up, drop
         let b = bar % 32;
-        if b == 24 {
-            self.breakdown = true;
-            self.song.track_mut(Voice::Kick).mute = true;
-            self.song.track_mut(Voice::Bass).mute = true;
-            self.send_song(Some(Change::Breakdown));
+        let at = self.plan.breakdown_at;
+        if b == at {
+            self.start_breakdown(idx);
         } else if b == 30 && self.build.is_none() {
             self.build = Some(Build {
                 start: idx,
                 len: 2 * STEPS as u64,
             });
             self.send_song(Some(Change::Build));
-        } else if b < 24 && bar.is_multiple_of(self.song.auto_bars.max(1) as u64) {
+        } else if b < at && bar.is_multiple_of(self.song.auto_bars.max(1) as u64) {
             let change = gen::evolve(&mut self.song, &mut self.auto_rng);
             self.send_song(Some(change));
+        }
+        if b + 1 < at && (b + 1).is_multiple_of(8) && self.auto_rng.chance(0.8) {
+            self.fill = Some((bar, *self.auto_rng.pick(&FILLS)));
         }
     }
 
@@ -338,7 +575,10 @@ impl Engine {
             Some(origin) if idx >= origin => origin + (idx - origin) % 2,
             _ => idx,
         };
+        let in_bar = idx % STEPS as u64;
+        let fill = self.fill.filter(|(b, _)| *b == idx / STEPS as u64).map(|(_, f)| f);
         let step_len = self.step_len() as f32;
+        let energy = self.song.macros.energy;
         for (ti, voice) in Voice::ALL.into_iter().enumerate() {
             let track = self.song.tracks[ti];
             if track.mute {
@@ -347,24 +587,71 @@ impl Engine {
             if build.is_some() && matches!(voice, Voice::Kick | Voice::Bass | Voice::OpenHat) {
                 continue;
             }
-            let si = track.step_at(play_idx);
-            let step = track.steps[si];
-            if !step.on || (step.chance < 100 && self.rng.below(100) >= step.chance as u32) {
+            if fill == Some(Fill::Gap) && in_bar >= 12 && matches!(voice, Voice::Kick | Voice::Bass) {
                 continue;
             }
-            let vel = track.volume * if step.accent { 1.0 } else { 0.72 };
+            let si = track.step_at(play_idx);
+            let step = track.steps[si];
+            let mut vel = track.volume * if step.accent { 1.0 } else { 0.72 };
+            // Energy thins out the percussion (below 45) or adds ghost hats (above 60);
+            // the choice changes every two bars
+            let perc = matches!(voice, Voice::Hat | Voice::Ride | Voice::Rim | Voice::OpenHat);
+            let h = hash01(ti as u64 * 7919 + si as u64 * 104_729 + (play_idx / 32) * 15_485_863);
+            let mut on = step.on;
+            if on && perc && !step.accent && energy < 0.45 && h < (0.45 - energy) * 1.8 {
+                on = false;
+            }
+            if !step.on && voice == Voice::Hat && energy > 0.6 && h < (energy - 0.6) * 1.5 {
+                on = true;
+                vel *= 0.5;
+            }
+            if !on || (step.on && step.chance < 100 && self.rng.below(100) >= step.chance as u32) {
+                continue;
+            }
             let next = track.steps[(si + 1) % track.len.max(1) as usize];
             let legato = voice == Voice::Acid && next.on && next.slide;
             let gate = if legato { step_len * 1.05 } else { step_len * 0.5 };
-            self.trigger(voice, vel, step.accent, step.note, gate as u32, step.slide);
+            self.trigger(voice, vel, step.accent, step.note, gate as u32, step.slide && step.on);
         }
         // Build-up: a clap roll that gets faster and louder
         if let Some(p) = build {
             if p < 0.5 && idx.is_multiple_of(2) || p >= 0.5 {
                 let v = 0.35 + 0.55 * p;
-                self.clap.trigger(v, 0.08, self.sr);
+                let sound = self.song.track(Voice::Clap).sound;
+                self.clap.trigger(v, 0.08, self.sr, sound);
                 self.count_hit(Voice::Clap);
             }
+        }
+        if build.is_none() {
+            self.play_fill(fill, in_bar);
+        }
+    }
+
+    fn play_fill(&mut self, fill: Option<Fill>, s: u64) {
+        let sr = self.sr;
+        match fill {
+            Some(Fill::Roll) if s >= 8 && (s >= 12 || s.is_multiple_of(2)) => {
+                let sound = self.song.track(Voice::Clap).sound;
+                self.clap.trigger(0.25 + 0.06 * (s - 8) as f32, 0.07, sr, sound);
+                self.count_hit(Voice::Clap);
+            }
+            Some(Fill::Toms) if s >= 10 => {
+                self.rim.trigger(0.55 + 0.05 * (s - 10) as f32, 1.45 - (s - 10) as f32 * 0.1, 3);
+                self.count_hit(Voice::Rim);
+            }
+            Some(Fill::OpenHats) if s >= 8 && s.is_multiple_of(2) => {
+                let m = &OPEN_HATS[self.song.track(Voice::OpenHat).sound as usize % OPEN_HATS.len()];
+                self.open_hat.set_model(m, sr);
+                self.open_hat.trigger(0.3 + 0.04 * (s - 8) as f32, 0.12 * m.length, sr);
+                self.count_hit(Voice::OpenHat);
+            }
+            Some(Fill::Throw) if s == 12 => {
+                self.throw = 1.0;
+                let sound = self.song.track(Voice::Clap).sound;
+                self.clap.trigger(0.7, 0.15, sr, sound);
+                self.count_hit(Voice::Clap);
+            }
+            _ => {}
         }
     }
 
@@ -378,32 +665,49 @@ impl Engine {
         let m = self.song.macros;
         let gate = if gate == 0 { self.step_len() as f32 * 0.6 } else { gate as f32 };
         let pitch = (self.song.root as i32 + note as i32 + self.transpose as i32) as f32;
+        let sound = self.song.track(voice).sound;
+        let pick = |n: usize| sound as usize % n;
         match voice {
             Voice::Kick => {
-                self.kick.tune = 47.0 + (self.song.root % 12) as f32 * 0.6;
-                self.kick.drive = 1.4
-                    + m.energy * 1.4
-                    + if self.song.vibe == crate::song::Vibe::Industrial {
-                        1.5
-                    } else {
-                        0.0
-                    };
-                self.kick.trigger(vel, 0.11 + m.dark * 0.16, sr);
+                let k = &KICKS[pick(KICKS.len())];
+                self.kick.set_model(k);
+                self.kick.tune = (47.0 + (self.song.root % 12) as f32 * 0.6) * k.tune;
+                let hard = if matches!(self.song.vibe, Vibe::Industrial | Vibe::Hard) {
+                    1.5
+                } else {
+                    0.0
+                };
+                self.kick.drive = (1.4 + m.energy * 1.6 + hard) * k.drive + k.drive_add;
+                self.kick.trigger(vel, (0.11 + m.dark * 0.2) * k.length, sr);
             }
-            Voice::Clap => self.clap.trigger(vel * 1.3, 0.1 + m.space * 0.12, sr),
-            Voice::Rim => self.rim.trigger(vel * 1.4, if accent { 1.06 } else { 1.0 }),
+            Voice::Clap => self.clap.trigger(vel * 1.3, 0.1 + m.space * 0.15, sr, sound),
+            Voice::Rim => self.rim.trigger(vel * 1.4, if accent { 1.06 } else { 1.0 }, sound),
             Voice::Hat => {
+                let h = &HATS[pick(HATS.len())];
+                self.hat.set_model(h, sr);
                 self.open_hat.choke(sr);
-                self.hat.trigger(vel * 1.05, 0.03 + m.energy * 0.035, sr);
+                self.hat.trigger(vel * 1.05, (0.03 + m.energy * 0.035) * h.length, sr);
             }
-            Voice::OpenHat => self.open_hat.trigger(vel * 0.85, 0.18 + m.energy * 0.2, sr),
-            Voice::Ride => self.ride.trigger(vel * 0.9, 0.45 + m.space * 0.4, sr),
-            Voice::Bass => self.bass.trigger(pitch, vel, gate, sr),
+            Voice::OpenHat => {
+                let h = &OPEN_HATS[pick(OPEN_HATS.len())];
+                self.open_hat.set_model(h, sr);
+                self.open_hat.trigger(vel * 0.85, (0.18 + m.energy * 0.2) * h.length, sr);
+            }
+            Voice::Ride => {
+                let h = &RIDES[pick(RIDES.len())];
+                self.ride.set_model(h, sr);
+                self.ride.trigger(vel * 0.9, (0.45 + m.space * 0.4) * h.length, sr);
+            }
+            Voice::Bass => self.bass.trigger(pitch, vel, gate, sr, sound),
             Voice::Acid => {
-                if slide {
+                // Stab chords: root, third and fifth of the scale on this note
+                let sc = self.song.scale;
+                let base = sc.shift(note, 0) as f32;
+                let chord = [0.0, sc.shift(note, 2) as f32 - base, sc.shift(note, 4) as f32 - base];
+                if slide && sound < 2 {
                     self.acid.slide(pitch, accent, gate, sr);
                 } else {
-                    self.acid.trigger(pitch, vel, accent, gate, sr);
+                    self.acid.trigger(pitch, vel, accent, gate, sr, sound, chord);
                 }
             }
         }
@@ -425,10 +729,23 @@ impl Engine {
         let delay_time = (step_len * 3.0) as f32;
         let space = m.space;
         let dark = m.dark;
-        // Darkness closes the master tone filter a bit
-        let tone = 18_000.0 * (1.0 - dark * 0.65);
+        // Darkness closes the master tone filter – all the way down to a muffled 1.5 kHz
+        let tone = 18_000.0 * 0.1f32.powf(dark * dark * 1.08);
         self.tone_l.set(tone, 0.6, sr);
         self.tone_r.set(tone, 0.6, sr);
+        // Chord stabs live in the echo (dub)
+        let mut delay_send = DELAY_SEND;
+        if self.song.track(Voice::Acid).sound == 2 {
+            delay_send[Voice::Acid.index()] = 0.75;
+        }
+        // Auto mode turns the acid knob itself: a slow sweep over 16 bars
+        let acid = if self.song.auto && self.playing {
+            (m.acid + 0.22 * (self.phase as f32 / 256.0 * std::f32::consts::TAU).sin()).clamp(0.0, 1.0)
+        } else {
+            m.acid
+        };
+        // (Stutter works on the steps, in `fire`)
+        let [_, echo_on, wash_on, crush_on, gate_on, tape_on] = self.fx;
 
         for frame in out.chunks_exact_mut(2) {
             // ── Clock ──
@@ -446,7 +763,8 @@ impl Engine {
                     self.shared.build.store((p * 1000.0).max(1.0) as u32, Ordering::Relaxed);
                     if p > 0.75 && frac >= 0.5 && self.half_fired != Some(idx) {
                         self.half_fired = Some(idx);
-                        self.clap.trigger(0.5 + 0.4 * p, 0.06, sr);
+                        let sound = self.song.track(Voice::Clap).sound;
+                        self.clap.trigger(0.5 + 0.4 * p, 0.06, sr, sound);
                     }
                 }
             }
@@ -462,7 +780,7 @@ impl Engine {
                 self.open_hat.next(sr, &mut self.rng) * vol[4],
                 self.ride.next(sr, &mut self.rng) * vol[5],
                 self.bass.next(sr, m.energy, dark) * vol[6] * 2.0 * (1.0 - duck * 0.7),
-                self.acid.next(sr, m.acid) * vol[7] * (1.0 - duck * 0.3),
+                self.acid.next(sr, acid) * vol[7] * (1.0 - duck * 0.3),
             ];
             let (mut l, mut r) = (0.0f32, 0.0f32);
             let (mut dl, mut dr, mut rv) = (0.0f32, 0.0f32, 0.0f32);
@@ -472,13 +790,13 @@ impl Engine {
                 let p = PAN[i];
                 l += x * (1.0 - p).min(1.0);
                 r += x * (1.0 + p).min(1.0);
-                let ds = DELAY_SEND[i] * space * 1.2 + if i == 0 || i == 6 { 0.0 } else { echo_send };
+                let ds = delay_send[i] * space * 2.0 + if i == 0 || i == 6 { 0.0 } else { echo_send };
                 dl += x * ds * (1.0 - p * 0.5);
                 dr += x * ds * (1.0 + p * 0.5);
-                rv += x * VERB_SEND[i] * (0.25 + space);
+                rv += x * VERB_SEND[i] * (0.15 + space * 1.6);
             }
             // Rumble and the drop
-            let rumble = self.rumble.run(kick_raw * vol[0], duck) * dark * 0.8;
+            let rumble = self.rumble.run(kick_raw * vol[0], duck) * dark * 1.3;
             l += rumble;
             r += rumble;
             let boom = self.boom.next(sr) * 0.8;
@@ -503,17 +821,37 @@ impl Engine {
             }
 
             // ── Sends ──
-            self.echo_amount += ((if self.echo { 0.9 } else { 0.0 }) - self.echo_amount) * 0.0005;
-            let fb = 0.3 + space * 0.25 + self.echo_amount * 0.35;
+            self.throw *= 0.99997;
+            let echo_want = if echo_on { 0.9 } else { 0.0 } + self.throw * 0.6;
+            self.echo_amount += (echo_want - self.echo_amount) * 0.0005;
+            let fb = 0.25 + space * 0.4 + self.echo_amount * 0.35;
             let (el, er) = self.delay.run(dl, dr, delay_time, fb.min(0.85));
-            l += el;
-            r += er;
-            let (rl, rr) = self.reverb.run(rv, 0.55 + space * 0.4, 0.3 + dark * 0.5);
+            // Wash: everything into the reverb, the dry beat steps back
+            self.wash += ((if wash_on { 1.0 } else { 0.0 }) - self.wash) * 0.0008;
+            rv += (l + r) * 0.5 * self.wash * 1.2;
+            let duck_dry = 1.0 - self.wash * 0.55;
+            l = l * duck_dry + el;
+            r = r * duck_dry + er;
+            let size = (0.5 + space * 0.46 + self.wash * 0.5).min(0.98);
+            let (rl, rr) = self.reverb.run(rv, size, 0.3 + dark * 0.5);
             l += rl;
             r += rr;
 
             // ── Master ──
-            self.filter += (self.filter_target - self.filter) * 0.002;
+            // With no hand on the filter, a breakdown may sweep it open by itself
+            let auto_filter = match &self.breakdown {
+                Some(b) if b.sweep && self.playing => {
+                    let p = ((self.phase - b.start as f64) / b.len as f64).clamp(0.0, 1.0) as f32;
+                    -0.75 * (1.0 - p)
+                }
+                _ => 0.0,
+            };
+            let target = if self.filter_target.abs() > 0.01 {
+                self.filter_target
+            } else {
+                auto_filter
+            };
+            self.filter += (target - self.filter) * 0.002;
             let f = self.filter;
             if f < -0.02 {
                 let fc = 18_000.0 * 0.012f32.powf(-f);
@@ -538,8 +876,31 @@ impl Engine {
             l = self.tone_l.run(l).lp;
             r = self.tone_r.run(r).lp;
 
+            // Crush: hold every few samples and round to fewer bits
+            self.crush += ((if crush_on { 1.0 } else { 0.0 }) - self.crush) * 0.002;
+            if self.crush > 0.002 {
+                self.crush_count += 1.0;
+                let hold = 1.0 + self.crush * 9.0;
+                if self.crush_count >= hold {
+                    self.crush_count -= hold;
+                    let q = 2f32.powf(12.0 - self.crush * 8.0);
+                    self.crush_hold = ((l * q).round() / q, (r * q).round() / q);
+                }
+                l += (self.crush_hold.0 * 1.3 - l) * self.crush;
+                r += (self.crush_hold.1 * 1.3 - r) * self.crush;
+            }
+            // Gate: open for the first half of every 16th
+            self.gate += ((if gate_on { 1.0 } else { 0.0 }) - self.gate) * 0.002;
+            if self.gate > 0.002 {
+                let open = !self.playing || self.phase.fract() < 0.5;
+                self.gate_env += ((if open { 1.0 } else { 0.0 }) - self.gate_env) * 0.01;
+                let g = 1.0 - self.gate * (1.0 - self.gate_env);
+                l *= g;
+                r *= g;
+            }
+
             // Glue: a little saturation, more with energy
-            let drive = 0.9 + m.energy * 0.6;
+            let drive = 0.8 + m.energy * 0.9;
             l = sat(l * drive * 0.7);
             r = sat(r * drive * 0.7);
             // Brick-wall-ish limiter
@@ -553,6 +914,31 @@ impl Engine {
             let g = self.limiter * self.song.master;
             l *= g;
             r *= g;
+
+            // Tape stop: read the recent output back slower and slower until it stands still
+            let n = self.tape.len() / 2;
+            let w = self.tape_w;
+            self.tape[2 * w] = l;
+            self.tape[2 * w + 1] = r;
+            self.tape_w = (w + 1) % n;
+            if tape_on {
+                if !self.taping {
+                    self.taping = true;
+                    self.tape_r = w as f64;
+                    self.tape_rate = 1.0;
+                }
+                let i = self.tape_r.floor() as usize % n;
+                let j = (i + 1) % n;
+                let f = self.tape_r.fract() as f32;
+                let fade = (self.tape_rate * 3.0).min(1.0);
+                l = (self.tape[2 * i] * (1.0 - f) + self.tape[2 * j] * f) * fade;
+                r = (self.tape[2 * i + 1] * (1.0 - f) + self.tape[2 * j + 1] * f) * fade;
+                self.tape_r = (self.tape_r + self.tape_rate as f64) % n as f64;
+                self.tape_rate = (self.tape_rate - 1.0 / (0.8 * sr)).max(0.0);
+            } else {
+                self.taping = false;
+            }
+
             self.peak = self.peak.max(l.abs().max(r.abs()));
             frame[0] = l;
             frame[1] = r;
@@ -635,7 +1021,7 @@ mod tests {
         let changes: Vec<Change> = rx.try_iter().filter_map(|Event::Song(_, c)| c).collect();
         assert!(changes.contains(&Change::Breakdown), "{changes:?}");
         assert!(changes.contains(&Change::Build));
-        assert_eq!(changes.last(), Some(&Change::Drop));
+        assert!(matches!(changes.last(), Some(Change::Drop | Change::NewChapter)), "{changes:?}");
         // Changes every 4 bars before the breakdown
         assert!(changes.len() >= 5 + 3, "{changes:?}");
         assert!(!e.song.track(Voice::Kick).mute);
@@ -705,6 +1091,93 @@ mod tests {
     }
 
     #[test]
+    fn auto_mode_varies_and_always_brings_the_beat_back() {
+        // Several 32-bar cycles: different breakdowns, fills, chapters – and after every
+        // drop the kick plays again
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut song = gen::generate(Vibe::Hypnotic, &Default::default(), &mut Rng::new(8));
+        song.auto = true;
+        song.auto_bars = 2;
+        song.bpm = 180.0;
+        let mut e = Engine::new(11_025.0, song, Shared::new(), Some(tx), 4);
+        e.handle(Cmd::Play);
+        let bar = (e.step_len() * STEPS as f64) as usize;
+        let mut buf = vec![0.0; 2 * bar];
+        let mut kinds = std::collections::HashSet::new();
+        for b in 0..(32 * 6 + 1) {
+            e.render(&mut buf);
+            assert!(buf.iter().all(|x| x.is_finite() && x.abs() <= 1.0));
+            if b % 32 == 1 && b > 32 {
+                assert!(!e.song.track(Voice::Kick).mute, "kick back after the drop (bar {b})");
+            }
+            kinds.insert(e.plan.breakdown_at * 100 + e.plan.out.len() as u64 * 10 + e.plan.sweep as u64);
+        }
+        assert!(kinds.len() >= 2, "different breakdowns");
+        let changes: Vec<Change> = rx.try_iter().filter_map(|Event::Song(_, c)| c).collect();
+        assert!(changes.iter().any(|c| matches!(c, Change::NewSound(..))), "{changes:?}");
+        assert!(changes.iter().filter(|c| matches!(c, Change::Drop | Change::NewChapter)).count() >= 5);
+    }
+
+    #[test]
+    fn live_effects_stay_clean() {
+        let song = gen::generate(Vibe::Peak, &Default::default(), &mut Rng::new(3));
+        let mut e = Engine::new(22_050.0, song, Shared::new(), None, 1);
+        e.handle(Cmd::Play);
+        let mut buf = vec![0.0; 2 * 22_050];
+        e.render(&mut buf);
+        for fx in Fx::ALL {
+            e.handle(Cmd::Fx(fx, true));
+            e.render(&mut buf);
+            assert!(buf.iter().all(|x| x.is_finite() && x.abs() <= 1.0), "{fx:?}");
+            if fx == Fx::Tape {
+                // Fully stopped after a second
+                let tail = &buf[buf.len() - 2000..];
+                assert!(tail.iter().all(|x| x.abs() < 1e-3), "tape stop ends in silence");
+            }
+            e.handle(Cmd::Fx(fx, false));
+            e.render(&mut buf);
+        }
+        let (peak, rms) = stats(&buf);
+        assert!(peak > 0.1 && rms > 0.02, "back to normal after the effects");
+    }
+
+    #[test]
+    fn chain_plays_the_scenes_in_turn() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let a = gen::generate(Vibe::Dub, &Default::default(), &mut Rng::new(1));
+        let c = gen::generate(Vibe::Hard, &Default::default(), &mut Rng::new(2));
+        let mut e = Engine::new(22_050.0, a, Shared::new(), Some(tx), 1);
+        e.handle(Cmd::Chain(Some(Box::new(Chain {
+            songs: [Some(a), None, Some(c), None],
+            bars: 2,
+            at: 0,
+        }))));
+        e.handle(Cmd::Play);
+        let bar = (e.step_len() * STEPS as f64) as usize;
+        let mut buf = vec![0.0; 2 * bar * 5 + 200];
+        e.render(&mut buf);
+        let scenes: Vec<Change> = rx.try_iter().filter_map(|Event::Song(_, c)| c).collect();
+        assert_eq!(scenes, vec![Change::Scene(2), Change::Scene(0)]);
+        assert_eq!(e.song.tracks, a.tracks);
+    }
+
+    #[test]
+    fn every_sound_plays_cleanly() {
+        let base = gen::generate(Vibe::Peak, &Default::default(), &mut Rng::new(6));
+        for v in Voice::ALL {
+            for s in 0..v.sounds().len() {
+                let mut song = base;
+                song.track_mut(v).sound = s as u8;
+                song.track_mut(v).mute = false;
+                let buf = render_offline(&song, 2, 22_050, 1);
+                assert!(buf.iter().all(|x| x.is_finite()));
+                let (peak, _) = stats(&buf);
+                assert!(peak <= 1.0, "{v:?} {s}: {peak}");
+            }
+        }
+    }
+
+    #[test]
     fn stutter_repeats_two_steps() {
         let mut song = Song::empty();
         song.bpm = 120.0;
@@ -714,7 +1187,7 @@ mod tests {
         e.handle(Cmd::Play);
         let mut buf = vec![0.0; 2 * 6000 * 4 + 20];
         e.render(&mut buf); // steps 0…4 fired
-        e.handle(Cmd::Stutter(true)); // loops steps 5 and 6
+        e.handle(Cmd::Fx(Fx::Stutter, true)); // loops steps 5 and 6
         let before = shared.hits[Voice::Rim.index()].load(Ordering::Relaxed);
         let mut buf = vec![0.0; 2 * 6000 * 8];
         e.render(&mut buf);
@@ -728,29 +1201,33 @@ mod levels {
     use super::*;
     use crate::song::Vibe;
 
-    /// Prints the loudness of each track on its own – for balancing the mix:
+    /// Prints the loudness of each track – and each of its sounds – on its own, for balancing the mix:
     /// `cargo test --release print_levels -- --ignored --nocapture`
     #[test]
     #[ignore]
     fn print_levels() {
         let base = gen::generate(Vibe::Peak, &Default::default(), &mut Rng::new(11));
         for (i, v) in Voice::ALL.into_iter().enumerate() {
-            let mut s = base;
-            for (j, t) in s.tracks.iter_mut().enumerate() {
-                t.mute = j != i;
+            for sound in 0..v.sounds().len() {
+                let mut s = base;
+                for (j, t) in s.tracks.iter_mut().enumerate() {
+                    t.mute = j != i;
+                }
+                s.tracks[i].sound = sound as u8;
+                s.macros.space = 0.0;
+                s.macros.dark = 0.0;
+                let buf = render_offline(&s, 4, 44_100, 1);
+                let n = buf.len() - 44_100 * 4; // without the tail
+                let rms = (buf[..n].iter().map(|x| x * x).sum::<f32>() / n as f32).sqrt();
+                let peak = buf.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+                println!(
+                    "{:10} {:11} rms {:6.1} dB  peak {:6.1} dB",
+                    v.name(),
+                    v.sounds()[sound],
+                    20.0 * rms.log10(),
+                    20.0 * peak.log10()
+                );
             }
-            s.macros.space = 0.0;
-            s.macros.dark = 0.0;
-            let buf = render_offline(&s, 4, 44_100, 1);
-            let n = buf.len() - 44_100 * 4; // without the tail
-            let rms = (buf[..n].iter().map(|x| x * x).sum::<f32>() / n as f32).sqrt();
-            let peak = buf.iter().fold(0.0f32, |m, x| m.max(x.abs()));
-            println!(
-                "{:10} rms {:6.1} dB  peak {:6.1} dB",
-                v.name(),
-                20.0 * rms.log10(),
-                20.0 * peak.log10()
-            );
         }
     }
 }

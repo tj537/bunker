@@ -1,15 +1,17 @@
-//! The window: top bar, track list, the orbit (or pads), macros and live controls.
+//! The window: top bar, vibe bar, track list, the orbit (or pads) with the scenes
+//! below, sound knobs, auto mode and live effects.
 
 use crate::audio::{self, Audio};
-use crate::engine::{self, Cmd, Event, Shared};
+use crate::engine::{self, Chain, Cmd, Event, Fx, Shared};
 use crate::gen;
 use crate::midi::{Midi, MidiIn};
 use crate::orbit::{self, Live, Paint};
 use crate::pads;
 use crate::rng::Rng;
-use crate::song::{Scale, Song, Vibe, Voice, STEPS, TRACKS};
+use crate::song::{Scale, Song, Track, Vibe, Voice, STEPS, TRACKS};
 use crate::theme::*;
-use crate::widgets::{self, big_button, chip, glow, heading, knob};
+use crate::update::{self, Release};
+use crate::widgets::{self, big_button, chip, chip_sized, glow, heading, knob};
 use eframe::egui::{self, pos2, vec2, Align2, Color32, Key, Rect, Sense, Ui};
 use egui_phosphor::regular as ph;
 use std::path::PathBuf;
@@ -20,6 +22,7 @@ use std::sync::Arc;
 pub const SLOTS: usize = 4;
 const UNDO_LIMIT: usize = 60;
 const SLOT_NAMES: [&str; SLOTS] = ["A", "B", "C", "D"];
+const FX_KEYS: [Key; 6] = [Key::Q, Key::W, Key::E, Key::X, Key::C, Key::V];
 
 /// A stored song (undo step, saved slot) with the current volume and auto-mode settings –
 /// those belong to the moment, not to the groove
@@ -28,6 +31,33 @@ fn keep_live_settings(mut song: Song, now: &Song) -> Song {
     song.auto = now.auto;
     song.auto_bars = now.auto_bars;
     song
+}
+
+fn fx_icon(fx: Fx) -> &'static str {
+    match fx {
+        Fx::Stutter => ph::REPEAT,
+        Fx::Echo => ph::WAVEFORM,
+        Fx::Wash => ph::DROP,
+        Fx::Crush => ph::CPU,
+        Fx::Gate => ph::BARCODE,
+        Fx::Tape => ph::VINYL_RECORD,
+    }
+}
+
+fn fx_color(fx: Fx) -> Color32 {
+    match fx {
+        Fx::Stutter => track_color(Voice::Rim),
+        Fx::Echo => track_color(Voice::OpenHat),
+        Fx::Wash => track_color(Voice::Ride),
+        Fx::Crush => track_color(Voice::Clap),
+        Fx::Gate => track_color(Voice::Hat),
+        Fx::Tape => track_color(Voice::Bass),
+    }
+}
+
+/// 303 lines and stab/pluck/hoover lines are written differently
+fn synth_family(sound: u8) -> u8 {
+    (sound >= 2) as u8 + (sound >= 3) as u8 + (sound >= 4) as u8
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -65,10 +95,10 @@ pub struct BunkerApp {
     step_time: f64,
     caption: Option<(String, f64)>,
     filter: f32,
-    echo: bool,
-    stutter: bool,
-    echo_mouse: bool,
-    stutter_mouse: bool,
+    /// Live effects held with the keyboard / the mouse, and what the engine was told
+    pub fx_key: [bool; 6],
+    fx_mouse: [bool; 6],
+    fx_sent: [bool; 6],
     key_down: [bool; TRACKS],
     export: Export,
     pub help: bool,
@@ -77,17 +107,28 @@ pub struct BunkerApp {
     /// False in tests: never touch the sound card or MIDI there
     with_devices: bool,
     bpm_scroll: f32,
+    sound_scroll: f32,
     /// Undo history: songs before each edit (grouped when edits come quickly)
     undo: Vec<Song>,
     redo: Vec<Song>,
     last_edit: f64,
     /// Set by undo/redo so the restored song doesn't count as a new edit
     restoring: bool,
-    /// Four saved grooves
+    /// Four scenes; the active one (`slot_now`) keeps every edit
     pub slots: [Option<Song>; SLOTS],
-    slot_now: Option<usize>,
+    pub slot_now: Option<usize>,
+    /// Scene chain: switch to the next scene every this many bars (None: off)
+    pub chain: Option<u8>,
+    chain_bars: u8,
     /// Solo: the soloed track and everyone's mute state before
     solo: Option<(usize, [bool; TRACKS])>,
+    /// Play this track once the engine has the new song (sound preview)
+    preview: Option<Voice>,
+    /// Which sound knob the mouse is on – its description shows below
+    knob_hint: Option<usize>,
+    update_rx: Option<Receiver<Release>>,
+    pub new_version: Option<Release>,
+    pub check_updates: bool,
     /// For screenshots: pretend to play at this position
     pub fake_live: Option<Live>,
 }
@@ -105,10 +146,23 @@ impl BunkerApp {
             }
             app.slots = slots;
         }
+        app.slot_now = cc
+            .storage
+            .and_then(|s| eframe::get_value::<Option<usize>>(s, "slot_now"))
+            .flatten()
+            .filter(|&i| i < SLOTS && app.slots[i].is_some());
+        if let Some(b) = cc.storage.and_then(|s| eframe::get_value::<u8>(s, "chain_bars")) {
+            app.chain_bars = if [4, 8, 16].contains(&b) { b } else { 8 };
+        }
         // First start: show how it works
         let seen: bool = cc.storage.and_then(|s| eframe::get_value(s, "seen_help")).unwrap_or(false);
         app.help = !seen;
+        app.check_updates = cc.storage.and_then(|s| eframe::get_value(s, "check_updates")).unwrap_or(true);
         let ctx = cc.egui_ctx.clone();
+        if app.check_updates {
+            let c = ctx.clone();
+            app.update_rx = Some(update::check(move || c.request_repaint()));
+        }
         app.connect_midi(move || ctx.request_repaint());
         app
     }
@@ -146,12 +200,11 @@ impl BunkerApp {
             hit_age: [9.0; TRACKS],
             step_seen: u64::MAX,
             step_time: 0.0,
-            caption: Some(("Press play – or roll a new groove with SHUFFLE".into(), 0.0)),
+            caption: Some(("Press play – or pick a vibe above to roll a new groove".into(), 0.0)),
             filter: 0.0,
-            echo: false,
-            stutter: false,
-            echo_mouse: false,
-            stutter_mouse: false,
+            fx_key: [false; 6],
+            fx_mouse: [false; 6],
+            fx_sent: [false; 6],
             key_down: [false; TRACKS],
             export: Export::Closed,
             help: false,
@@ -159,13 +212,21 @@ impl BunkerApp {
             audio_failed,
             with_devices: with_audio,
             bpm_scroll: 0.0,
+            sound_scroll: 0.0,
             undo: Vec::new(),
             redo: Vec::new(),
             last_edit: -10.0,
             restoring: false,
             slots: [None; SLOTS],
             slot_now: None,
+            chain: None,
+            chain_bars: 8,
             solo: None,
+            preview: None,
+            knob_hint: None,
+            update_rx: None,
+            new_version: None,
+            check_updates: true,
             fake_live: None,
         }
     }
@@ -193,6 +254,7 @@ impl BunkerApp {
         self.tx = tx;
         self.events = events;
         self.sent = self.song;
+        self.fx_sent = [false; 6];
         self.audio_device = audio::default_device_name();
         if was_playing {
             self.send(Cmd::Play);
@@ -200,6 +262,7 @@ impl BunkerApp {
         if self.filter != 0.0 {
             self.send(Cmd::Filter(self.filter));
         }
+        self.send_chain();
         // MIDI talks to the engine directly – reconnect it to the new one
         let c = ctx.clone();
         self.connect_midi(move || c.request_repaint());
@@ -220,6 +283,7 @@ impl BunkerApp {
             self.redo.push(self.song);
             self.song = keep_live_settings(prev, &self.song);
             self.restoring = true;
+            self.slot_now = None;
             self.say("Undo", now);
         }
     }
@@ -229,20 +293,84 @@ impl BunkerApp {
             self.undo.push(self.song);
             self.song = keep_live_settings(next, &self.song);
             self.restoring = true;
+            self.slot_now = None;
             self.say("Redo", now);
         }
     }
 
+    /// Click on a scene: an empty one keeps what you hear, a full one switches to it
     fn slot_clicked(&mut self, i: usize, save: bool, now: f64) {
         if save || self.slots[i].is_none() {
             self.slots[i] = Some(self.song);
             self.slot_now = Some(i);
-            self.say(format!("Groove saved in slot {}", SLOT_NAMES[i]), now);
+            self.say(format!("Saved as scene {} – changes now go into it", SLOT_NAMES[i]), now);
         } else if let Some(s) = self.slots[i] {
             self.song = keep_live_settings(s, &self.song);
             self.slot_now = Some(i);
-            self.say(format!("Slot {} loaded", SLOT_NAMES[i]), now);
+            self.say(format!("Scene {}", SLOT_NAMES[i]), now);
         }
+        self.send_chain();
+    }
+
+    fn clear_slot(&mut self, i: usize, now: f64) {
+        self.slots[i] = None;
+        if self.slot_now == Some(i) {
+            self.slot_now = None;
+        }
+        if self.chain.is_some() && self.slots.iter().flatten().count() < 2 {
+            self.chain = None;
+        }
+        self.send_chain();
+        self.say(format!("Scene {} cleared", SLOT_NAMES[i]), now);
+    }
+
+    /// Tell the engine about the chain (or that there is none)
+    fn send_chain(&self) {
+        let chain = self.chain.map(|bars| {
+            Box::new(Chain {
+                songs: self.slots,
+                bars,
+                at: self.slot_now.unwrap_or(0),
+            })
+        });
+        self.send(Cmd::Chain(chain));
+    }
+
+    fn toggle_chain(&mut self, now: f64) {
+        if self.chain.is_some() {
+            self.chain = None;
+            self.say("Chain off – the scene keeps playing", now);
+        } else {
+            let filled: Vec<usize> = (0..SLOTS).filter(|&i| self.slots[i].is_some()).collect();
+            if filled.len() < 2 {
+                self.say("Save at least two scenes – then they play one after another", now);
+                return;
+            }
+            if self.slot_now.is_none_or(|i| self.slots[i].is_none()) {
+                self.slot_clicked(filled[0], false, now);
+            }
+            self.song.auto = false;
+            self.chain = Some(self.chain_bars);
+            let order: Vec<&str> = filled.iter().map(|&i| SLOT_NAMES[i]).collect();
+            self.say(format!("Chain: {} – every {} bars", order.join(" → "), self.chain_bars), now);
+        }
+        self.send_chain();
+    }
+
+    fn toggle_auto(&mut self, now: f64) {
+        self.song.auto = !self.song.auto;
+        if self.song.auto && self.chain.is_some() {
+            self.chain = None;
+            self.send_chain();
+        }
+        self.say(
+            if self.song.auto {
+                "Auto mode on – sit back"
+            } else {
+                "Auto mode off"
+            },
+            now,
+        );
     }
 
     fn toggle_solo(&mut self, i: usize, now: f64) {
@@ -263,6 +391,38 @@ impl BunkerApp {
                 self.say(format!("Solo: {}", Voice::ALL[i].name()), now);
             }
         }
+    }
+
+    /// Another sound for a track. The synth gets a new line when the sound needs another kind
+    fn set_sound(&mut self, i: usize, sound: u8, now: f64) {
+        let voice = Voice::ALL[i];
+        let old = self.song.tracks[i].sound;
+        if old == sound {
+            return;
+        }
+        self.song.tracks[i].sound = sound;
+        let name = voice.sounds()[sound as usize];
+        if voice == Voice::Acid && synth_family(old) != synth_family(sound) {
+            self.roll_track(i);
+            self.say(format!("{name}: new line to fit the sound (undo keeps the old one)"), now);
+        } else {
+            self.say(format!("{}: {name}", voice.name()), now);
+        }
+        if !self.playing() {
+            self.preview = Some(voice);
+        }
+    }
+
+    /// A new rhythm for one track (keeps its sound, volume and mute)
+    fn roll_track(&mut self, i: usize) {
+        let voice = Voice::ALL[i];
+        let fresh = gen::track_for(voice, self.song.vibe, self.song.macros.energy, &self.song, &mut self.rng);
+        let t = &mut self.song.tracks[i];
+        *t = Track {
+            mute: t.mute,
+            volume: t.volume,
+            ..fresh
+        };
     }
 
     fn send(&self, cmd: Cmd) {
@@ -296,7 +456,17 @@ impl BunkerApp {
             s.bpm = self.song.bpm;
         }
         self.song = s;
-        self.say(format!("{} · {} · {} BPM", vibe.name(), self.song.root_name(), self.song.bpm), now);
+        self.solo = None;
+        // A new groove is not the scene it was rolled in – keep the scene as it was
+        let keep = if self.slot_now.take().is_some() || self.slots.iter().any(|s| s.is_some()) {
+            " · click an empty scene to keep it"
+        } else {
+            ""
+        };
+        self.say(
+            format!("{} · {} · {} BPM{keep}", vibe.name(), self.song.root_name(), self.song.bpm),
+            now,
+        );
     }
 
     fn hit(&mut self, voice: Voice) {
@@ -311,6 +481,9 @@ impl BunkerApp {
             self.song = *song;
             self.sent = self.song;
             if let Some(c) = change {
+                if let gen::Change::Scene(i) = c {
+                    self.slot_now = Some(i);
+                }
                 self.say(c.describe(), now);
             }
         }
@@ -323,6 +496,13 @@ impl BunkerApp {
                 Midi::Filter(x) => self.filter = x,
                 Midi::Transpose(Some(t)) if t != 0 => self.say(format!("Transposed {t:+}"), now),
                 _ => {}
+            }
+        }
+        if let Some(rx) = &self.update_rx {
+            if let Ok(r) = rx.try_recv() {
+                self.say(format!("Bunker {} is out – click the green button at the top", r.version), now);
+                self.new_version = Some(r);
+                self.update_rx = None;
             }
         }
         if let Some(live) = &self.fake_live {
@@ -365,16 +545,9 @@ impl BunkerApp {
                 m.surrender_focus(id);
             }
         });
-        // Window lost focus while Q/W was held? Let go, or the effect would stick
+        // Window lost focus while an effect key was held? Let go, or the effect would stick
         if ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::WindowFocused(false)))) {
-            if self.echo {
-                self.echo = false;
-                self.send(Cmd::Echo(false));
-            }
-            if self.stutter {
-                self.stutter = false;
-                self.send(Cmd::Stutter(false));
-            }
+            self.fx_key = [false; 6];
             self.key_down = [false; TRACKS];
         }
         let tab = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Tab));
@@ -430,16 +603,11 @@ impl BunkerApp {
                 self.key_down[i] = pressed;
                 continue;
             }
-            match (key, pressed, repeat) {
-                (Key::Q, p, false) => {
-                    self.stutter = p;
-                    self.send(Cmd::Stutter(p));
+            if let Some(i) = FX_KEYS.iter().position(|&k| k == key) {
+                if !repeat {
+                    self.fx_key[i] = pressed;
                 }
-                (Key::W, p, false) => {
-                    self.echo = p;
-                    self.send(Cmd::Echo(p));
-                }
-                _ => {}
+                continue;
             }
             if !pressed || repeat {
                 continue;
@@ -488,26 +656,34 @@ impl BunkerApp {
                     .color(TEXT)
                     .extra_letter_spacing(2.0),
             );
-            ui.add_space(18.0);
-
-            for vibe in Vibe::ALL {
-                let on = self.song.vibe == vibe;
-                if chip(ui, vibe.name(), on, ACID)
-                    .on_hover_text(format!("{} – rolls a new groove", vibe.blurb()))
+            ui.label(
+                egui::RichText::new(concat!("v", env!("CARGO_PKG_VERSION")))
+                    .font(body(11.0))
+                    .color(FAINT),
+            );
+            ui.add_space(10.0);
+            if let Some(r) = &self.new_version {
+                let text = format!("{}  Update to {}", ph::ARROW_CIRCLE_UP, r.version);
+                if chip(ui, &text, true, ACID)
+                    .on_hover_text("A new version is on GitHub – opens the download page")
                     .clicked()
                 {
-                    self.shuffle(vibe, now);
+                    ui.ctx().open_url(egui::OpenUrl::new_tab(update::RELEASES_URL));
                 }
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(6.0);
-                if ui
-                    .add(egui::Button::new(egui::RichText::new(ph::QUESTION).size(18.0)).frame(false))
-                    .on_hover_text("How it works")
-                    .clicked()
-                {
+                let icon_button = |ui: &mut Ui, icon: &str, tip: &str| {
+                    ui.add(egui::Button::new(egui::RichText::new(icon).size(18.0)).frame(false))
+                        .on_hover_text(tip)
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                };
+                if icon_button(ui, ph::QUESTION, "How it works").clicked() {
                     self.help = !self.help;
+                }
+                if icon_button(ui, ph::GITHUB_LOGO, "Bunker on GitHub – code, downloads, ideas").clicked() {
+                    ui.ctx().open_url(egui::OpenUrl::new_tab(update::REPO_URL));
                 }
                 let export_btn = ui.add(egui::Button::new(
                     egui::RichText::new(format!("{}  Export", ph::DOWNLOAD_SIMPLE)).font(bold(13.0)),
@@ -558,8 +734,43 @@ impl BunkerApp {
         });
     }
 
+    /// The presets: one chip per vibe, and SHUFFLE to roll again in the current one
+    fn vibe_bar(&mut self, ui: &mut Ui, now: f64) {
+        ui.horizontal_centered(|ui| {
+            ui.add_space(8.0);
+            ui.add_sized(
+                vec2(40.0, 30.0),
+                egui::Label::new(egui::RichText::new("VIBE").font(bold(11.0)).color(FAINT).extra_letter_spacing(1.6)),
+            )
+            .on_hover_text("Pick a style – every click rolls a new groove in it");
+            let shuffle_w = 132.0;
+            let gap = ui.spacing().item_spacing.x;
+            let n = Vibe::ALL.len() as f32;
+            let w = ((ui.available_width() - shuffle_w - 18.0 - gap * n) / n).clamp(60.0, 116.0);
+            for vibe in Vibe::ALL {
+                let on = self.song.vibe == vibe;
+                let (lo, hi) = vibe.bpm();
+                if chip_sized(ui, vibe.name(), on, ACID, Some(w))
+                    .on_hover_text(format!("{} · {lo:.0}–{hi:.0} BPM\nClick: roll a new groove", vibe.blurb()))
+                    .clicked()
+                {
+                    self.shuffle(vibe, now);
+                }
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_space(8.0);
+                if big_button(ui, vec2(shuffle_w, 32.0), ph::SHUFFLE, "SHUFFLE", ACID, false)
+                    .on_hover_text("Roll a whole new groove in this vibe (Enter)")
+                    .clicked()
+                {
+                    self.shuffle(self.song.vibe, now);
+                }
+            });
+        });
+    }
+
     fn bpm_box(&mut self, ui: &mut Ui) {
-        let (rect, resp) = ui.allocate_exact_size(vec2(104.0, 46.0), Sense::click_and_drag());
+        let (rect, resp) = ui.allocate_exact_size(vec2(104.0, 42.0), Sense::click_and_drag());
         if resp.dragged() {
             let d = resp.drag_delta();
             self.song.bpm = (self.song.bpm + (d.x - d.y) * 0.15).clamp(90.0, 180.0);
@@ -585,7 +796,7 @@ impl BunkerApp {
             rect.left_center() + vec2(12.0, 0.0),
             Align2::LEFT_CENTER,
             format!("{:.0}", self.song.bpm),
-            display(28.0),
+            display(26.0),
             TEXT,
         );
         p.text(rect.right_center() - vec2(12.0, 0.0), Align2::RIGHT_CENTER, "BPM", bold(11.0), DIM);
@@ -595,26 +806,24 @@ impl BunkerApp {
 
     fn tracks_panel(&mut self, ui: &mut Ui, live: &Live, now: f64) {
         heading(ui, "TRACKS");
-        ui.add_space(2.0);
+        let w = ui.available_width();
+        let row_h = ((ui.available_height() - 132.0) / TRACKS as f32).clamp(42.0, 54.0);
         for (i, voice) in Voice::ALL.into_iter().enumerate() {
             let color = track_color(voice);
-            let (row, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 50.0), Sense::click());
+            let (row, resp) = ui.allocate_exact_size(vec2(w, row_h), Sense::hover());
             let soloed = self.solo.is_some_and(|(t, _)| t == i);
-            let resp = resp.on_hover_text("Click: solo – hear only this track");
-            if resp.clicked() {
-                self.toggle_solo(i, now);
-            }
             let flash = live.flash(i);
             let muted = self.song.tracks[i].mute;
             let p = ui.painter().clone();
             if resp.hovered() {
                 p.rect_filled(row, 10.0, PANEL_HI);
             }
-            let dot = row.left_center() + vec2(14.0, -8.0);
+            let top = row.top() + (row_h - 42.0) / 2.0;
+            let dot = pos2(row.left() + 11.0, top + 12.0);
             glow(&p, dot, 5.0, color, if muted { 0.0 } else { 0.3 + flash });
             p.circle_filled(dot, 5.0, if muted { FAINT } else { color });
             let name_rect = p.text(
-                row.left_top() + vec2(28.0, 6.0),
+                pos2(row.left() + 24.0, top + 3.0),
                 Align2::LEFT_TOP,
                 voice.name(),
                 bold(14.0),
@@ -626,38 +835,25 @@ impl BunkerApp {
                     TEXT
                 },
             );
-            if soloed {
-                p.text(
-                    name_rect.right_center() + vec2(6.0, 0.0),
-                    Align2::LEFT_CENTER,
-                    "SOLO",
-                    bold(9.5),
-                    ACID,
-                );
-            }
-            let t = &self.song.tracks[i];
-            p.text(
-                row.left_top() + vec2(28.0, 25.0),
-                Align2::LEFT_TOP,
-                format!("{} steps · {} hits", t.len, t.hits()),
-                body(11.0),
-                FAINT,
-            );
-            // Buttons on the right
-            let mut x = row.right() - 6.0;
+            ui.allocate_rect(name_rect, Sense::hover()).on_hover_text(voice.blurb());
+
+            // Buttons on the right: solo, mute, dice
+            let mut x = row.right() - 4.0;
             let mut icon_btn = |ui: &mut Ui, icon: &str, tip: &str, on: bool, col: Color32| -> egui::Response {
-                let r = Rect::from_min_size(pos2(x - 28.0, row.top() + 4.0), vec2(28.0, 26.0));
-                x -= 30.0;
+                let r = Rect::from_min_size(pos2(x - 26.0, top), vec2(26.0, 22.0));
+                x -= 28.0;
                 let resp = ui.allocate_rect(r, Sense::click()).on_hover_text(tip);
                 let hot = resp.hovered();
-                if hot {
+                if on {
+                    ui.painter().rect_filled(r, 7.0, alpha(col, 0.18));
+                } else if hot {
                     ui.painter().rect_filled(r, 7.0, mix(PANEL_HI, Color32::WHITE, 0.06));
                 }
                 ui.painter().text(
                     r.center(),
                     Align2::CENTER_CENTER,
                     icon,
-                    body(16.0),
+                    if icon.len() == 1 { bold(12.5) } else { body(15.0) },
                     if on {
                         col
                     } else if hot {
@@ -666,25 +862,28 @@ impl BunkerApp {
                         DIM
                     },
                 );
-                resp
+                resp.on_hover_cursor(egui::CursorIcon::PointingHand)
             };
-            let dice = icon_btn(ui, ph::DICE_FIVE, "New pattern for this track (right-click: clear)", false, ACID);
+            let dice = icon_btn(
+                ui,
+                ph::DICE_FIVE,
+                &format!(
+                    "New {} rhythm\nRolls a fresh pattern for this track only – the sound stays.\nRight-click: clear all steps",
+                    voice.name().to_lowercase()
+                ),
+                false,
+                ACID,
+            );
             if dice.secondary_clicked() {
-                let t = &mut self.song.tracks[i];
-                for st in t.steps.iter_mut() {
+                for st in self.song.tracks[i].steps.iter_mut() {
                     *st = crate::song::Step::default();
                 }
                 self.say(format!("{} cleared", voice.name()), now);
             }
             if dice.clicked() {
-                let fresh = gen::track_for(voice, self.song.vibe, self.song.macros.energy, &self.song, &mut self.rng);
-                let t = &mut self.song.tracks[i];
-                *t = crate::song::Track {
-                    mute: false,
-                    volume: t.volume,
-                    ..fresh
-                };
-                self.say(format!("New {} pattern", voice.name().to_lowercase()), now);
+                self.roll_track(i);
+                self.song.tracks[i].mute = false;
+                self.say(format!("New {} rhythm", voice.name().to_lowercase()), now);
             }
             if icon_btn(
                 ui,
@@ -697,23 +896,84 @@ impl BunkerApp {
             {
                 self.song.tracks[i].mute = !muted;
             }
-            // Length stepper
-            let lr = Rect::from_min_size(pos2(x - 34.0, row.top() + 6.0), vec2(34.0, 22.0));
+            if icon_btn(ui, "S", "Solo: hear only this track (click again to end)", soloed, ACID).clicked() {
+                self.toggle_solo(i, now);
+            }
+
+            // Second line: sound, loop length, volume
+            let y = top + 23.0;
+            let sound_rect = Rect::from_min_size(pos2(row.left() + 22.0, y), vec2(84.0, 18.0));
+            let sound = ui.allocate_rect(sound_rect, Sense::click());
+            let hot = sound.hovered();
+            p.rect_filled(sound_rect, 9.0, if hot { alpha(color, 0.22) } else { alpha(color, 0.1) });
+            p.text(
+                sound_rect.left_center() + vec2(8.0, 0.0),
+                Align2::LEFT_CENTER,
+                self.song.sound_name(voice),
+                bold(11.0),
+                if muted { DIM } else { mix(color, TEXT, 0.35) },
+            );
+            p.text(
+                sound_rect.right_center() - vec2(7.0, 0.0),
+                Align2::RIGHT_CENTER,
+                ph::CARET_DOWN,
+                body(10.0),
+                DIM,
+            );
+            let popup = ui.make_persistent_id(("sound", i));
+            if sound.hovered() {
+                let s = ui.input(|inp| inp.raw_scroll_delta.y);
+                let n = orbit::scroll_notches(&mut self.sound_scroll, s, 24.0);
+                if n != 0 {
+                    let count = voice.sounds().len() as i32;
+                    let next = (self.song.tracks[i].sound as i32 - n.signum()).rem_euclid(count);
+                    self.set_sound(i, next as u8, now);
+                }
+            }
+            let sound = sound
+                .on_hover_text("Sound: click for the list, scroll to flip through")
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
+            if sound.clicked() {
+                ui.memory_mut(|m| m.toggle_popup(popup));
+            }
+            let mut picked = None;
+            egui::popup_below_widget(ui, popup, &sound, egui::PopupCloseBehavior::CloseOnClick, |ui| {
+                ui.set_min_width(150.0);
+                ui.label(
+                    egui::RichText::new(format!("{} SOUND", voice.name().to_uppercase()))
+                        .font(bold(10.5))
+                        .color(FAINT),
+                );
+                for (k, name) in voice.sounds().iter().enumerate() {
+                    if ui
+                        .selectable_label(self.song.tracks[i].sound as usize == k, egui::RichText::new(*name).font(bold(13.0)))
+                        .clicked()
+                    {
+                        picked = Some(k as u8);
+                    }
+                }
+            });
+            if let Some(k) = picked {
+                self.set_sound(i, k, now);
+            }
+            // Loop length
+            let lr = Rect::from_min_size(pos2(sound_rect.right() + 6.0, y), vec2(30.0, 18.0));
             let lresp = ui
                 .allocate_rect(lr, Sense::click())
-                .on_hover_text("Steps in this loop: click −1, right-click +1. Fewer steps = polyrhythm");
-            ui.painter().rect_stroke(
+                .on_hover_text("Steps in this loop: click −1, right-click +1.\nFewer than 16 = it drifts against the beat (polyrhythm)");
+            p.rect_stroke(
                 lr,
-                11.0,
+                9.0,
                 stroke(1.0, if lresp.hovered() { FAINT } else { LINE }),
                 egui::StrokeKind::Inside,
             );
-            ui.painter().text(
+            let len = self.song.tracks[i].len;
+            p.text(
                 lr.center(),
                 Align2::CENTER_CENTER,
-                format!("{}", self.song.tracks[i].len),
-                bold(11.5),
-                DIM,
+                format!("{len}"),
+                bold(10.5),
+                if len < 16 { ACID } else { DIM },
             );
             let len = &mut self.song.tracks[i].len;
             if lresp.clicked() {
@@ -723,34 +983,49 @@ impl BunkerApp {
                 *len = if *len >= 16 { 1 } else { *len + 1 };
             }
             // Volume
-            let vr = Rect::from_min_size(pos2(row.right() - 104.0, row.bottom() - 17.0), vec2(96.0, 14.0));
+            let vx = lr.right() + 8.0;
+            let vr = Rect::from_min_max(pos2(vx, y + 2.0), pos2(row.right() - 6.0, y + 16.0));
             let mut vol = self.song.tracks[i].volume;
             ui.allocate_new_ui(egui::UiBuilder::new().max_rect(vr), |ui| {
-                widgets::bar_slider(ui, &mut vol, 96.0, color).on_hover_text("Volume");
+                widgets::bar_slider(ui, &mut vol, vr.width(), color).on_hover_text("Volume");
             });
             self.song.tracks[i].volume = vol;
         }
 
-        ui.add_space(14.0);
-        heading(ui, "KEY & GROOVE");
+        ui.add_space(8.0);
+        heading(ui, "KEY & SWING");
+        let label = |ui: &mut Ui, text: &str, tip: &str| {
+            ui.add_sized(
+                vec2(52.0, 22.0),
+                egui::Label::new(egui::RichText::new(text).font(body(12.5)).color(DIM)).sense(Sense::hover()),
+            )
+            .on_hover_text(tip);
+        };
         ui.horizontal(|ui| {
-            if ui.small_button(ph::CARET_LEFT).clicked() {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            let tip = "The key: which notes bass and synth play.\nThe arrows move everything a semitone down or up, the scale button next to them changes the mood.";
+            label(ui, "Key", tip);
+            if ui.small_button(ph::CARET_LEFT).on_hover_text("Down a semitone").clicked() {
                 self.song.root = if self.song.root <= 36 { 47 } else { self.song.root - 1 };
             }
-            let label = egui::RichText::new(self.song.root_name()).font(bold(14.0));
-            if ui
-                .add(egui::Button::new(label).frame(false))
-                .on_hover_text("Click for another scale")
+            ui.add_sized(
+                vec2(28.0, 22.0),
+                egui::Label::new(egui::RichText::new(self.song.note_name()).font(bold(15.0)).color(TEXT)),
+            )
+            .on_hover_text(tip);
+            if ui.small_button(ph::CARET_RIGHT).on_hover_text("Up a semitone").clicked() {
+                self.song.root = if self.song.root >= 47 { 36 } else { self.song.root + 1 };
+            }
+            let scale = self.song.scale;
+            if chip(ui, scale.name(), false, ACID)
+                .on_hover_text(format!("Scale: {} – {}\nClick for another one", scale.name(), scale.blurb()))
                 .clicked()
             {
-                self.song.scale = match self.song.scale {
+                self.song.scale = match scale {
                     Scale::Minor => Scale::Phrygian,
                     Scale::Phrygian => Scale::Dorian,
                     Scale::Dorian => Scale::Minor,
                 };
-            }
-            if ui.small_button(ph::CARET_RIGHT).clicked() {
-                self.song.root = if self.song.root >= 47 { 36 } else { self.song.root + 1 };
             }
             let tr = self.shared.transpose.load(Ordering::Relaxed);
             if tr != 0 {
@@ -758,20 +1033,27 @@ impl BunkerApp {
                     .on_hover_text("Transposed by the MIDI keyboard");
             }
         });
-        let w = ui.available_width() - 70.0;
-        for (label, which) in [("Swing", 0), ("Volume", 1)] {
+        let w = ui.available_width() - 100.0;
+        for which in 0..2 {
             ui.horizontal(|ui| {
-                ui.add_sized(
-                    vec2(58.0, 14.0),
-                    egui::Label::new(egui::RichText::new(label).font(body(12.0)).color(DIM)),
-                );
+                ui.spacing_mut().item_spacing.x = 4.0;
+                if which == 0 {
+                    label(
+                        ui,
+                        "Swing",
+                        "Pushes every second 16th note a little late: from straight (0) to bouncy (100)",
+                    );
+                } else {
+                    label(ui, "Volume", "Master volume");
+                }
                 let v = if which == 0 { &mut self.song.swing } else { &mut self.song.master };
                 widgets::bar_slider(ui, v, w, if which == 0 { ACID } else { TEXT });
+                ui.label(egui::RichText::new(format!("{:.0}", *v * 100.0)).font(bold(11.0)).color(FAINT));
             });
         }
         // Output level
         let level = self.shared.level().min(1.0);
-        let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 6.0), Sense::hover());
+        let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 5.0), Sense::hover());
         ui.painter().rect_filled(r, 3.0, PANEL_HI);
         let col = if level > 0.94 {
             RED
@@ -784,20 +1066,19 @@ impl BunkerApp {
 
     fn live_panel(&mut self, ui: &mut Ui, live: &Live, now: f64) {
         let w = ui.available_width();
-        heading(ui, "MACROS");
-        // Short window: four small knobs in a row instead of a 2 × 2 block
-        let compact = ui.available_height() < 715.0;
-        let ks = if compact { (w - 24.0) / 4.0 } else { (w / 2.0 - 8.0).min(118.0) };
+        let tall = ui.available_height() > 600.0;
+        heading(ui, "SOUND");
+        let ks = ((w - 24.0) / 4.0).min(if tall { 64.0 } else { 58.0 });
         let m = self.song.macros;
         let mut vals = [m.energy, m.dark, m.acid, m.space];
         let defaults = crate::song::Macros::default();
         let def = [defaults.energy, defaults.dark, defaults.acid, defaults.space];
-        let names = ["ENERGY", "DARKNESS", "ACID", "SPACE"];
+        let names = ["ENERGY", "DARK", "ACID", "SPACE"];
         let tips = [
-            "Busier hats, harder drive. Also used when rolling new grooves.",
-            "Longer kick, deep rumble, darker sound.",
-            "Opens and squeezes the acid filter.",
-            "Reverb and echo.",
+            "Low: hats and percussion thin out. High: extra hats, harder kick, more drive",
+            "Darker sound, longer kick, deep rumble under it",
+            "Opens and squeezes the synth filter – and brings the synth line in",
+            "Reverb and echo on everything",
         ];
         let colors = [
             Color32::from_rgb(255, 154, 60),
@@ -805,14 +1086,30 @@ impl BunkerApp {
             ACID,
             track_color(Voice::OpenHat),
         ];
-        let (rows, cols) = if compact { (1, 4) } else { (2, 2) };
-        for row in 0..rows {
-            ui.horizontal(|ui| {
-                for col in 0..cols {
-                    let i = row * cols + col;
-                    knob(ui, &mut vals[i], def[i], names[i], colors[i], ks).on_hover_text(tips[i]);
+        let mut hint = None;
+        ui.horizontal(|ui| {
+            for i in 0..4 {
+                let r = knob(ui, &mut vals[i], def[i], names[i], colors[i], ks);
+                if r.hovered() || r.dragged() {
+                    hint = Some(i);
                 }
-            });
+            }
+        });
+        self.knob_hint = hint;
+        let text = hint.map_or("Drag a knob up or down · double-click resets", |i| tips[i]);
+        ui.add_sized(
+            vec2(w, 28.0),
+            egui::Label::new(
+                egui::RichText::new(text)
+                    .font(body(11.0))
+                    .color(if hint.is_some() { DIM } else { FAINT }),
+            )
+            .wrap(),
+        );
+        // Turning up ACID while the synth sits muted: bring it in, or the knob seems broken
+        if vals[2] > m.acid + 0.001 && self.song.track(Voice::Acid).mute && self.solo.is_none() {
+            self.song.track_mut(Voice::Acid).mute = false;
+            self.say(format!("Synth in: {}", self.song.sound_name(Voice::Acid)), now);
         }
         let mm = &mut self.song.macros;
         mm.energy = vals[0];
@@ -820,89 +1117,82 @@ impl BunkerApp {
         mm.acid = vals[2];
         mm.space = vals[3];
 
-        ui.add_space(10.0);
+        ui.add_space(4.0);
         heading(ui, "AUTO");
         // Auto mode toggle
-        let (r, resp) = ui.allocate_exact_size(vec2(w, 54.0), Sense::click());
+        let (r, resp) = ui.allocate_exact_size(vec2(w, 50.0), Sense::click());
         let on = self.song.auto;
         {
             let p = ui.painter();
             p.rect_filled(r, 12.0, if on { alpha(ACID, 0.12) } else { PANEL_HI });
             p.rect_stroke(r, 12.0, stroke(1.2, if on { ACID } else { LINE }), egui::StrokeKind::Inside);
             p.text(
-                r.left_top() + vec2(14.0, 10.0),
+                r.left_top() + vec2(14.0, 9.0),
                 Align2::LEFT_TOP,
                 format!("{}  AUTO MODE", ph::INFINITY),
                 bold(14.0),
                 if on { ACID } else { TEXT },
             );
             let sub = if on {
-                format!("New ideas every {} bars", self.song.auto_bars)
+                format!("Changes every {} bars", self.song.auto_bars)
             } else {
                 "Let Bunker play a whole set".into()
             };
-            p.text(r.left_top() + vec2(14.0, 31.0), Align2::LEFT_TOP, sub, body(11.5), DIM);
+            p.text(r.left_top() + vec2(14.0, 29.0), Align2::LEFT_TOP, sub, body(11.0), DIM);
             // Switch
-            let sw = Rect::from_center_size(r.right_center() - vec2(30.0, 0.0), vec2(36.0, 20.0));
+            let sw = Rect::from_center_size(r.right_center() - vec2(28.0, 0.0), vec2(36.0, 20.0));
             p.rect_filled(sw, 10.0, if on { ACID } else { LINE });
             let knob_x = if on { sw.right() - 10.0 } else { sw.left() + 10.0 };
             p.circle_filled(pos2(knob_x, sw.center().y), 7.0, if on { BG } else { DIM });
         }
-        if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-            self.song.auto = !on;
-            self.say(
-                if self.song.auto {
-                    "Auto mode on – sit back"
-                } else {
-                    "Auto mode off"
-                },
-                now,
-            );
+        if resp
+            .on_hover_text("New patterns, sounds, fills, breakdowns and drops – all by itself")
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .clicked()
+        {
+            self.toggle_auto(now);
         }
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Every").font(body(12.0)).color(DIM));
-            for bars in [4u8, 8, 16] {
-                if chip(ui, &format!("{bars} bars"), self.song.auto_bars == bars, ACID).clicked() {
+            ui.label(egui::RichText::new("Change every").font(body(12.0)).color(DIM));
+            for bars in [2u8, 4, 8] {
+                if chip_sized(ui, &format!("{bars}"), self.song.auto_bars == bars, ACID, Some(36.0))
+                    .on_hover_text(format!("The auto mode changes one thing every {bars} bars"))
+                    .clicked()
+                {
                     self.song.auto_bars = bars;
                 }
             }
+            ui.label(egui::RichText::new("bars").font(body(12.0)).color(DIM));
         });
-        if big_button(ui, vec2(w, 48.0), ph::SHUFFLE, "SHUFFLE", ACID, false)
-            .on_hover_text("A whole new groove in this vibe (Enter)")
-            .clicked()
-        {
-            self.shuffle(self.song.vibe, now);
-        }
 
-        ui.add_space(10.0);
+        ui.add_space(4.0);
         heading(ui, "LIVE");
         let before = self.filter;
         widgets::filter_slider(ui, &mut self.filter, w);
         if self.filter != before {
             self.send(Cmd::Filter(self.filter));
         }
-        ui.horizontal(|ui| {
-            let half = (w - 8.0) / 2.0;
-            for (label, icon, key, is_echo) in [("ECHO", ph::WAVEFORM, "W", true), ("STUTTER", ph::REPEAT, "Q", false)] {
-                let (r, resp) = ui.allocate_exact_size(vec2(half, 46.0), Sense::click_and_drag());
-                let mouse = resp.is_pointer_button_down_on();
-                let (key_held, prev) = if is_echo {
-                    (self.echo, &mut self.echo_mouse)
-                } else {
-                    (self.stutter, &mut self.stutter_mouse)
-                };
-                if mouse != *prev {
-                    *prev = mouse;
-                    let on = mouse || key_held;
-                    let _ = self.tx.send(if is_echo { Cmd::Echo(on) } else { Cmd::Stutter(on) });
+        // Effects: hold to use
+        let gap = 8.0;
+        let bw = (w - gap * 2.0) / 3.0;
+        let bh = if tall { 50.0 } else { 40.0 };
+        for row in 0..2 {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                for col in 0..3 {
+                    let i = row * 3 + col;
+                    let fx = Fx::ALL[i];
+                    let (r, resp) = ui.allocate_exact_size(vec2(bw, bh), Sense::click_and_drag());
+                    self.fx_mouse[i] = resp.is_pointer_button_down_on();
+                    let active = self.fx_mouse[i] || self.fx_key[i];
+                    widgets::fx_button(ui, r, &resp, fx_icon(fx), fx.name(), fx.key(), fx_color(fx), active);
+                    resp.on_hover_text(format!("{} – hold ({})", fx.blurb(), fx.key()))
+                        .on_hover_cursor(egui::CursorIcon::PointingHand);
                 }
-                let color = track_color(if is_echo { Voice::OpenHat } else { Voice::Rim });
-                widgets::paint_big_button(ui, r, &resp, icon, label, color, mouse || key_held);
-                resp.on_hover_text(format!("Hold ({key})"));
-            }
-        });
+            });
+        }
         // The drop
-        let (r, resp) = ui.allocate_exact_size(vec2(w, 64.0), Sense::click());
+        let (r, resp) = ui.allocate_exact_size(vec2(w, if tall { 64.0 } else { 52.0 }), Sense::click());
         let building = live.build;
         let p = ui.painter();
         let hot = resp.hovered();
@@ -937,9 +1227,16 @@ impl BunkerApp {
         }
         p.rect_stroke(r, 14.0, stroke(1.5, RED), egui::StrokeKind::Inside);
         let text = if building.is_some() { "BUILDING…" } else { "DROP" };
-        p.text(r.center() - vec2(0.0, 6.0), Align2::CENTER_CENTER, text, display(26.0), TEXT);
+        let big = r.height() > 56.0;
         p.text(
-            r.center() + vec2(0.0, 17.0),
+            r.center() - vec2(0.0, if big { 6.0 } else { 5.0 }),
+            Align2::CENTER_CENTER,
+            text,
+            display(if big { 26.0 } else { 22.0 }),
+            TEXT,
+        );
+        p.text(
+            r.center() + vec2(0.0, if big { 17.0 } else { 14.0 }),
             Align2::CENTER_CENTER,
             "build-up → drop on the next bar (B)",
             body(10.5),
@@ -950,68 +1247,110 @@ impl BunkerApp {
         }
     }
 
-    /// Four slots for grooves you like: click an empty one to save, a full one to load
-    fn slots_ui(&mut self, ui: &mut Ui, top_right: egui::Pos2, now: f64) {
-        let size = 36.0;
-        let gap = 6.0;
-        let left = top_right.x - SLOTS as f32 * (size + gap) + gap;
-        ui.painter().text(
-            pos2(left - 10.0, top_right.y + size / 2.0),
-            Align2::RIGHT_CENTER,
-            "GROOVES",
-            bold(10.5),
-            FAINT,
+    /// The scene strip under the orbit: four slots and the chain
+    fn scenes_ui(&mut self, ui: &mut Ui, rect: Rect, live: &Live, now: f64) {
+        let p = ui.painter().clone();
+        let left_w = 96.0;
+        p.text(rect.left_top() + vec2(4.0, 8.0), Align2::LEFT_TOP, "SCENES", bold(11.0), FAINT);
+        let sub = if self.slots.iter().all(|s| s.is_none()) {
+            "+ keeps what\nyou hear"
+        } else {
+            "click to switch"
+        };
+        p.text(rect.left_top() + vec2(4.0, 25.0), Align2::LEFT_TOP, sub, body(10.5), FAINT);
+        let info = ui.allocate_rect(Rect::from_min_size(rect.min, vec2(left_w - 8.0, rect.height())), Sense::hover());
+        info.on_hover_text(
+            "Scenes are four memory slots for grooves.\n\
+             • Click an empty one (+) to keep the groove you hear.\n\
+             • Click a full one to switch to it – the lit one keeps your changes.\n\
+             • CHAIN plays the full scenes one after another, like a song.\n\
+             • Right-click a scene to overwrite or clear it.",
         );
+
+        // Chain controls on the right
+        let chain_w = 92.0;
+        let chip_w = 30.0;
+        let right_w = chain_w + 3.0 * (chip_w + 4.0) + 8.0;
+        let cards = Rect::from_min_max(pos2(rect.left() + left_w, rect.top()), pos2(rect.right() - right_w, rect.bottom()));
+        let gap = 8.0;
+        let cw = (cards.width() - gap * 3.0) / SLOTS as f32;
         for (i, name) in SLOT_NAMES.into_iter().enumerate() {
-            let r = Rect::from_min_size(pos2(left + i as f32 * (size + gap), top_right.y), vec2(size, size));
+            let r = Rect::from_min_size(
+                pos2(cards.left() + i as f32 * (cw + gap), cards.top() + 4.0),
+                vec2(cw, rect.height() - 8.0),
+            );
             let resp = ui.allocate_rect(r, Sense::click());
             let filled = self.slots[i];
             let current = self.slot_now == Some(i);
             let hot = resp.hovered();
-            let p = ui.painter();
             match filled {
                 Some(song) => {
-                    p.rect_filled(r, 9.0, if hot { PANEL_HI } else { mix(PANEL, PANEL_HI, 0.6) });
+                    let chained = current && self.chain.is_some() && live.playing;
+                    if chained {
+                        widgets::glow_rect(&p, r, 10.0, ACID, 0.25 + live.flash(0) * 0.5);
+                    }
+                    p.rect_filled(
+                        r,
+                        10.0,
+                        if current {
+                            mix(PANEL, ACID, 0.12)
+                        } else if hot {
+                            PANEL_HI
+                        } else {
+                            mix(PANEL, PANEL_HI, 0.6)
+                        },
+                    );
                     p.rect_stroke(
                         r,
-                        9.0,
+                        10.0,
                         stroke(if current { 1.5 } else { 1.0 }, if current { ACID } else { LINE }),
                         egui::StrokeKind::Inside,
                     );
-                    p.text(
-                        r.center() - vec2(0.0, 4.0),
-                        Align2::CENTER_CENTER,
-                        name,
-                        display(16.0),
-                        if current { ACID } else { TEXT },
-                    );
-                    // Tiny dots: which tracks play in this groove
+                    let wide = cw > 96.0;
+                    let (letter_at, letter_align) = if wide {
+                        (r.left_center() + vec2(12.0, -2.0), Align2::LEFT_CENTER)
+                    } else {
+                        (r.center_top() + vec2(0.0, 5.0), Align2::CENTER_TOP)
+                    };
+                    p.text(letter_at, letter_align, name, display(20.0), if current { ACID } else { TEXT });
+                    let tx = if wide { r.left() + 34.0 } else { r.left() + 10.0 };
+                    if wide {
+                        p.text(
+                            pos2(tx, r.top() + 8.0),
+                            Align2::LEFT_TOP,
+                            format!("{} · {:.0}", song.vibe.name(), song.bpm),
+                            bold(11.0),
+                            if current { TEXT } else { DIM },
+                        );
+                    }
+                    // Tiny dots: which tracks play in this scene
+                    let dots_w = (r.right() - 10.0 - tx).min(70.0);
+                    let dy = r.bottom() - if wide { 11.0 } else { 7.0 };
                     for (t, v) in Voice::ALL.into_iter().enumerate() {
                         let tr = song.tracks[t];
-                        let x = r.left() + 6.0 + t as f32 * (size - 12.0) / 7.0;
+                        let x = tx + t as f32 * dots_w / 7.0;
                         let c = if tr.mute || tr.hits() == 0 {
                             alpha(FAINT, 0.5)
                         } else {
                             track_color(v)
                         };
-                        p.circle_filled(pos2(x, r.bottom() - 6.0), 1.6, c);
+                        p.circle_filled(pos2(x, dy), 2.2, c);
                     }
                 }
                 None => {
-                    p.rect_stroke(r, 9.0, stroke(1.0, if hot { FAINT } else { LINE }), egui::StrokeKind::Inside);
-                    p.text(
-                        r.center(),
-                        Align2::CENTER_CENTER,
-                        if hot { ph::PLUS } else { name },
-                        body(14.0),
-                        if hot { TEXT } else { FAINT },
-                    );
+                    p.rect_stroke(r, 10.0, stroke(1.0, if hot { FAINT } else { LINE }), egui::StrokeKind::Inside);
+                    let label = if cw > 80.0 {
+                        format!("{}  {name}", ph::PLUS)
+                    } else {
+                        ph::PLUS.to_string()
+                    };
+                    p.text(r.center(), Align2::CENTER_CENTER, label, bold(13.0), if hot { TEXT } else { FAINT });
                 }
             }
-            let tip = if filled.is_some() {
-                format!("Load groove {} (right-click: save over it or clear)", name)
-            } else {
-                format!("Save this groove in slot {}", name)
+            let tip = match (filled.is_some(), current) {
+                (false, _) => format!("Empty – click to keep the groove you hear now as scene {name}"),
+                (true, true) => format!("Scene {name} is playing – your changes are kept in it.\nRight-click: overwrite or clear"),
+                (true, false) => format!("Click: switch to scene {name}\nRight-click: overwrite or clear"),
             };
             let resp = resp.on_hover_text(tip).on_hover_cursor(egui::CursorIcon::PointingHand);
             if resp.clicked() {
@@ -1019,18 +1358,70 @@ impl BunkerApp {
             }
             if filled.is_some() {
                 resp.context_menu(|ui| {
-                    if ui.button(format!("{}  Save current groove here", ph::FLOPPY_DISK)).clicked() {
+                    if ui.button(format!("{}  Save what you hear here", ph::FLOPPY_DISK)).clicked() {
                         self.slot_clicked(i, true, now);
                         ui.close_menu();
                     }
-                    if ui.button(format!("{}  Clear slot", ph::TRASH)).clicked() {
-                        self.slots[i] = None;
-                        if self.slot_now == Some(i) {
-                            self.slot_now = None;
-                        }
+                    if ui.button(format!("{}  Clear scene", ph::TRASH)).clicked() {
+                        self.clear_slot(i, now);
                         ui.close_menu();
                     }
                 });
+            }
+        }
+
+        // CHAIN toggle and its length
+        let cr = Rect::from_min_size(
+            pos2(rect.right() - right_w + 8.0, rect.top() + 4.0),
+            vec2(chain_w, rect.height() - 8.0),
+        );
+        let resp = ui.allocate_rect(cr, Sense::click());
+        let on = self.chain.is_some();
+        widgets::fx_button(ui, cr, &resp, ph::PLAY_PAUSE, "CHAIN", "", ACID, on);
+        if resp
+            .on_hover_text("Plays the full scenes one after another (A → B → C → D), like a song")
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .clicked()
+        {
+            self.toggle_chain(now);
+        }
+        for (k, bars) in [4u8, 8, 16].into_iter().enumerate() {
+            let r = Rect::from_min_size(
+                pos2(cr.right() + 4.0 + k as f32 * (chip_w + 4.0), cr.center().y - 13.0),
+                vec2(chip_w, 26.0),
+            );
+            let resp = ui.allocate_rect(r, Sense::click());
+            let sel = self.chain_bars == bars;
+            let hot = resp.hovered();
+            p.rect_filled(
+                r,
+                8.0,
+                if sel {
+                    alpha(ACID, 0.16)
+                } else if hot {
+                    PANEL_HI
+                } else {
+                    Color32::TRANSPARENT
+                },
+            );
+            p.rect_stroke(r, 8.0, stroke(1.0, if sel { ACID } else { LINE }), egui::StrokeKind::Inside);
+            p.text(
+                r.center(),
+                Align2::CENTER_CENTER,
+                format!("{bars}"),
+                bold(12.0),
+                if sel { ACID } else { DIM },
+            );
+            if resp
+                .on_hover_text(format!("Chain: next scene every {bars} bars"))
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+            {
+                self.chain_bars = bars;
+                if self.chain.is_some() {
+                    self.chain = Some(bars);
+                    self.send_chain();
+                }
             }
         }
     }
@@ -1038,8 +1429,7 @@ impl BunkerApp {
     fn hints(&self, ui: &mut Ui) {
         ui.horizontal_centered(|ui| {
             ui.add_space(8.0);
-            let keys =
-                "Space play  ·  Enter shuffle  ·  A–K pads  ·  1–8 mute  ·  B drop  ·  Q stutter  ·  W echo  ·  R record  ·  Tab view  ·  ⌘/Ctrl Z undo";
+            let keys = "Space play  ·  Enter shuffle  ·  A–K pads  ·  1–8 mute  ·  B drop  ·  Q W E  X C V effects  ·  R record  ·  Tab view  ·  ⌘/Ctrl Z undo";
             ui.label(egui::RichText::new(keys).font(body(11.5)).color(FAINT));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(8.0);
@@ -1151,7 +1541,7 @@ impl BunkerApp {
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
-            .default_width(460.0)
+            .default_width(480.0)
             .anchor(Align2::CENTER_CENTER, vec2(0.0, 0.0))
             .show(ctx, |ui| {
                 let row = |ui: &mut Ui, icon: &str, title: &str, text: &str| {
@@ -1164,16 +1554,27 @@ impl BunkerApp {
                     });
                     ui.add_space(4.0);
                 };
-                let max_h = ctx.screen_rect().height() - 180.0;
+                let max_h = ctx.screen_rect().height() - 200.0;
                 egui::ScrollArea::vertical().max_height(max_h).show(ui, |ui| {
-                    row(ui, ph::PLAY, "Press play", "Space or the button in the middle. Pick a vibe at the top to roll a fresh groove.");
-                    row(ui, ph::CIRCLES_THREE, "The orbit", "Each ring is one sound, each dot one step. Click to switch a dot on or off, drag to paint. Right-click: accent (on acid: slide). Scroll on bass/acid dots to change the note. Shift-click: chance.");
+                    row(ui, ph::PLAY, "Press play", "Space or the button in the middle. Pick a vibe in the bar at the top – each click rolls a fresh groove in that style. SHUFFLE rolls again.");
+                    row(ui, ph::CIRCLES_THREE, "The orbit", "Each ring is one sound, each dot one step. Click to switch a dot on or off, drag to paint. Right-click: accent (on the synth: slide). Scroll on bass/synth dots to change the note. Shift-click: chance.");
+                    row(ui, ph::LIST, "Tracks", "S solos a track, the speaker mutes it, the dice rolls a new rhythm for just that track (right-click: clear). The coloured pill is its sound – click it for the list or scroll on it. The number is the loop length: under 16 it drifts against the beat.");
+                    row(ui, ph::MUSIC_NOTES, "Key & swing", "Key = which notes bass and synth play: the arrows shift them, the scale button changes the mood. Swing pushes every second 16th late for more bounce.");
+                    row(ui, ph::STACK, "Scenes", "Four memory slots under the orbit. Click + to keep what you hear, click a full scene to switch – the lit one keeps your changes. CHAIN plays them one after another like a song.");
+                    row(ui, ph::INFINITY, "Auto mode", "Bunker changes something every 2, 4 or 8 bars – patterns, sounds, notes, fills – and every 32 bars plays a breakdown, a build-up and a drop. Sometimes the drop starts a new chapter with a new bassline or key.");
+                    row(ui, ph::SLIDERS, "Sound knobs", "ENERGY thins out or fills up the hats and drives the kick. DARK closes the sound and adds rumble. ACID opens the synth filter. SPACE: reverb and echo.");
+                    row(ui, ph::LIGHTNING, "Live effects", "FILTER springs back when you let go. Hold STUTTER (Q), ECHO (W), WASH (E), CRUSH (X), GATE (C) or TAPE STOP (V) – combine them. DROP builds up and hits on the next bar.");
                     row(ui, ph::GRID_FOUR, "Pads", "Tab switches to big pads and a classic grid. Hit RECORD and play along – your hits land on the beat.");
-                    row(ui, ph::FLOPPY_DISK, "Grooves A–D", "Like what you hear? Click an empty slot (top right) to keep it, click it again later to bring it back. Right-click a full slot to overwrite or clear it.");
                     row(ui, ph::ARROW_COUNTER_CLOCKWISE, "Undo", "⌘/Ctrl + Z takes back any change – a shuffle too. ⌘/Ctrl + Shift + Z redoes it.");
-                    row(ui, ph::INFINITY, "Auto mode", "Bunker keeps changing the groove on its own and plays breakdowns and drops every 32 bars.");
-                    row(ui, ph::SLIDERS, "Macros & live", "Four big knobs shape the sound. FILTER springs back when you let go. Hold ECHO or STUTTER. DROP builds up and hits on the next bar. Click a track name to solo it, right-click its dice to clear it.");
-                    row(ui, ph::PIANO_KEYS, "MIDI keyboard", "Keys below middle C play the sounds. Hold a key from middle C up to transpose bass and acid. Mod wheel = acid, pitch bend = filter, sustain = echo, knobs (CC 70–73) = macros.");
+                    row(ui, ph::PIANO_KEYS, "MIDI keyboard", "Keys below middle C play the sounds. Hold a key from middle C up to transpose bass and synth. Mod wheel = acid, pitch bend = filter, sustain = echo, knobs (CC 70–73) = sound knobs.");
+                });
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut self.check_updates, "Tell me when a new version is out")
+                        .on_hover_text("Asks GitHub once at start – nothing else is sent");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.hyperlink_to(format!("{}  github.com/tj537/bunker", ph::GITHUB_LOGO), update::REPO_URL);
+                    });
                 });
             });
         self.help = open;
@@ -1189,6 +1590,9 @@ impl eframe::App for BunkerApp {
         eframe::set_value(storage, "song", &self.song);
         eframe::set_value(storage, "view", &self.view);
         eframe::set_value(storage, "slots", &self.slots);
+        eframe::set_value(storage, "slot_now", &self.slot_now);
+        eframe::set_value(storage, "chain_bars", &self.chain_bars);
+        eframe::set_value(storage, "check_updates", &self.check_updates);
         eframe::set_value(storage, "seen_help", &true);
     }
 }
@@ -1225,15 +1629,19 @@ impl BunkerApp {
 
         let frame = |fill: Color32, margin: f32| egui::Frame::new().fill(fill).inner_margin(margin);
         egui::TopBottomPanel::top("top")
-            .exact_height(66.0)
-            .frame(frame(BG, 8.0))
+            .exact_height(58.0)
+            .frame(frame(BG, 6.0))
             .show(ctx, |ui| self.top_bar(ui, &live, now));
+        egui::TopBottomPanel::top("vibes")
+            .exact_height(44.0)
+            .frame(frame(BG, 4.0))
+            .show(ctx, |ui| self.vibe_bar(ui, now));
         egui::TopBottomPanel::bottom("hints")
             .exact_height(28.0)
             .frame(frame(BG, 2.0))
             .show(ctx, |ui| self.hints(ui));
         egui::SidePanel::left("tracks")
-            .exact_width(262.0)
+            .exact_width(266.0)
             .resizable(false)
             .frame(frame(BG, 14.0))
             .show(ctx, |ui| self.tracks_panel(ui, &live, now));
@@ -1243,7 +1651,9 @@ impl BunkerApp {
             .frame(frame(BG, 14.0))
             .show(ctx, |ui| self.live_panel(ui, &live, now));
         egui::CentralPanel::default().frame(frame(BG, 10.0)).show(ctx, |ui| {
-            let rect = ui.available_rect_before_wrap();
+            let area = ui.available_rect_before_wrap();
+            let scenes_h = 58.0;
+            let rect = Rect::from_min_max(area.min, pos2(area.right(), area.bottom() - scenes_h - 6.0));
             // Concrete slab behind the main view
             ui.painter().rect_filled(rect, 22.0, PANEL);
             ui.painter().rect_stroke(rect, 22.0, stroke(1.0, LINE), egui::StrokeKind::Inside);
@@ -1266,11 +1676,21 @@ impl BunkerApp {
                     }
                 }
             }
-            self.slots_ui(ui, inner.right_top(), now);
+            let strip = Rect::from_min_max(pos2(area.left(), area.bottom() - scenes_h), area.max);
+            self.scenes_ui(ui, strip, &live, now);
         });
 
         self.export_window(ctx, now);
         self.help_window(ctx);
+
+        // Live effects: held with a key or the mouse
+        for i in 0..Fx::ALL.len() {
+            let on = self.fx_key[i] || self.fx_mouse[i];
+            if on != self.fx_sent[i] {
+                self.fx_sent[i] = on;
+                self.send(Cmd::Fx(Fx::ALL[i], on));
+            }
+        }
 
         if self.song != self.sent {
             if self.restoring {
@@ -1285,9 +1705,25 @@ impl BunkerApp {
                 }
                 self.redo.clear();
                 self.last_edit = now;
+                // The lit scene keeps every change
+                if let Some(i) = self.slot_now {
+                    if self.slots[i].is_some() {
+                        self.slots[i] = Some(self.song);
+                        if self.chain.is_some() {
+                            self.send_chain();
+                        }
+                    }
+                }
             }
             self.sent = self.song;
             self.send(Cmd::Song(Box::new(self.song)));
+        }
+        if let Some(v) = self.preview.take() {
+            self.send(Cmd::Hit {
+                voice: v,
+                vel: 0.85,
+                record: false,
+            });
         }
     }
 }
@@ -1348,10 +1784,62 @@ mod tests {
         app.slot_clicked(0, false, 0.0); // empty → save
         assert_eq!(app.slots[0], Some(first));
         app.shuffle(Vibe::Acid, 0.0);
+        assert_eq!(app.slot_now, None, "a shuffle leaves the scene alone");
         app.song.master = 0.3;
         app.slot_clicked(0, false, 0.0); // full → load
         assert_eq!(app.song.tracks, first.tracks);
         assert_eq!(app.song.master, 0.3, "volume belongs to the moment");
+    }
+
+    #[test]
+    fn the_lit_scene_keeps_changes() {
+        let mut snap = Offscreen::new(1360.0, 860.0);
+        install(&snap.ctx);
+        let mut app = BunkerApp::headless(Song::default(), View::Orbit, false);
+        frame(&mut app, &mut snap, 1.0);
+        app.slot_clicked(1, false, 1.0);
+        frame(&mut app, &mut snap, 1.1);
+        app.song.tracks[2].steps[5].on = !app.song.tracks[2].steps[5].on;
+        frame(&mut app, &mut snap, 2.0);
+        assert_eq!(app.slots[1].unwrap().tracks[2], app.song.tracks[2]);
+        // Undo doesn't write into a scene
+        app.undo(3.0);
+        frame(&mut app, &mut snap, 3.0);
+        assert_eq!(app.slot_now, None);
+        assert_ne!(app.slots[1].unwrap().tracks[2], app.song.tracks[2]);
+    }
+
+    #[test]
+    fn chain_needs_two_scenes_and_stops_auto() {
+        let mut app = BunkerApp::headless(Song::default(), View::Orbit, false);
+        app.toggle_chain(0.0);
+        assert_eq!(app.chain, None);
+        app.slot_clicked(0, false, 0.0);
+        app.shuffle(Vibe::Dub, 0.0);
+        app.slot_clicked(2, false, 0.0);
+        app.song.auto = true;
+        app.toggle_chain(0.0);
+        assert_eq!(app.chain, Some(8));
+        assert!(!app.song.auto);
+        app.toggle_auto(0.0);
+        assert_eq!(app.chain, None);
+        // Clearing down to one scene ends the chain
+        app.toggle_chain(0.0);
+        app.clear_slot(0, 0.0);
+        assert_eq!(app.chain, None);
+    }
+
+    #[test]
+    fn new_synth_sound_gets_a_fitting_line() {
+        let mut app = BunkerApp::headless(Song::default(), View::Orbit, false);
+        let i = Voice::Acid.index();
+        app.song.tracks[i].sound = 0;
+        let before = app.song.tracks[i].steps;
+        app.set_sound(i, 1, 0.0); // 303 saw → square: same line
+        assert_eq!(app.song.tracks[i].steps, before);
+        app.set_sound(i, 2, 0.0); // → stab: a new line
+        assert_eq!(app.song.tracks[i].sound, 2);
+        assert!(app.song.tracks[i].hits() <= 6, "stabs are sparse");
     }
 
     #[test]

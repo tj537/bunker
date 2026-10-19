@@ -8,7 +8,7 @@
 //! - Knobs: CC 70–73 (Akai MPK mini default) or CC 74/71/91/93 → Energy,
 //!   Darkness, Acid, Space.
 
-use crate::engine::Cmd;
+use crate::engine::{Cmd, Fx};
 use crate::song::Voice;
 use midir::{Ignore, MidiInput, MidiInputConnection};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -121,7 +121,7 @@ impl MidiIn {
                         }),
                         Midi::Transpose(t) => Some(Cmd::Transpose(t.unwrap_or(0))),
                         Midi::Filter(x) => Some(Cmd::Filter(x)),
-                        Midi::Echo(on) => Some(Cmd::Echo(on)),
+                        Midi::Echo(on) => Some(Cmd::Fx(Fx::Echo, on)),
                         Midi::Macro(..) => None, // changes the song – the UI does that
                     };
                     if let Some(cmd) = cmd {

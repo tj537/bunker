@@ -113,6 +113,13 @@ pub fn pads(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mut P
             bold(13.0),
             alpha(TEXT, 0.4),
         );
+        p.text(
+            r.left_top() + vec2(16.0, 14.0 + (pw * 0.13).min(22.0) * 1.35),
+            Align2::LEFT_TOP,
+            song.sound_name(voice),
+            bold(12.0),
+            alpha(color, 0.7),
+        );
         if muted {
             p.text(
                 r.left_bottom() + vec2(16.0, -12.0),
