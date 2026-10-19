@@ -6,7 +6,7 @@
 //! Euclidean rhythms, so every roll sounds like techno but never the same.
 
 use crate::rng::Rng;
-use crate::song::{Macros, Scale, Song, Step, Track, Vibe, Voice, STEPS};
+use crate::song::{Macros, Scale, Song, Step, Track, Vibe, Voice, PROGRESSIONS, STEPS, TRACKS};
 
 /// `k` hits spread as evenly as possible over `n` steps, rotated by `rot`
 pub fn euclid(k: usize, n: usize, rot: usize) -> [bool; STEPS] {
@@ -41,17 +41,26 @@ fn from_positions(pos: &[usize]) -> Track {
 }
 
 /// Chord changes per half bar, as scale degrees: i–i, i–VI, i–iv, i–VII, i–v
-const PROGRESSIONS: [[i32; 2]; 5] = [[0, 0], [0, 5], [0, 3], [0, -1], [0, 4]];
+const HALF_BAR_CHORDS: [[i32; 2]; 5] = [[0, 0], [0, 5], [0, 3], [0, -1], [0, 4]];
 
 /// The song's chord progression – derived from key and scale, so bass and synth
 /// agree even when only one of them is rolled again
 fn progression(song: &Song) -> [i32; 2] {
+    // A song-wide progression moves bar by bar already – then the bar itself stays on one chord
+    if song.prog != 0 {
+        return [0, 0];
+    }
     let k = song.root as usize + song.scale as usize * 5;
-    PROGRESSIONS[k % PROGRESSIONS.len()]
+    HALF_BAR_CHORDS[k % HALF_BAR_CHORDS.len()]
 }
 
 /// A whole new groove
 pub fn generate(vibe: Vibe, m: &Macros, rng: &mut Rng) -> Song {
+    generate_keeping(vibe, m, rng, &[None; TRACKS])
+}
+
+/// A whole new groove that keeps the given tracks (the locked ones) as they are
+pub fn generate_keeping(vibe: Vibe, m: &Macros, rng: &mut Rng, keep: &[Option<Track>; TRACKS]) -> Song {
     let mut song = Song::empty();
     song.vibe = vibe;
     song.macros = *m;
@@ -70,11 +79,22 @@ pub fn generate(vibe: Vibe, m: &Macros, rng: &mut Rng) -> Song {
         Vibe::Hypnotic | Vibe::Melodic => rng.f32() * 0.12,
         _ => 0.0,
     };
+    song.prog = *rng.pick(match vibe {
+        Vibe::Melodic | Vibe::Dub | Vibe::Rave => &[1u8, 3, 4, 1, 0][..],
+        Vibe::Hypnotic | Vibe::Minimal => &[0, 0, 0, 2, 6],
+        Vibe::Peak => &[0, 1, 3],
+        Vibe::Electro => &[0, 2, 5],
+        Vibe::Acid | Vibe::Industrial | Vibe::Hard => &[0, 0, 6],
+    }) % PROGRESSIONS.len() as u8;
     // Sounds first: the synth line is written for the sound that plays it
     for v in Voice::ALL {
         song.track_mut(v).sound = sound_for(v, vibe, rng);
     }
-    for v in Voice::ALL {
+    for (i, v) in Voice::ALL.into_iter().enumerate() {
+        if let Some(t) = keep[i] {
+            *song.track_mut(v) = t;
+            continue;
+        }
         let vol = song.track(v).volume;
         *song.track_mut(v) = track_for(v, vibe, m.energy, &song, rng);
         song.track_mut(v).volume = vol;
@@ -178,7 +198,8 @@ pub fn sound_for(v: Voice, vibe: Vibe, rng: &mut Rng) -> u8 {
 /// A fresh pattern for one track that fits the vibe (keeps the track's sound)
 pub fn track_for(v: Voice, vibe: Vibe, energy: f32, song: &Song, rng: &mut Rng) -> Track {
     let e = energy.clamp(0.0, 1.0);
-    let sound = song.track(v).sound;
+    let old = *song.track(v);
+    let sound = old.sound;
     let mut t = match v {
         Voice::Kick => kick(vibe, rng),
         Voice::Clap => clap(vibe, e, rng),
@@ -189,8 +210,11 @@ pub fn track_for(v: Voice, vibe: Vibe, energy: f32, song: &Song, rng: &mut Rng) 
         Voice::Bass => bass(vibe, e, song, rng),
         Voice::Acid => synth_line(vibe, e, song, rng),
     };
-    t.volume = song.track(v).volume;
+    t.volume = old.volume;
     t.sound = sound;
+    t.tune = old.tune;
+    t.decay = old.decay;
+    t.lock = old.lock;
     t.mute = match v {
         // The synth line plays in the vibes made for it – elsewhere it often waits muted for the auto mode
         Voice::Acid => match vibe {
@@ -571,11 +595,11 @@ impl Change {
 }
 
 /// One step of the auto mode: change one thing so the groove keeps moving but
-/// stays recognizable. (Breakdowns and drops are arranged by the engine.)
-pub fn evolve(song: &mut Song, rng: &mut Rng) -> Change {
+/// stays recognizable. Locked tracks are left alone; `None` when everything is locked.
+/// (Breakdowns and drops are arranged by the engine.)
+pub fn evolve(song: &mut Song, rng: &mut Rng) -> Option<Change> {
     let m = song.macros;
-    let roll = rng.f32();
-    let voices = [
+    let all = [
         Voice::Clap,
         Voice::Rim,
         Voice::Hat,
@@ -584,7 +608,15 @@ pub fn evolve(song: &mut Song, rng: &mut Rng) -> Change {
         Voice::Bass,
         Voice::Acid,
     ];
+    let free = |song: &Song, list: &[Voice]| -> Vec<Voice> { list.iter().copied().filter(|&v| !song.track(v).lock).collect() };
+    let voices = free(song, &all);
+    if voices.is_empty() {
+        return None;
+    }
+    let roll = rng.f32();
     let v = *rng.pick(&voices);
+    let synths = free(song, &[Voice::Bass, Voice::Acid]);
+    let loops = free(song, &[Voice::Rim, Voice::Ride, Voice::Acid, Voice::OpenHat]);
     if roll < 0.28 {
         let fresh = track_for(v, song.vibe, m.energy, song, rng);
         let t = song.track_mut(v);
@@ -594,36 +626,27 @@ pub fn evolve(song: &mut Song, rng: &mut Rng) -> Change {
             volume: t.volume,
             ..fresh
         };
-        Change::NewPattern(v)
+        Some(Change::NewPattern(v))
     } else if roll < 0.5 {
         // Bring in or take out an element; keep at least four running
-        let playing = voices.iter().filter(|&&x| !song.track(x).mute).count();
+        let playing = all.iter().filter(|&&x| !song.track(x).mute).count();
         let v = if !song.track(v).mute && playing <= 4 {
             let muted: Vec<Voice> = voices.iter().copied().filter(|&x| song.track(x).mute).collect();
             if muted.is_empty() {
-                v
-            } else {
-                *rng.pick(&muted)
+                return Some(rotate(song, v, rng));
             }
+            *rng.pick(&muted)
         } else {
             v
         };
         let t = song.track_mut(v);
         t.mute = !t.mute;
-        if t.mute {
-            Change::Muted(v)
-        } else {
-            Change::Unmuted(v)
-        }
+        Some(if t.mute { Change::Muted(v) } else { Change::Unmuted(v) })
     } else if roll < 0.62 {
-        // Rotate the pattern by a step or two – same notes, new feel
-        let t = song.track_mut(v);
-        let len = t.len as usize;
-        t.steps[..len].rotate_right(*rng.pick(&[1usize, 2, 3]));
-        Change::Shifted(v)
+        Some(rotate(song, v, rng))
     } else if roll < 0.76 {
         // Another sound on a playing track (the synth gets a line made for its new sound)
-        let v = *rng.pick(&[Voice::Clap, Voice::Rim, Voice::Hat, Voice::OpenHat, Voice::Bass, Voice::Acid]);
+        let v = if v == Voice::Ride { voices[0] } else { v };
         let n = v.sounds().len() as u8;
         let old = song.track(v).sound;
         let new = (old + 1 + rng.below(n as u32 - 1) as u8) % n;
@@ -634,27 +657,37 @@ pub fn evolve(song: &mut Song, rng: &mut Rng) -> Change {
             t.steps = fresh.steps;
             t.len = fresh.len;
         }
-        Change::NewSound(v, new)
-    } else if roll < 0.88 {
+        Some(Change::NewSound(v, new))
+    } else if roll < 0.88 && !synths.is_empty() {
         // Same rhythm, new notes for bass or synth
-        let v = *rng.pick(&[Voice::Bass, Voice::Acid]);
+        let v = *rng.pick(&synths);
         let fresh = track_for(v, song.vibe, m.energy, song, rng);
         let t = song.track_mut(v);
         let mut fresh_notes = fresh.steps.iter().filter(|s| s.on).map(|s| s.note).cycle();
         for s in t.steps.iter_mut().filter(|s| s.on) {
             s.note = fresh_notes.next().unwrap_or(s.note);
         }
-        Change::NewNotes(v)
-    } else {
+        Some(Change::NewNotes(v))
+    } else if !loops.is_empty() {
         // Polyrhythm: a loop gets shorter (or back to a full bar)
-        let v = *rng.pick(&[Voice::Rim, Voice::Ride, Voice::Acid, Voice::OpenHat]);
+        let v = *rng.pick(&loops);
         let t = song.track_mut(v);
         t.len = if t.len < 16 { 16 } else { *rng.pick(&[12u8, 14, 15]) };
         if t.hits() == 0 {
             t.steps[2] = Step::hit();
         }
-        Change::Length(v, t.len)
+        Some(Change::Length(v, t.len))
+    } else {
+        Some(rotate(song, v, rng))
     }
+}
+
+/// Rotate a pattern by a step or two – same notes, new feel
+fn rotate(song: &mut Song, v: Voice, rng: &mut Rng) -> Change {
+    let t = song.track_mut(v);
+    let len = t.len as usize;
+    t.steps[..len].rotate_right(*rng.pick(&[1usize, 2, 3]));
+    Change::Shifted(v)
 }
 
 /// A bigger change after a drop: new bassline and synth line, often new sounds,
@@ -670,12 +703,18 @@ pub fn new_chapter(song: &mut Song, rng: &mut Rng) -> Change {
             (shifted - 12).clamp(36, 47) as u8
         };
     }
+    if rng.chance(0.3) {
+        song.prog = rng.below(PROGRESSIONS.len() as u32) as u8;
+    }
     for v in [Voice::Hat, Voice::Clap, Voice::Bass, Voice::Acid] {
-        if rng.chance(0.4) {
+        if rng.chance(0.4) && !song.track(v).lock {
             song.track_mut(v).sound = sound_for(v, vibe, rng);
         }
     }
     for v in [Voice::Bass, Voice::Acid, Voice::Rim] {
+        if song.track(v).lock {
+            continue;
+        }
         let fresh = track_for(v, vibe, song.macros.energy, song, rng);
         let t = song.track_mut(v);
         let mute = if v == Voice::Acid { rng.chance(0.3) } else { t.mute };
@@ -745,7 +784,7 @@ mod tests {
         let before = s;
         let mut changes = 0;
         for _ in 0..200 {
-            evolve(&mut s, &mut rng);
+            assert!(evolve(&mut s, &mut rng).is_some());
             changes += 1;
             // The kick is never touched by the auto mode
             assert_eq!(s.track(Voice::Kick), before.track(Voice::Kick));
@@ -782,6 +821,33 @@ mod tests {
             .collect();
         let different = rolls.iter().filter(|r| **r != rolls[0]).count();
         assert!(different >= 4);
+    }
+
+    #[test]
+    fn locked_tracks_stay_as_they_are() {
+        let mut rng = Rng::new(31);
+        let mut s = generate(Vibe::Acid, &Macros::default(), &mut rng);
+        for v in [Voice::Bass, Voice::Hat, Voice::Clap] {
+            s.track_mut(v).lock = true;
+        }
+        let before = s;
+        for _ in 0..300 {
+            evolve(&mut s, &mut rng);
+            new_chapter(&mut s, &mut rng);
+        }
+        for v in [Voice::Bass, Voice::Hat, Voice::Clap] {
+            assert_eq!(s.track(v), before.track(v), "{v:?}");
+        }
+        // Everything locked: the auto mode has nothing to do
+        for t in s.tracks.iter_mut() {
+            t.lock = true;
+        }
+        assert_eq!(evolve(&mut s, &mut rng), None);
+        // Shuffle keeps locked tracks
+        let mut keep = [None; TRACKS];
+        keep[Voice::Bass.index()] = Some(*before.track(Voice::Bass));
+        let fresh = generate_keeping(Vibe::Dub, &Macros::default(), &mut rng, &keep);
+        assert_eq!(fresh.track(Voice::Bass), before.track(Voice::Bass));
     }
 
     #[test]

@@ -223,8 +223,8 @@ pub fn fx_button(ui: &Ui, rect: Rect, resp: &Response, icon: &str, name: &str, k
 }
 
 /// Bipolar slider −1…1 that springs back to the middle when released
-pub fn filter_slider(ui: &mut Ui, value: &mut f32, width: f32) -> Response {
-    let (rect, mut resp) = ui.allocate_exact_size(vec2(width, 54.0), Sense::click_and_drag());
+pub fn filter_slider(ui: &mut Ui, value: &mut f32, width: f32, height: f32) -> Response {
+    let (rect, mut resp) = ui.allocate_exact_size(vec2(width, height), Sense::click_and_drag());
     let track = Rect::from_center_size(rect.center() - vec2(0.0, 6.0), vec2(width - 24.0, 8.0));
     if let Some(pos) = resp.interact_pointer_pos() {
         if resp.dragged() || resp.is_pointer_button_down_on() {
@@ -276,6 +276,103 @@ pub fn filter_slider(ui: &mut Ui, value: &mut f32, width: f32) -> Response {
         if *value > 0.05 { color } else { FAINT },
     );
     resp.on_hover_cursor(egui::CursorIcon::ResizeHorizontal)
+}
+
+pub struct EnergyOut {
+    pub changed: bool,
+    pub curve_clicked: bool,
+}
+
+/// The energy fader: drag to strip the groove down or build it up. Dots below show
+/// where each track comes in. `curve`: None = auto mode off, Some(on) = the auto
+/// mode's energy curve is (not) driving it – the pill switches it.
+pub fn energy_fader(ui: &mut Ui, value: &mut f32, width: f32, height: f32, curve: Option<bool>) -> EnergyOut {
+    use crate::engine::LAYERS;
+    use crate::song::Voice;
+    let (rect, resp) = ui.allocate_exact_size(vec2(width, height), Sense::click_and_drag());
+    let mut out = EnergyOut {
+        changed: false,
+        curve_clicked: false,
+    };
+    let p = ui.painter();
+    let top = rect.top() + 8.0;
+    p.text(pos2(rect.left(), top), Align2::LEFT_CENTER, "ENERGY", bold(10.5), DIM);
+    // The curve pill
+    let pill = Rect::from_min_size(pos2(rect.right() - 62.0, top - 9.0), vec2(62.0, 18.0));
+    if let Some(on) = curve {
+        let hot = ui.rect_contains_pointer(pill);
+        p.rect_filled(
+            pill,
+            9.0,
+            if on {
+                alpha(ACID, 0.18)
+            } else if hot {
+                PANEL_HI
+            } else {
+                Color32::TRANSPARENT
+            },
+        );
+        p.rect_stroke(pill, 9.0, stroke(1.0, if on { ACID } else { LINE }), egui::StrokeKind::Inside);
+        p.text(
+            pill.center(),
+            Align2::CENTER_CENTER,
+            if on { "CURVE" } else { "BY HAND" },
+            bold(9.5),
+            if on { ACID } else { DIM },
+        );
+    }
+    let e = *value;
+    p.text(
+        pos2(if curve.is_some() { pill.left() - 8.0 } else { rect.right() }, top),
+        Align2::RIGHT_CENTER,
+        format!("{:.0}", e * 100.0),
+        bold(12.0),
+        TEXT,
+    );
+    let track = Rect::from_min_size(pos2(rect.left() + 6.0, top + 14.0), vec2(width - 12.0, 10.0));
+    let on_pill = curve.is_some() && resp.interact_pointer_pos().is_some_and(|p| pill.contains(p));
+    if resp.clicked() && on_pill {
+        out.curve_clicked = true;
+    } else if let Some(pos) = resp.interact_pointer_pos() {
+        if (resp.dragged() || resp.is_pointer_button_down_on()) && !on_pill {
+            let v = ((pos.x - track.left()) / track.width()).clamp(0.0, 1.0);
+            if (v - *value).abs() > 1e-4 {
+                *value = v;
+                out.changed = true;
+            }
+        }
+    }
+    let p = ui.painter();
+    let cool = Color32::from_rgb(69, 200, 255);
+    let hot_col = mix(cool, RED, *value);
+    p.rect_filled(track, 5.0, PANEL_HI);
+    let fill = Rect::from_min_max(track.min, pos2(track.left() + track.width() * *value, track.bottom()));
+    p.rect_filled(fill, 5.0, alpha(hot_col, 0.85));
+    let knob = pos2(fill.right(), track.center().y);
+    glow(p, knob, 7.0, hot_col, 0.6);
+    p.circle_filled(knob, 8.0, TEXT);
+    // Where each track comes in
+    let y = track.bottom() + 8.0;
+    for (i, v) in Voice::ALL.into_iter().enumerate() {
+        if LAYERS[i] <= 0.0 {
+            continue;
+        }
+        let x = track.left() + track.width() * LAYERS[i];
+        let lit = *value >= LAYERS[i];
+        let c = crate::theme::track_color(v);
+        p.circle_filled(pos2(x, y), 3.0, if lit { c } else { alpha(c, 0.25) });
+    }
+    if height > 52.0 {
+        p.text(pos2(track.right(), y + 9.0), Align2::RIGHT_CENTER, "more", body(9.5), FAINT);
+        p.text(pos2(track.left(), y + 9.0), Align2::LEFT_CENTER, "less", body(9.5), FAINT);
+    }
+    resp.on_hover_cursor(egui::CursorIcon::ResizeHorizontal).on_hover_text(
+        "Energy: turn it down and the groove strips down to hats and synth, turn it up and kick, bass, clap, \
+         open hat and ride come back (the dots), plus extra hats and drive at the top. ← → on the keyboard.\n\
+         Then hit DROP – the energy comes back with it.\n\
+         In auto mode CURVE lets Bunker move it through the set; touching the fader takes over by hand.",
+    );
+    out
 }
 
 /// Thin horizontal value bar (track volume, swing, master)

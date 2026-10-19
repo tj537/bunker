@@ -4,6 +4,7 @@
 mod app;
 mod audio;
 mod engine;
+mod file;
 mod gen;
 mod midi;
 #[cfg(test)]
@@ -17,6 +18,7 @@ mod song;
 mod synth;
 mod theme;
 mod update;
+mod visual;
 mod wav;
 mod widgets;
 

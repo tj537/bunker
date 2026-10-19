@@ -35,6 +35,8 @@ mod tests {
             build: None,
             bar: (pos / 16.0) as u64,
             caption: Some(("New hat pattern".into(), 0.5)),
+            bands: [0.22, 0.12, 0.05, 0.03, 0.035, 0.02, 0.015, 0.008],
+            level: 0.7,
         }
     }
 
@@ -66,7 +68,9 @@ mod tests {
             }
             app.song = app.slots[1].unwrap();
             app.slot_now = Some(1);
-            app.chain = Some(8);
+            app.chain = true;
+            app.scene_drop[2] = true;
+            app.scene_bars = [4, 8, 16, 8];
             app.new_version = Some(crate::update::Release { version: "0.3.0".into() });
             app.fake_live = Some(playing(20.3, &[0, 7]));
         });
@@ -91,6 +95,22 @@ mod tests {
         render("help_small", 1100.0, 700.0, |app| {
             app.help = true;
         });
+        render("visualizer", 1360.0, 860.0, |app| {
+            app.visual = true;
+            app.song.macros.energy = 0.8;
+            app.fake_live = Some(Live {
+                caption: Some(("Drop!".into(), 0.4)),
+                ..playing(66.2, &[0, 1, 3, 6])
+            });
+        });
+        render("master_tab_small", 1100.0, 700.0, |app| {
+            app.master_tab = true;
+            app.song.auto = true;
+            app.song.tracks[0].lock = true;
+            app.song.tracks[6].lock = true;
+            app.song.prog = 3;
+            app.fake_live = Some(playing(12.5, &[0]));
+        });
         // The pictures in the README (docs/images, see `readme_images` below)
         render("readme_orbit", 1360.0, 860.0, |app| {
             use crate::song::{Vibe, Voice};
@@ -103,6 +123,12 @@ mod tests {
             app.song = app.slots[1].unwrap();
             app.song.auto = true;
             app.song.auto_bars = 4;
+            app.song.prog = 3;
+            app.song.macros.pump = 0.4;
+            app.song.tracks[0].lock = true;
+            app.song.tracks[3].tune = 2;
+            app.scene_bars = [8, 16, 8, 8];
+            app.scene_drop[1] = true;
             app.slot_now = Some(1);
             app.fx_key[2] = true;
             app.fake_live = Some(Live {

@@ -20,6 +20,9 @@ pub struct Live {
     pub build: Option<f32>,
     pub bar: u64,
     pub caption: Option<(String, f32)>,
+    /// Spectrum (engine::BANDS) and output peak, for the visualizer
+    pub bands: [f32; 8],
+    pub level: f32,
 }
 
 impl Live {
@@ -229,6 +232,18 @@ pub fn orbit(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mut 
         p.circle_stroke(g.c, r, stroke(1.0 + flash * 1.5, alpha(color, base)));
         let current = live.playing.then(|| track.step_at(live.step()));
         let dr = g.dot_radius(t, len);
+        if track.lock {
+            // Locked: a small lock between the first two steps
+            let a = Geometry::angle(0, len) + TAU / len.max(1) as f32 / 2.0;
+            let at = g.c + vec2(a.cos(), a.sin()) * r;
+            p.text(
+                at,
+                Align2::CENTER_CENTER,
+                ph::LOCK_SIMPLE,
+                body((g.spacing() * 0.55).min(13.0)),
+                alpha(color, 0.8),
+            );
+        }
 
         for s in 0..len {
             let step = track.steps[s];

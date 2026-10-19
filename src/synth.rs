@@ -257,6 +257,7 @@ pub struct Clap {
     burst_decay: f32,
     model: u8,
     body: f32,
+    pitch: f32,
 }
 
 impl Clap {
@@ -271,23 +272,26 @@ impl Clap {
             burst_decay: 0.0,
             model: 0,
             body: 0.0,
+            pitch: 1.0,
         }
     }
 
-    /// `model` in `Voice::Clap.sounds()` order: clap, snare, big clap, snap
-    pub fn trigger(&mut self, vel: f32, length: f32, sr: f32, model: u8) {
+    /// `model` in `Voice::Clap.sounds()` order: clap, snare, big clap, snap; `pitch` as a factor
+    pub fn trigger(&mut self, vel: f32, length: f32, sr: f32, model: u8, pitch: f32) {
         self.t = 0.0;
         self.amp = vel;
         self.tail = 1.0;
         self.model = model;
         self.body = 0.0;
+        self.pitch = pitch;
         let (band, q, len) = match model {
             1 => (3200.0, 0.8, length * 0.9),
             2 => (950.0, 1.0, length * 2.2),
             3 => (2300.0, 1.8, 0.035),
             _ => (1150.0, 1.3, length),
         };
-        self.bp.set(band, q, sr);
+        self.bp.set(band * pitch, q, sr);
+        self.hp.set(1800.0 * pitch, 0.7, sr);
         self.tail_decay = decay_coef(len, sr);
         self.burst_decay = decay_coef(0.006, sr);
     }
@@ -304,7 +308,7 @@ impl Clap {
                 // Snare: a short tone body plus bright noise
                 self.tail *= self.tail_decay;
                 let t = ms / 1000.0;
-                self.body = (self.body + (175.0 + 60.0 * (-t / 0.01).exp()) / sr) % 1.0;
+                self.body = (self.body + (175.0 + 60.0 * (-t / 0.01).exp()) * self.pitch / sr) % 1.0;
                 let tone = ((self.body * TAU).sin() + (self.body * TAU * 1.87).sin() * 0.4) * (-t / 0.045).exp();
                 let noise = self.hp.run(self.bp.run(n).bp + n * 0.3).hp * self.tail;
                 (tone * 0.75 + noise * 1.6) * self.amp * (t / 0.0008).min(1.0)
@@ -339,6 +343,7 @@ pub struct Rim {
     pitch: f32,
     model: u8,
     phases: [f32; 2],
+    decay: f32,
 }
 
 impl Rim {
@@ -351,23 +356,27 @@ impl Rim {
             pitch: 1.0,
             model: 0,
             phases: [0.0; 2],
+            decay: 1.0,
         }
     }
 
-    /// `model` in `Voice::Rim.sounds()` order: rim, cowbell, clave, tom, blip
-    pub fn trigger(&mut self, vel: f32, pitch: f32, model: u8) {
+    /// `model` in `Voice::Rim.sounds()` order: rim, cowbell, clave, tom, blip; `decay` stretches the envelopes
+    pub fn trigger(&mut self, vel: f32, pitch: f32, model: u8, decay: f32) {
         self.t = 0.0;
         self.amp = vel;
         self.pitch = pitch;
         self.model = model;
         self.phases = [0.0; 2];
+        self.decay = decay.max(0.05);
     }
 
     pub fn next(&mut self, sr: f32, rng: &mut Rng) -> f32 {
         let t = self.t / sr;
-        if t > 0.5 {
+        if t > 0.5 * self.decay.max(1.0) {
             return 0.0;
         }
+        // Envelopes run on stretched time, oscillators on real time
+        let te = t / self.decay;
         self.t += 1.0;
         let p = self.pitch;
         match self.model {
@@ -378,24 +387,24 @@ impl Rim {
                 }
                 let sq = |ph: f32| if ph < 0.5 { 1.0 } else { -1.0 };
                 let x = sq(self.phases[0]) + sq(self.phases[1]);
-                let env = 0.6 * (-t / 0.012).exp() + 0.4 * (-t / 0.11).exp();
+                let env = 0.6 * (-te / 0.012).exp() + 0.4 * (-te / 0.11).exp();
                 self.bp.run(x).bp * env * self.amp * 0.32
             }
-            2 => (TAU * 2450.0 * p * t).sin() * (-t / 0.02).exp() * self.amp * 0.8,
+            2 => (TAU * 2450.0 * p * t).sin() * (-te / 0.02).exp() * self.amp * 0.8,
             3 => {
-                let hz = (105.0 + 150.0 * (-t / 0.035).exp()) * p;
+                let hz = (105.0 + 150.0 * (-te / 0.035).exp()) * p;
                 self.phases[0] = (self.phases[0] + hz / sr) % 1.0;
-                sat((self.phases[0] * TAU).sin() * 1.3) * (-t / 0.17).exp() * self.amp * 0.4
+                sat((self.phases[0] * TAU).sin() * 1.3) * (-te / 0.17).exp() * self.amp * 0.4
             }
             4 => {
                 // FM blip
-                let index = 3.0 * (-t / 0.012).exp();
+                let index = 3.0 * (-te / 0.012).exp();
                 let m = (TAU * 1730.0 * p * t).sin() * index;
-                (TAU * 1150.0 * p * t + m).sin() * (-t / 0.045).exp() * self.amp * 0.7
+                (TAU * 1150.0 * p * t + m).sin() * (-te / 0.045).exp() * self.amp * 0.7
             }
             _ => {
                 let tone = (TAU * 1720.0 * p * t).sin() * 0.55 + (TAU * 495.0 * p * t).sin() * 0.7;
-                let x = tone * (-t / 0.024).exp() + rng.noise() * (-t / 0.003).exp() * 0.6;
+                let x = tone * (-te / 0.024).exp() + rng.noise() * (-te / 0.003).exp() * 0.6;
                 self.hp.run(x).hp * self.amp
             }
         }
@@ -508,14 +517,15 @@ impl Hat {
             rise_coef: 0.0,
             gain: 1.0,
         };
-        h.set_model(model, sr);
+        h.set_model(model, 1.0, sr);
         h
     }
 
-    pub fn set_model(&mut self, m: &HatModel, sr: f32) {
-        self.metal.tune(m.scale);
-        self.bp.set(m.band, 1.1, sr);
-        self.hp.set(m.hp, 0.7, sr);
+    /// `tune` as a factor (1 = the model's own pitch)
+    pub fn set_model(&mut self, m: &HatModel, tune: f32, sr: f32) {
+        self.metal.tune(m.scale * tune);
+        self.bp.set(m.band * tune, 1.1, sr);
+        self.hp.set(m.hp * tune, 0.7, sr);
         self.noise_mix = m.noise;
         self.rise_coef = if m.rise > 0.0 { decay_coef(m.rise, sr) } else { 0.0 };
         self.gain = m.gain;
@@ -583,8 +593,9 @@ impl Bass {
         }
     }
 
-    /// `gate` in samples; `model` in `Voice::Bass.sounds()` order
-    pub fn trigger(&mut self, note: f32, vel: f32, gate: f32, sr: f32, model: u8) {
+    /// `gate` in samples; `model` in `Voice::Bass.sounds()` order; `decay` stretches the envelopes
+    #[allow(clippy::too_many_arguments)]
+    pub fn trigger(&mut self, note: f32, vel: f32, gate: f32, sr: f32, model: u8, decay: f32) {
         self.hz = midi_hz(note);
         self.amp = vel;
         self.env = 1.0;
@@ -601,8 +612,8 @@ impl Bass {
             4 => (0.13, 0.022),
             _ => (0.22, 0.055),
         };
-        self.adecay = decay_coef(a, sr);
-        self.fdecay = decay_coef(f, sr);
+        self.adecay = decay_coef(a * decay, sr);
+        self.fdecay = decay_coef(f * decay.sqrt(), sr);
     }
 
     /// `bright` 0…1 (energy), `dark` 0…1 lowers the filter
@@ -751,7 +762,7 @@ impl Acid {
 
     /// `model` in `Voice::Acid.sounds()` order; `chord` only matters for the stab
     #[allow(clippy::too_many_arguments)]
-    pub fn trigger(&mut self, note: f32, vel: f32, accent: bool, gate: f32, sr: f32, model: u8, chord: [f32; 3]) {
+    pub fn trigger(&mut self, note: f32, vel: f32, accent: bool, gate: f32, sr: f32, model: u8, chord: [f32; 3], decay: f32) {
         self.set_model(model, chord);
         self.hz = midi_hz(note);
         self.target_hz = self.hz;
@@ -765,8 +776,8 @@ impl Acid {
             4 => (0.3, 2.0),
             _ => (if accent { 0.09 } else { 0.2 }, 1e3),
         };
-        self.fdecay = decay_coef(fd, sr);
-        self.adecay = decay_coef(ad, sr);
+        self.fdecay = decay_coef(fd * decay, sr);
+        self.adecay = decay_coef(ad * decay, sr);
         self.bend = if model == 4 { 1.0 } else { 0.0 };
         self.bend_coef = decay_coef(0.07, sr);
         self.gate = gate;
@@ -783,7 +794,7 @@ impl Acid {
         }
         if self.env < 0.05 {
             let model = self.model;
-            self.trigger(note, self.amp.max(0.7), accent, gate, sr, model, [0.0, 3.0, 7.0]);
+            self.trigger(note, self.amp.max(0.7), accent, gate, sr, model, [0.0, 3.0, 7.0], 1.0);
         }
     }
 
@@ -1020,14 +1031,14 @@ mod tests {
 
         for m in 0..4 {
             let mut clap = Clap::new(SR);
-            clap.trigger(1.0, 0.15, SR, m);
+            clap.trigger(1.0, 0.15, SR, m, 1.0);
             let p = peak_and_finite(|| clap.next(SR, &mut rng), 20_000);
             assert!(p > 0.1 && p < 3.0, "clap {m}: {p}");
         }
 
         for m in 0..5 {
             let mut rim = Rim::new(SR);
-            rim.trigger(1.0, 1.0, m);
+            rim.trigger(1.0, 1.0, m, 1.0);
             let p = peak_and_finite(|| rim.next(SR, &mut rng), 20_000);
             assert!(p > 0.1 && p < 3.0, "rim {m}: {p}");
         }
@@ -1041,14 +1052,14 @@ mod tests {
 
         for m in 0..5 {
             let mut bass = Bass::new(SR);
-            bass.trigger(41.0, 1.0, 4000.0, SR, m);
+            bass.trigger(41.0, 1.0, 4000.0, SR, m, 1.0);
             let p = peak_and_finite(|| bass.next(SR, 0.5, 0.5), 20_000);
             assert!(p > 0.2 && p <= 1.0, "bass {m}: {p}");
         }
 
         for m in 0..5 {
             let mut acid = Acid::new(SR);
-            acid.trigger(53.0, 1.0, true, 4000.0, SR, m, [0.0, 3.0, 7.0]);
+            acid.trigger(53.0, 1.0, true, 4000.0, SR, m, [0.0, 3.0, 7.0], 1.0);
             let p = peak_and_finite(|| acid.next(SR, 1.0), 20_000);
             assert!(p > 0.2 && p <= 1.2, "acid {m}: {p}");
         }

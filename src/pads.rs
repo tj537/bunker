@@ -184,10 +184,15 @@ pub fn pads(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mut P
         let track = &song.tracks[t];
         let color = track_color(voice);
         let y = grid_area.top() + t as f32 * row_h;
+        let label = if track.lock {
+            format!("{} {}", voice.name(), ph::LOCK_SIMPLE)
+        } else {
+            voice.name().to_string()
+        };
         p.text(
             pos2(grid_area.left() + 10.0, y + row_h / 2.0),
             Align2::LEFT_CENTER,
-            voice.name(),
+            label,
             bold(12.0),
             if track.mute { FAINT } else { color },
         );

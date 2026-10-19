@@ -25,11 +25,11 @@
 
 ![Bunker playing: the orbit, ten vibes on top, sounds per track on the left, live effects on the right, scenes below](docs/images/orbit.jpg)
 
-Every sound is a glowing ring, every step a dot, a beam of light circles like a radar. Pick one of **ten vibes**, give every track **its own sound**, keep grooves in **scenes** and chain them into a song – or switch on the **auto mode** and let Bunker play a whole set with fills, breakdowns and drops while you play the **live effects**.
+Every sound is a glowing ring, every step a dot, a beam of light circles like a radar. Pick one of **ten vibes**, give every track **its own sound**, keep grooves in **scenes** and arrange them into a **song** – or switch on the **auto mode** and let Bunker play a whole set with fills, breakdowns and drops while you ride the **energy fader** and the **live effects**. Then switch to the **visualizer** and put it on the big screen.
 
 Written in Rust, every sound synthesized live – no samples, no account, no tracking.
 
-> 🇩🇪 **Kurz auf Deutsch:** Bunker ist eine Techno-Drum-Machine zum Ausprobieren, ganz ohne Vorwissen. Jeder Sound ist ein leuchtender Ring, jeder Punkt ein Schritt – klicken, und es groovt. Oben wählst du einen von zehn **Vibes** (Dub bis Hard Techno), jede Spur hat mehrere **Sounds** zur Auswahl (909, 808, Snare, Cowbell, Reese, Stab, Hoover …). **Szenen** speichern Grooves und spielen sie als **Kette** nacheinander ab. Der **Auto-Modus** spielt selbstständig ein ganzes Set – mit Fills, verschiedenen Breakdowns, Drops und neuen Kapiteln. Dazu sechs **Live-Effekte** (Stutter, Echo, Wash, Crush, Gate, Tape Stop), Filter, DROP-Button, WAV-Export und MIDI-Keyboards. Läuft auf Mac und Windows, alles wird live synthetisiert, und Bunker sagt Bescheid, wenn es ein Update gibt.
+> 🇩🇪 **Kurz auf Deutsch:** Bunker ist eine Techno-Drum-Machine zum Ausprobieren, ganz ohne Vorwissen. Jeder Sound ist ein leuchtender Ring, jeder Punkt ein Schritt – klicken, und es groovt. Oben wählst du einen von zehn **Vibes** (Dub bis Hard Techno), jede Spur hat mehrere **Sounds** (909, 808, Snare, Cowbell, Reese, Stab, Hoover …) mit **Tune & Decay** und lässt sich **sperren**. Mit dem **Energie-Fader** baust du den Groove ab und wieder auf, dann **DROP**. **Szenen** speichern Grooves, der **Song-Modus** spielt sie mit eigenen Längen und Drops nacheinander ab. Der **Auto-Modus** spielt selbstständig ein ganzes Set mit Energie-Kurve, Fills, Breakdowns und Drops. Dazu sechs **Live-Effekte**, **Pump**, **Master-EQ**, **Akkordfolgen**, ein **Visualizer** für den Beamer, `.bunker`-Dateien, WAV-Export und MIDI-Keyboards. Läuft auf Mac und Windows, alles wird live synthetisiert, und Bunker sagt Bescheid, wenn es ein Update gibt.
 
 ---
 
@@ -55,7 +55,7 @@ Click the coloured pill under a track name (or scroll on it):
 | Bass | Rolling · Sub · Reese · Pulse · Donk |
 | Synth | 303 saw · 303 square · Stab · Pluck · Hoover |
 
-**S** solos a track, the speaker mutes it, the 🎲 rolls a new rhythm for just that track.
+Under the list: **Tune** (±12 semitones) and **Decay** (shorter or longer) for that track. **S** solos a track, the speaker mutes it, the 🎲 rolls a new rhythm for just that track, the 🔒 **locks** it – shuffle, vibes, the dice and the auto mode leave a locked track alone, in the orbit and in the pads.
 
 </td>
 <td width="50%" valign="top">
@@ -68,33 +68,44 @@ Click the coloured pill under a track name (or scroll on it):
 </td>
 <td width="50%" valign="top">
 
+### 📈 Energy & drop
+The **ENERGY** fader is the big lever: pull it down and the groove strips to hats and synth, push it up and kick, bass, clap, open hat and ride come back one by one (the coloured dots show where), with extra hats and drive at the top. Pull it down, hit **DROP** – build-up, clap roll, noise riser – and the next bar hits with everything back. <kbd>←</kbd> <kbd>→</kbd> on the keyboard.
+
 ### ♾️ Auto mode
-Bunker plays a whole set on its own. Every **2, 4 or 8 bars** it changes one thing – a new pattern, another sound, new notes, a polyrhythm, a track in or out. Every 8 bars a **fill** (clap roll, falling toms, a kick gap, an echo throw). Every 32 bars a **breakdown** – a different kind each time – a build-up and the drop. After some drops a **new chapter** starts: new bassline, new sounds, sometimes a new key.
+Bunker plays a whole set on its own. Every **2, 4 or 8 bars** it changes one thing – a new pattern, another sound, new notes, a polyrhythm, a track in or out. Every 8 bars a **fill**. Every 32 bars a **breakdown** – a different kind each time – a build-up and the drop. After some drops a **new chapter** starts: new bassline, new sounds, sometimes a new key. The **energy curve** (CURVE) moves the energy through the set; touch the fader and it's yours.
 
 ### 🔥 Live effects
 Hold them, combine them:
-**STUTTER** <kbd>Q</kbd> · **ECHO** <kbd>W</kbd> · **WASH** <kbd>E</kbd> · **CRUSH** <kbd>X</kbd> · **GATE** <kbd>C</kbd> · **TAPE STOP** <kbd>V</kbd> – plus a **filter** that springs back and the **DROP** button: build-up, clap roll, noise riser, then everything hits on the next bar.
+**STUTTER** <kbd>Q</kbd> · **ECHO** <kbd>W</kbd> · **WASH** <kbd>E</kbd> · **CRUSH** <kbd>X</kbd> · **GATE** <kbd>C</kbd> · **TAPE STOP** <kbd>V</kbd> – plus a **filter** that springs back.
 
-### 🎚️ Four sound knobs
-**ENERGY** thins out or fills up the hats and drives the kick · **DARK** closes the sound and adds rumble · **ACID** squeezes the synth filter · **SPACE** reverb and echo.
+### 🎚️ Sound & master
+**SOUND:** **DARK** closes the sound and adds rumble · **ACID** squeezes the synth filter · **SPACE** reverb and echo · **PUMP** everything ducks under the kick.
+**MASTER:** **LOW**, **MID**, **HIGH** (±12 dB each) and **DRIVE** for the whole mix.
 
 </td>
 </tr>
 </table>
 
-### 🎬 Scenes & chain
+### 🎬 Scenes & song mode
 
-![Scenes A–D under the orbit and the CHAIN button](docs/images/scenes.jpg)
+![Scenes A–D under the orbit and the SONG button](docs/images/scenes.jpg)
 
-Four memory slots under the orbit. Click **+** to keep the groove you hear, click a full scene to switch to it – the lit one keeps your changes. **CHAIN** plays the full scenes one after another (A → B → C → D) every 4, 8 or 16 bars, like a song. Right-click a scene to overwrite or clear it.
+Four memory slots under the orbit. Click **+** to keep the groove you hear, click a full scene to switch to it – the lit one keeps your changes. Each scene has a **length** (the number: 2 to 32 bars) and a **⚡ drop**: lit, song mode builds up over the last two bars before it and drops into it. **SONG** plays the full scenes one after another, then from the top. Right-click a scene to overwrite or clear it.
+
+### 🌌 Visualizer
+
+![The visualizer: radial spectrum, kick shockwaves, star field](docs/images/visualizer.jpg)
+
+<kbd>P</kbd> (or the screen icon at the top) turns the whole window into a fullscreen light show: a spectrum ring, shockwaves on every kick, a star field that speeds up with the energy, one moon per track. All keys keep working – play the drop and the effects while it runs. <kbd>Esc</kbd> goes back.
 
 ### And also
 
 - **The orbit** – click a dot to switch a step, drag to paint, right-click for an accent (on the synth: slide), shift-click for chance, scroll on bass and synth dots to change the note. Give a ring fewer steps and it drifts against the others – polyrhythms you can *see*.
 - **Pads** – <kbd>Tab</kbd> for eight big pads and a classic step grid. Play with the mouse or <kbd>A</kbd>–<kbd>K</kbd>, hit **RECORD** and your hits land on the nearest step.
-- **Key & swing** – the arrows move bass and synth up or down, the scale button changes the mood (minor, phrygian, dorian), swing adds bounce.
+- **Key, chords & swing** – the arrows move bass and synth up or down, the scale list changes the mood (minor, phrygian, dorian, harmonic, pentatonic, major), **Chords** moves bass and synth through a progression bar by bar (i → VI → III → VII …), swing adds bounce.
+- **.bunker files** – *File → Save as .bunker file* keeps the groove, all four scenes and the song in one small text file – to back up or share. Open it again from the menu or drag it onto the window.
 - **Undo everything** – <kbd>⌘</kbd>/<kbd>Ctrl</kbd> + <kbd>Z</kbd> takes back any change, a shuffle too.
-- **Export WAV** – 4 to 64 bars, 44.1 kHz stereo, auto mode included.
+- **Export WAV** – *File → Export audio*: 4 to 64 bars, 44.1 kHz stereo, auto mode included.
 - **Plug and play** – switch to headphones or plug in a MIDI keyboard while it runs; Bunker follows within a few seconds.
 - **Update check** – Bunker asks GitHub once at start whether there is a new version and shows a green button if there is. Nothing else is sent; switch it off in the help window (<kbd>?</kbd>).
 
@@ -122,7 +133,8 @@ Bunker connects to every MIDI keyboard it finds, also when you plug one in later
 | <kbd>A</kbd> … <kbd>K</kbd> | The eight pads | | <kbd>B</kbd> | Build-up and drop |
 | <kbd>1</kbd> … <kbd>8</kbd> | Mute / unmute a track | | <kbd>R</kbd> | Record on / off |
 | <kbd>↑</kbd> / <kbd>↓</kbd> | Tempo | | <kbd>Tab</kbd> | Orbit ↔ pads |
-| <kbd>⌘</kbd>/<kbd>Ctrl</kbd> + <kbd>Z</kbd> | Undo (with <kbd>Shift</kbd>: redo) | | <kbd>Esc</kbd> | Close a window |
+| <kbd>←</kbd> / <kbd>→</kbd> | Energy down / up | | <kbd>P</kbd> | Visualizer |
+| <kbd>⌘</kbd>/<kbd>Ctrl</kbd> + <kbd>Z</kbd> | Undo (with <kbd>Shift</kbd>: redo) | | <kbd>Esc</kbd> | Close a window, leave the visualizer |
 
 ## ⬇️ Install
 

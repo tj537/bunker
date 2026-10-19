@@ -129,6 +129,12 @@ pub struct Track {
     pub volume: f32,
     /// Index into `Voice::sounds()`
     pub sound: u8,
+    /// Semitones, −12…12
+    pub tune: i8,
+    /// 0…1, 0.5 = the sound's own length
+    pub decay: f32,
+    /// Locked tracks are left alone by shuffle, the dice and the auto mode
+    pub lock: bool,
 }
 
 impl Default for Track {
@@ -139,6 +145,9 @@ impl Default for Track {
             mute: false,
             volume: 0.8,
             sound: 0,
+            tune: 0,
+            decay: 0.5,
+            lock: false,
         }
     }
 }
@@ -151,6 +160,16 @@ impl Track {
     /// Index of the step that plays at global step `pos`
     pub fn step_at(&self, pos: u64) -> usize {
         (pos % self.len.max(1) as u64) as usize
+    }
+
+    /// Pitch factor from `tune`
+    pub fn tune_ratio(&self) -> f32 {
+        2f32.powf(self.tune as f32 / 12.0)
+    }
+
+    /// Length factor from `decay`: about ⅓ … 3 ×
+    pub fn decay_factor(&self) -> f32 {
+        2f32.powf((self.decay - 0.5) * 3.2)
     }
 }
 
@@ -240,14 +259,29 @@ pub enum Scale {
     Minor,
     Phrygian,
     Dorian,
+    Harmonic,
+    Pentatonic,
+    Major,
 }
 
 impl Scale {
-    pub fn intervals(self) -> [i8; 7] {
+    pub const ALL: [Scale; 6] = [
+        Scale::Minor,
+        Scale::Phrygian,
+        Scale::Dorian,
+        Scale::Harmonic,
+        Scale::Pentatonic,
+        Scale::Major,
+    ];
+
+    pub fn intervals(self) -> &'static [i8] {
         match self {
-            Scale::Minor => [0, 2, 3, 5, 7, 8, 10],
-            Scale::Phrygian => [0, 1, 3, 5, 7, 8, 10],
-            Scale::Dorian => [0, 2, 3, 5, 7, 9, 10],
+            Scale::Minor => &[0, 2, 3, 5, 7, 8, 10],
+            Scale::Phrygian => &[0, 1, 3, 5, 7, 8, 10],
+            Scale::Dorian => &[0, 2, 3, 5, 7, 9, 10],
+            Scale::Harmonic => &[0, 2, 3, 5, 7, 8, 11],
+            Scale::Pentatonic => &[0, 3, 5, 7, 10],
+            Scale::Major => &[0, 2, 4, 5, 7, 9, 11],
         }
     }
 
@@ -256,6 +290,9 @@ impl Scale {
             Scale::Minor => "minor",
             Scale::Phrygian => "phrygian",
             Scale::Dorian => "dorian",
+            Scale::Harmonic => "harmonic",
+            Scale::Pentatonic => "pentatonic",
+            Scale::Major => "major",
         }
     }
 
@@ -264,18 +301,54 @@ impl Scale {
             Scale::Minor => "dark and classic",
             Scale::Phrygian => "darker, a bit eastern",
             Scale::Dorian => "minor, but warmer",
+            Scale::Harmonic => "minor with a dramatic, exotic step",
+            Scale::Pentatonic => "five notes – nothing can sound wrong",
+            Scale::Major => "bright and uplifting",
         }
     }
 
     /// Closest note of the scale at or below `semis`, then `steps` scale degrees further
     pub fn shift(self, semis: i8, steps: i32) -> i8 {
         let iv = self.intervals();
+        let n = iv.len() as i32;
         let octave = (semis as i32).div_euclid(12);
         let within = (semis as i32).rem_euclid(12) as i8;
         let degree = iv.iter().rposition(|&i| i <= within).unwrap_or(0) as i32;
         let d = degree + steps;
-        let (o, k) = (d.div_euclid(7), d.rem_euclid(7));
+        let (o, k) = (d.div_euclid(n), d.rem_euclid(n));
         ((octave + o) * 12 + iv[k as usize] as i32).clamp(-24, 36) as i8
+    }
+}
+
+/// Chord progressions over four bars: scale degrees the bass and synth move by, bar by bar
+pub const PROGRESSIONS: [(&str, [i32; 4]); 7] = [
+    ("none", [0, 0, 0, 0]),
+    ("i → VI", [0, 0, -2, -2]),
+    ("i → iv", [0, 0, 3, 3]),
+    ("i → VI → III → VII", [0, -2, 2, -1]),
+    ("i → VII → VI → VII", [0, -1, -2, -1]),
+    ("i → iv → v → i", [0, 3, 4, 0]),
+    ("i → II (dark)", [0, 1, 0, 1]),
+];
+
+/// The master section: three-band EQ and drive, each 0…1 (0.5 = flat)
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MasterEq {
+    pub low: f32,
+    pub mid: f32,
+    pub high: f32,
+    pub drive: f32,
+}
+
+impl Default for MasterEq {
+    fn default() -> Self {
+        MasterEq {
+            low: 0.5,
+            mid: 0.5,
+            high: 0.5,
+            drive: 0.3,
+        }
     }
 }
 
@@ -287,6 +360,8 @@ pub struct Macros {
     pub dark: f32,
     pub acid: f32,
     pub space: f32,
+    /// Everything ducks under the kick
+    pub pump: f32,
 }
 
 impl Default for Macros {
@@ -296,6 +371,7 @@ impl Default for Macros {
             dark: 0.45,
             acid: 0.5,
             space: 0.35,
+            pump: 0.0,
         }
     }
 }
@@ -317,6 +393,11 @@ pub struct Song {
     pub auto: bool,
     /// Bars between two auto changes (2, 4 or 8)
     pub auto_bars: u8,
+    /// Auto mode moves the energy itself (off once you take the energy fader)
+    pub curve: bool,
+    /// Index into `PROGRESSIONS`
+    pub prog: u8,
+    pub eq: MasterEq,
 }
 
 impl Default for Song {
@@ -347,6 +428,9 @@ impl Song {
             master: 0.8,
             auto: false,
             auto_bars: 8,
+            curve: true,
+            prog: 0,
+            eq: MasterEq::default(),
         }
     }
 
@@ -366,6 +450,8 @@ impl Song {
                 t.sound = 0;
             }
             t.volume = if t.volume.is_finite() { t.volume.clamp(0.0, 1.0) } else { 0.8 };
+            t.tune = t.tune.clamp(-12, 12);
+            t.decay = if t.decay.is_finite() { t.decay.clamp(0.0, 1.0) } else { 0.5 };
             for s in &mut t.steps {
                 s.chance = s.chance.min(100);
                 s.note = s.note.clamp(-24, 36);
@@ -380,6 +466,15 @@ impl Song {
         m.dark = fix(m.dark, 0.0, 1.0, 0.45);
         m.acid = fix(m.acid, 0.0, 1.0, 0.5);
         m.space = fix(m.space, 0.0, 1.0, 0.35);
+        m.pump = fix(m.pump, 0.0, 1.0, 0.0);
+        let eq = &mut self.eq;
+        eq.low = fix(eq.low, 0.0, 1.0, 0.5);
+        eq.mid = fix(eq.mid, 0.0, 1.0, 0.5);
+        eq.high = fix(eq.high, 0.0, 1.0, 0.5);
+        eq.drive = fix(eq.drive, 0.0, 1.0, 0.3);
+        if self.prog as usize >= PROGRESSIONS.len() {
+            self.prog = 0;
+        }
         self.root = self.root.clamp(36, 47);
         if ![2, 4, 8].contains(&self.auto_bars) {
             self.auto_bars = if self.auto_bars > 8 { 8 } else { 4 };
@@ -394,6 +489,15 @@ impl Song {
 
     pub fn root_name(&self) -> String {
         format!("{} {}", self.note_name(), self.scale.name())
+    }
+
+    pub fn prog_name(&self) -> &'static str {
+        PROGRESSIONS[self.prog as usize % PROGRESSIONS.len()].0
+    }
+
+    /// Scale degrees bass and synth move by in global bar `bar`
+    pub fn prog_degree(&self, bar: u64) -> i32 {
+        PROGRESSIONS[self.prog as usize % PROGRESSIONS.len()].1[(bar % 4) as usize]
     }
 
     pub fn sound_name(&self, v: Voice) -> &'static str {
@@ -413,12 +517,15 @@ mod tests {
         assert_eq!(s.shift(0, 7), 12);
         assert_eq!(s.shift(0, -1), -2);
         assert_eq!(s.shift(1, 0), 0); // C♯ is not in C minor → snaps down to C
-        for n in -12..24 {
-            for d in -3..4 {
-                let r = s.shift(n, d).rem_euclid(12);
-                assert!(s.intervals().contains(&r), "{n} {d} → {r}");
+        for sc in Scale::ALL {
+            for n in -12..24 {
+                for d in -3..4 {
+                    let r = sc.shift(n, d).rem_euclid(12);
+                    assert!(sc.intervals().contains(&r), "{sc:?} {n} {d} → {r}");
+                }
             }
         }
+        assert_eq!(Scale::Pentatonic.shift(0, 5), 12);
     }
 
     #[test]
@@ -430,7 +537,15 @@ mod tests {
         s.root = 3;
         s.auto_bars = 16;
         s.tracks[7].sound = 99;
+        s.tracks[1].decay = f32::INFINITY;
+        s.tracks[1].tune = 99;
+        s.prog = 200;
+        s.eq.low = f32::NAN;
         s.sanitize();
+        assert_eq!(s.tracks[1].decay, 0.5);
+        assert_eq!(s.tracks[1].tune, 12);
+        assert_eq!(s.prog, 0);
+        assert_eq!(s.eq.low, 0.5);
         assert_eq!(s.tracks[2].len, 1);
         assert_eq!(s.tracks[3].volume, 0.8);
         assert_eq!(s.bpm, 180.0);

@@ -594,6 +594,7 @@ dependencies = [
  "midir",
  "png 0.17.16",
  "rfd",
+ "ron",
  "serde",
  "winresource",
 ]
