@@ -8,7 +8,7 @@ src/
   app.rs        BunkerApp: panels (top bar with the vibe dropdown, tracks, mood, sound|master/auto/live, favorites (12, named) and song strip, volume on the speaker, the record button), keys, MIDI, files, recording, help, persistence
   visual.rs     the visualizer: spectrum ring, kick shockwaves, star field, a small energy bar, no text – drawn from `Live` only
   file.rs       .bunker files (RON): song, favorites and their names
-  form.rs       song forms (Short, Club, Hypnotic): parts, lengths, patterns, energy per part
+  form.rs       song forms (Short, Club, Hypnotic): parts, lengths, favorite 1 then 2, energy per part
   orbit.rs      the circular sequencer (drawing + mouse) and `Live`, the playback state the UI shows
   pads.rs       pads view: eight pads + step grid
   widgets.rs    knobs, chips, glowing buttons, effect buttons, the energy fader, the spring-back filter slider
@@ -58,7 +58,7 @@ src/
 
 **Edits vs. engine songs**: every `Event::Song` carries how many `Cmd::Song` the engine had taken in (`songs_in`); the UI ignores a song older than its own last edit (`songs_sent`), so the engine's frequent songs (the energy glide sends one every beat) can't undo a click.
 
-**Song mode** (`Arrangement`: the patterns, a form from `form::FORMS`, and a fallback song for when no pattern is saved): `arrange_bar` moves to the next section when one is over or on a `Cmd::Jump`, and `enter_section` loads the section's pattern (`form::pattern_slot`: an empty slot falls back to the nearest full one before it), sets `curve` and the part's energy (`Part::energy`, every bar after), mutes kick and bass for a `Break` (a `Breakdown`, so a pattern change keeps them out) and drops into every `Peak`. A break builds up over its last two bars; a fill leads into a section with another pattern, plus random fills every 8 bars in grooves and peaks. After the last section the engine stops and sends `Change::SongEnd`. The section and the bar it started go to `Shared::part` / `part_start` for the strip.
+**Song mode** (`Arrangement`: the patterns, a form from `form::FORMS`, and a fallback song for when no pattern is saved): `arrange_bar` moves to the next section when one is over or on a `Cmd::Jump`, and `enter_section` loads the section's pattern (`form::pattern_slot`: an empty slot falls back to the nearest full one before it), sets `curve` and the part's energy (`Part::energy`, every bar after), mutes kick and bass for a `Break` (a `Breakdown`, so a pattern change keeps them out) and drops into every `Peak`. Grooves and peaks get a small change every 8 bars (`gen::evolve`, no mutes) and the acid sweep runs as in the auto mode; a peak that keeps the same favorite starts a `gen::new_chapter` of it. The intro climbs from 0.05 (hats under the break filter) and the outro sinks to 0, so tracks come and go one by one. A break builds up over its last two bars; a fill leads into a section with another pattern, plus random fills every 8 bars in grooves and peaks. After the last section the engine stops and sends `Change::SongEnd`. The section and the bar it started go to `Shared::part` / `part_start` for the strip.
 
 `render_offline` runs the same engine without a device – for tests and the demo loops.
 

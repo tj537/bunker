@@ -903,6 +903,12 @@ impl Engine {
         if self.song.curve {
             self.energy_goal = sec.part.energy(played, n);
         }
+        // Grooves and peaks keep moving: a small change every 8 bars (never a track out)
+        if matches!(sec.part, Part::Groove | Part::Peak) && played > 0 && played.is_multiple_of(8) {
+            if let Some(c) = gen::evolve(&mut self.song, &mut self.auto_rng, false) {
+                self.send_song(Some(c));
+            }
+        }
         if sec.part == Part::Break && played + 2 == n && self.build.is_none() {
             self.auto_build(idx);
         } else if played + 1 == n && sec.part != Part::Break {
@@ -942,7 +948,8 @@ impl Engine {
         }
         self.section = i;
         self.section_start = bar;
-        if first || slot != self.pattern_now {
+        let same = !first && slot == self.pattern_now;
+        if !same {
             self.load_pattern(pattern, slot);
         }
         match sec.part {
@@ -962,6 +969,10 @@ impl Engine {
             }
             Part::Peak if !dropped => self.drop_now(),
             _ => {}
+        }
+        // After the drop with the same favorite: a new chapter of it, so it feels fresh
+        if sec.part == Part::Peak && same {
+            gen::new_chapter(&mut self.song, &mut self.auto_rng);
         }
         self.song.curve = true;
         self.energy_goal = sec.part.energy(0, sec.bars as u64);
@@ -1350,8 +1361,8 @@ impl Engine {
         if self.song.track(Voice::Acid).sound == 2 {
             delay_send[Voice::Acid.index()] = 0.75;
         }
-        // Auto mode turns the acid knob itself: a slow sweep over 16 bars
-        let acid = if self.song.auto && self.playing {
+        // The auto mode and songs turn the acid knob themselves: a slow sweep over 16 bars
+        let acid = if (self.song.auto || self.arrangement.is_some()) && self.playing {
             (m.acid + 0.22 * (self.phase as f32 / 256.0 * std::f32::consts::TAU).sin()).clamp(0.0, 1.0)
         } else {
             m.acid
@@ -2065,11 +2076,6 @@ mod tests {
             assert!(buf.iter().all(|x| x.is_finite() && x.abs() <= 1.0));
             if e.breakdown.is_some() {
                 kick_in_break = Some(e.song.track(Voice::Kick).mute);
-                assert_eq!(
-                    e.song.tracks.map(|t| t.steps),
-                    b.tracks.map(|t| t.steps),
-                    "the break plays pattern B"
-                );
             }
         }
         let changes: Vec<Change> = rx.try_iter().filter_map(Event::change).collect();
@@ -2078,6 +2084,17 @@ mod tests {
             .filter_map(|c| if let Change::Part(p, ..) = c { Some(*p) } else { None })
             .collect();
         assert_eq!(parts, vec![Part::Intro, Part::Groove, Part::Break, Part::Peak, Part::Outro]);
+        // Favorite 1 until the drop, favorite 2 after it
+        let slots: Vec<Option<usize>> = changes
+            .iter()
+            .filter_map(|c| if let Change::Part(_, _, slot) = c { Some(*slot) } else { None })
+            .collect();
+        assert_eq!(slots, vec![Some(0), Some(0), Some(0), Some(1), Some(1)]);
+        // The grooves keep moving
+        assert!(changes.iter().any(|c| matches!(
+            c,
+            Change::NewPattern(_) | Change::NewSound(..) | Change::NewNotes(_) | Change::Shifted(_) | Change::Length(..)
+        )));
         assert_eq!(kick_in_break, Some(true), "no kick in the break");
         let build = changes.iter().position(|c| *c == Change::Build).expect("a build-up");
         let drop = changes.iter().position(|c| *c == Change::Drop).expect("a drop");

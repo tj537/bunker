@@ -31,17 +31,20 @@ impl Part {
     pub fn energy(self, bar: u64, bars: u64) -> f32 {
         let t = bar as f32 / bars.max(1) as f32;
         match self {
-            Part::Intro => 0.25 + 0.45 * t,
+            // From hats under a closed filter, one track after the other comes in
+            Part::Intro => 0.05 + 0.7 * t,
             Part::Groove => 0.75 + 0.1 * t,
+            // Deep in the break zone, rising through the build-up
             Part::Break => {
                 if bar + 2 >= bars {
                     0.45
                 } else {
-                    0.3
+                    0.15
                 }
             }
             Part::Peak => 0.97 - 0.1 * t,
-            Part::Outro => 0.7 - 0.55 * t,
+            // The tracks leave one after the other, down to the hats
+            Part::Outro => 0.75 * (1.0 - t),
         }
     }
 }
@@ -72,11 +75,13 @@ impl Form {
 
 use Part::*;
 
+/// Built around favorite 1; favorite 2 (if there is one) takes over after the first drop.
+/// With one favorite only, Bunker makes the part after the drop a new chapter of it.
 pub const FORMS: [Form; 3] = [
     Form {
         name: "Short",
         blurb: "One break, one drop",
-        sections: &[s(Intro, 8, 0), s(Groove, 16, 0), s(Break, 8, 1), s(Peak, 16, 1), s(Outro, 8, 0)],
+        sections: &[s(Intro, 16, 0), s(Groove, 16, 0), s(Break, 8, 0), s(Peak, 16, 1), s(Outro, 16, 1)],
     },
     Form {
         name: "Club",
@@ -84,13 +89,13 @@ pub const FORMS: [Form; 3] = [
         sections: &[
             s(Intro, 16, 0),
             s(Groove, 16, 0),
+            s(Groove, 16, 0),
+            s(Break, 8, 0),
+            s(Peak, 32, 1),
             s(Groove, 16, 1),
             s(Break, 8, 1),
-            s(Peak, 32, 2),
-            s(Groove, 16, 1),
-            s(Break, 8, 0),
-            s(Peak, 16, 3),
-            s(Outro, 16, 0),
+            s(Peak, 16, 1),
+            s(Outro, 16, 1),
         ],
     },
     Form {
@@ -99,10 +104,10 @@ pub const FORMS: [Form; 3] = [
         sections: &[
             s(Intro, 32, 0),
             s(Groove, 32, 0),
-            s(Groove, 32, 1),
-            s(Break, 16, 1),
-            s(Peak, 32, 2),
-            s(Outro, 32, 0),
+            s(Groove, 32, 0),
+            s(Break, 16, 0),
+            s(Peak, 32, 1),
+            s(Outro, 32, 1),
         ],
     },
 ];

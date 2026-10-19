@@ -299,10 +299,10 @@ fn clap(vibe: Vibe, e: f32, rng: &mut Rng) -> Track {
         _ => from_positions(&[4, 12]),
     };
     if e > 0.55 && rng.chance(e - 0.3) {
-        t.steps[*rng.pick(&[7usize, 9, 14, 15])] = Step { chance: 70, ..Step::hit() };
+        t.steps[*rng.pick(&[7usize, 9, 14, 15])] = Step::hit();
     }
     if matches!(vibe, Vibe::Industrial | Vibe::Hard) && rng.chance(0.5) {
-        t.steps[13] = Step { chance: 50, ..Step::hit() };
+        t.steps[13] = Step::hit();
     }
     t
 }
@@ -328,9 +328,6 @@ fn rim(vibe: Vibe, e: f32, song: &Song, rng: &mut Rng) -> Track {
     }
     for s in t.steps.iter_mut().filter(|s| s.on) {
         s.accent = rng.chance(0.3);
-        if rng.chance(0.25) {
-            s.chance = 65;
-        }
     }
     t
 }
@@ -373,7 +370,6 @@ fn hat(vibe: Vibe, e: f32, rng: &mut Rng) -> Track {
         t = from_positions(&(0..16).collect::<Vec<_>>());
         for (i, s) in t.steps.iter_mut().enumerate() {
             s.accent = i % 4 == 2;
-            s.chance = if i % 2 == 1 { 70 } else { 100 };
         }
     }
     t
@@ -390,7 +386,7 @@ fn open_hat(vibe: Vibe, e: f32, rng: &mut Rng) -> Track {
         t.len = 8;
     }
     if e > 0.75 && rng.chance(0.3) {
-        t.steps[15] = Step { chance: 50, ..Step::hit() };
+        t.steps[15] = Step::hit();
     }
     t
 }
@@ -864,8 +860,10 @@ mod tests {
                 for t in &s.tracks {
                     assert!([8, 16].contains(&t.len), "{vibe:?} {}", t.len);
                 }
-                // Kicks always play
-                assert!(s.track(Voice::Kick).steps.iter().all(|st| st.chance == 100));
+                // Every generated step always plays – "sometimes" is only for you to set (shift-click)
+                for t in &s.tracks {
+                    assert!(t.steps.iter().all(|st| st.chance == 100), "{vibe:?}");
+                }
             }
         }
     }

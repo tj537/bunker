@@ -421,7 +421,7 @@ impl BunkerApp {
         }
     }
 
-    /// The favorites AUTO SONG plays: 1–4
+    /// The favorites AUTO SONG can use (the forms play 1, then 2)
     fn song_favorites(&self) -> [Option<Song>; 4] {
         std::array::from_fn(|i| self.slots[i])
     }
@@ -1889,7 +1889,7 @@ impl BunkerApp {
              • Click a full one to switch to it – while playing it comes in on the next bar, with a clap roll.\n\
              • The lit one plays exactly as saved and keeps your changes; once the groove changes (auto mode) it goes dark.\n\
              • Right-click: save over it, rename or clear it.\n\
-             • AUTO SONG plays a whole track with favorites 1–4.",
+             • AUTO SONG plays a whole track from favorite 1 (and favorite 2 after the first drop).",
         );
 
         let song_w = 104.0;
@@ -2012,7 +2012,7 @@ impl BunkerApp {
             .on_hover_text(if on {
                 "Click: stop the song – the groove keeps playing"
             } else {
-                "Play a whole track with favorites 1–4: intro, groove, break, drop, outro"
+                "Play a whole track from favorite 1 (favorite 2 after the first drop): intro, groove, break, drop, outro"
             })
             .on_hover_cursor(egui::CursorIcon::PointingHand);
         if resp.clicked() {
@@ -2031,10 +2031,10 @@ impl BunkerApp {
             egui::PopupCloseBehavior::CloseOnClick,
             |ui| {
                 ui.set_min_width(360.0);
-                ui.label(egui::RichText::new("Play a song with favorites 1–4").font(bold(13.0)).color(TEXT));
+                ui.label(egui::RichText::new("Play a song from your favorite").font(bold(13.0)).color(TEXT));
                 ui.label(
                     egui::RichText::new(
-                        "Bunker steers energy, breaks and drops – you can jam along. Empty ones are filled in from the others.",
+                        "Favorite 1 starts – quietly, then track by track. Favorite 2 takes over after the first drop (or favorite 1 comes back as a new chapter). Bunker varies it, breaks and drops – you can jam along.",
                     )
                     .font(body(11.0))
                     .color(FAINT),
@@ -2279,7 +2279,7 @@ impl BunkerApp {
                     row(ui, ph::CIRCLES_THREE, "The orbit", "Each ring is one sound, each dot one step. Click to switch a dot on or off, drag to paint. Right-click: accent (on the synth: slide). Scroll on bass/synth dots to change the note. Shift-click: chance.");
                     row(ui, ph::LIST, "Tracks", "S solos a track, the speaker mutes it, the dice rolls a new rhythm for just that track (right-click: clear), the lock keeps shuffle, vibes, dice and auto mode away from it. The coloured pill is its sound – click it for the list, tune and decay, or scroll on it. The number is the loop length: under 16 it drifts against the beat.");
                     row(ui, ph::MUSIC_NOTES, "Mood", "MOOD picks which notes and chords bass and synth play – from Dark and Hypnotic to Euphoric, Sunny or Mysterious – and gives them fitting new notes. Each has its own chords, so the bars move. Pitch moves them lower or higher. The speaker at the top sets the volume.");
-                    row(ui, ph::STACK, "Favorites & auto song", "Twelve slots under the orbit. Click + to keep what you hear, click a full one to switch – while playing it comes in on the next bar, with a clap roll. Right-click to rename, save over or clear. The lit one is exactly what plays. AUTO SONG turns favorites 1–4 into a whole track (Short, Club or Hypnotic): intro, groove, break, drop, outro – Bunker steers the energy, you jam along. Click a part in the strip to jump there.");
+                    row(ui, ph::STACK, "Favorites & auto song", "Twelve slots under the orbit. Click + to keep what you hear, click a full one to switch – while playing it comes in on the next bar, with a clap roll. Right-click to rename, save over or clear. The lit one is exactly what plays. AUTO SONG turns favorite 1 into a whole track (Short, Club or Hypnotic): a quiet intro that builds track by track, grooves that keep changing a little, breaks and drops, favorite 2 after the first drop, an outro that winds down – you jam along. Click a part in the strip to jump there.");
                     row(ui, ph::INFINITY, "Auto mode", "Bunker changes something every 2, 4 or 8 bars – patterns, sounds, notes, fills – and every few drops starts a new chapter. With AUTO FX on it arranges by itself: the energy glides, every 32 to 64 bars a breakdown, a build-up with effects and a drop. With AUTO FX off the energy bar is yours and it never takes a track out.");
                     row(ui, ph::SLIDERS, "Sound & master", "DARK closes the sound and adds rumble. ACID opens the synth filter. SPACE: reverb and echo. PUMP ducks everything under the kick. MASTER: low, mid and high EQ and drive for the whole mix.");
                     row(ui, ph::LIGHTNING, "Live effects", "ENERGY is the arrangement, not the volume (← →): under 30 a break, then the groove builds up, at 90 the build-up starts and two bars later it drops – a whole track with one fader. DROP does the same any time. FILTER springs back when you let go. Hold STUTTER (Q), ECHO (W), WASH (E), CRUSH (X), GATE (C) or TAPE STOP (V) – combine them.");
