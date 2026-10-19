@@ -38,6 +38,8 @@ pub enum Cmd {
     Jump(usize),
     /// Switch to this pattern (slot `usize`) on the next bar, with a fill before
     Queue(Box<Song>, usize),
+    /// Record everything that plays from now on (true) or end the recording (false)
+    Capture(bool),
 }
 
 pub enum Event {
@@ -472,7 +474,10 @@ pub struct Engine {
     /// Song mode recording: on while a song plays, then `rec_tail` more frames for the reverb
     recording: bool,
     rec: Vec<f32>,
-    rec_tail: u32,
+    /// Frames of tail still to record once the recording ends (None: not ending)
+    rec_tail: Option<u32>,
+    /// The whole session is being recorded (`Cmd::Capture`), not just a song
+    capturing: bool,
 }
 
 impl Engine {
@@ -563,7 +568,8 @@ impl Engine {
             events,
             recording: false,
             rec: Vec::new(),
-            rec_tail: 0,
+            rec_tail: None,
+            capturing: false,
         }
     }
 
@@ -661,6 +667,18 @@ impl Engine {
                 self.shared.part.store(0, Ordering::Relaxed);
             }
             Cmd::Jump(i) => self.jump = Some(i),
+            Cmd::Capture(true) => {
+                if self.events.is_some() {
+                    self.finish_recording();
+                    self.recording = true;
+                    self.capturing = true;
+                    self.rec = Vec::with_capacity(REC_CHUNK + 4096);
+                }
+            }
+            Cmd::Capture(false) => {
+                self.capturing = false;
+                self.end_recording();
+            }
             Cmd::Queue(s, slot) => {
                 if self.playing {
                     self.queued = Some((s, slot));
@@ -908,7 +926,8 @@ impl Engine {
         let slot = pattern_slot(sec.pattern, a.patterns.map(|p| p.is_some()));
         let pattern = slot.and_then(|k| a.patterns[k]).unwrap_or(a.fallback);
         let first = self.section_start == PENDING;
-        if first && self.events.is_some() {
+        // A song records itself – unless the whole session is being recorded anyway
+        if first && self.events.is_some() && !self.capturing {
             self.finish_recording();
             self.recording = true;
             self.rec = Vec::with_capacity(REC_CHUNK + 4096);
@@ -955,10 +974,11 @@ impl Engine {
         self.send_song(Some(Change::Part(sec.part, i, slot)));
     }
 
-    /// The song is over: two more seconds for the tail, then the recording is complete
+    /// The song is over (or the session recording ends): two more seconds for the tail,
+    /// then the recording is complete. A session recording goes on until it's switched off.
     fn end_recording(&mut self) {
-        if self.recording && self.rec_tail == 0 {
-            self.rec_tail = (self.sr * 2.0) as u32;
+        if self.recording && !self.capturing && self.rec_tail.is_none() {
+            self.rec_tail = Some((self.sr * 2.0) as u32);
         }
     }
 
@@ -968,25 +988,26 @@ impl Engine {
             return;
         }
         self.recording = false;
-        self.rec_tail = 0;
+        self.rec_tail = None;
         if let Some(tx) = &self.events {
             let _ = tx.send(Event::Audio(std::mem::take(&mut self.rec)));
             let _ = tx.send(Event::Recorded);
         }
     }
 
-    /// Song mode: keep what was just rendered
+    /// Recording (a song, or the whole session): keep what was just rendered
     fn keep_recording(&mut self, out: &[f32]) {
         if !self.recording {
             return;
         }
         let frames = out.len() / 2;
-        let take = if self.rec_tail > 0 {
-            let n = frames.min(self.rec_tail as usize);
-            self.rec_tail -= n as u32;
-            n
-        } else {
-            frames
+        let take = match &mut self.rec_tail {
+            Some(left) => {
+                let n = frames.min(*left as usize);
+                *left -= n as u32;
+                n
+            }
+            None => frames,
         };
         self.rec.extend_from_slice(&out[..take * 2]);
         if self.rec.len() >= REC_CHUNK {
@@ -995,7 +1016,7 @@ impl Engine {
                 let _ = tx.send(Event::Audio(full));
             }
         }
-        if take < frames || (self.rec_tail == 0 && !self.playing) {
+        if self.rec_tail == Some(0) {
             self.finish_recording();
         }
     }
@@ -2102,6 +2123,37 @@ mod tests {
             "{frames} vs {}",
             song + tail
         );
+    }
+
+    #[test]
+    fn a_session_is_recorded_across_stops_until_switched_off() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let sr = 11_025.0;
+        let mut e = Engine::new(sr, Song::default(), Shared::new(), Some(tx), 1);
+        e.handle(Cmd::Capture(true));
+        e.handle(Cmd::Play);
+        let second = vec![0.0; 2 * sr as usize];
+        let mut buf = second.clone();
+        e.render(&mut buf);
+        e.handle(Cmd::Stop); // a pause in the jam – the recording goes on
+        e.render(&mut buf);
+        e.handle(Cmd::Play);
+        e.render(&mut buf);
+        e.handle(Cmd::Capture(false));
+        for _ in 0..3 {
+            e.render(&mut buf); // the tail, then it's done
+        }
+        let (mut samples, mut done) = (0, 0);
+        for ev in rx.try_iter() {
+            match ev {
+                Event::Audio(p) => samples += p.len(),
+                Event::Recorded => done += 1,
+                Event::Song(..) => {}
+            }
+        }
+        assert_eq!(done, 1);
+        let secs = samples as f32 / 2.0 / sr;
+        assert!((4.9..=5.1).contains(&secs), "3 s played and paused + 2 s tail: {secs}");
     }
 
     #[test]

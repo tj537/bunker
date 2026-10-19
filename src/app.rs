@@ -114,6 +114,8 @@ pub struct BunkerApp {
     recording: Vec<i16>,
     rec_sr: u32,
     rec_live: bool,
+    /// The whole session is being recorded (the record-the-set button)
+    pub capture: bool,
     pub help: bool,
     audio_failed: Arc<AtomicBool>,
     audio_device: Option<String>,
@@ -229,6 +231,7 @@ impl BunkerApp {
             recording: Vec::new(),
             rec_sr: 44_100,
             rec_live: false,
+            capture: false,
             help: false,
             audio_device: if with_audio { audio::default_device_name() } else { None },
             audio_failed,
@@ -290,6 +293,10 @@ impl BunkerApp {
             self.send(Cmd::Filter(self.filter));
         }
         self.send_arrangement();
+        // A session recording goes on in the new engine
+        if self.capture {
+            self.send(Cmd::Capture(true));
+        }
         // MIDI talks to the engine directly – reconnect it to the new one
         let c = ctx.clone();
         self.connect_midi(move || c.request_repaint());
@@ -374,9 +381,12 @@ impl BunkerApp {
     /// Song mode: play a form with the patterns, from the top
     fn start_song(&mut self, form: usize, now: f64) {
         // Everything you hear from here on is recorded, to save as a WAV at the end
-        self.recording.clear();
-        self.rec_live = true;
-        self.rec_sr = self.audio.as_ref().map_or(44_100, |a| a.sample_rate);
+        // (already the case when the whole session is being recorded)
+        if !self.capture {
+            self.recording.clear();
+            self.rec_live = true;
+            self.rec_sr = self.audio.as_ref().map_or(44_100, |a| a.sample_rate);
+        }
         self.song.auto = false;
         self.song.curve = true;
         self.song_fallback = self.song;
@@ -607,10 +617,15 @@ impl BunkerApp {
                 Event::Audio(piece) => {
                     if self.rec_live {
                         self.recording.extend(piece.iter().map(|&s| crate::wav::to_i16(s)));
+                        // An hour is plenty (about 350 MB in memory)
+                        if self.capture && self.recording.len() >= self.rec_sr as usize * 2 * 3600 {
+                            self.toggle_capture(now);
+                        }
                     }
                     continue;
                 }
                 Event::Recorded => {
+                    self.capture = false;
                     // At least two seconds: worth keeping
                     if std::mem::take(&mut self.rec_live) && self.recording.len() > self.rec_sr as usize * 4 {
                         self.export = Export::Recorded;
@@ -684,6 +699,9 @@ impl BunkerApp {
         let pos = step as f64 + ((now - self.step_time) / step_dur).min(0.999);
         if playing || self.hit_age.iter().any(|&a| a < 1.0) || self.filter != 0.0 {
             ctx.request_repaint();
+        } else if self.capture {
+            // The recording timer keeps counting while the music is paused
+            ctx.request_repaint_after(std::time::Duration::from_millis(500));
         }
         Live {
             playing,
@@ -790,6 +808,22 @@ impl BunkerApp {
                 Key::R => self.toggle_record(now),
                 _ => {}
             }
+        }
+    }
+
+    /// Record the session: everything you hear until it's switched off, then save it as a WAV
+    fn toggle_capture(&mut self, now: f64) {
+        if self.capture {
+            self.capture = false;
+            self.send(Cmd::Capture(false));
+            self.say("Recording ends – then you can save it", now);
+        } else {
+            self.recording.clear();
+            self.rec_live = true;
+            self.rec_sr = self.audio.as_ref().map_or(44_100, |a| a.sample_rate);
+            self.capture = true;
+            self.send(Cmd::Capture(true));
+            self.say("Recording your set – everything you hear. Click again to stop and save", now);
         }
     }
 
@@ -943,6 +977,23 @@ impl BunkerApp {
                     }
                 }
                 ui.add_space(8.0);
+                // Record the set: everything you hear, to a WAV
+                let text = if self.capture {
+                    let secs = self.recording.len() as u32 / 2 / self.rec_sr.max(1);
+                    format!("{}  {}:{:02}", ph::VINYL_RECORD, secs / 60, secs % 60)
+                } else {
+                    ph::VINYL_RECORD.to_string()
+                };
+                if chip(ui, &text, self.capture, RED)
+                    .on_hover_text(if self.capture {
+                        "Recording your set – click to stop and save it as a WAV"
+                    } else {
+                        "Record your set: everything you hear – auto mode, jamming, songs, effects – until you click again, then save it as a WAV"
+                    })
+                    .clicked()
+                {
+                    self.toggle_capture(now);
+                }
                 let rec = self.record.load(Ordering::Relaxed);
                 if chip(ui, ph::RECORD, rec, RED)
                     .on_hover_text("Record: play the pads (A–K) or a MIDI keyboard and your hits land in the pattern, on the beat (R)")
@@ -2024,7 +2075,7 @@ impl BunkerApp {
             Export::Closed => return,
             Export::Recorded => {
                 let secs = self.recording.len() as f32 / 2.0 / self.rec_sr as f32;
-                egui::Window::new("Your song is recorded")
+                egui::Window::new("Your recording is ready")
                     .collapsible(false)
                     .resizable(false)
                     .anchor(Align2::CENTER_CENTER, vec2(0.0, 0.0))
@@ -2132,7 +2183,7 @@ impl BunkerApp {
                     row(ui, ph::SLIDERS, "Sound & master", "DARK closes the sound and adds rumble. ACID opens the synth filter. SPACE: reverb and echo. PUMP ducks everything under the kick. MASTER: low, mid and high EQ and drive for the whole mix.");
                     row(ui, ph::LIGHTNING, "Live effects", "ENERGY is the arrangement, not the volume (← →): under 30 a break, then the groove builds up, at 90 the build-up starts and two bars later it drops – a whole track with one fader. DROP does the same any time. FILTER springs back when you let go. Hold STUTTER (Q), ECHO (W), WASH (E), CRUSH (X), GATE (C) or TAPE STOP (V) – combine them.");
                     row(ui, ph::MONITOR_PLAY, "Visualizer", "P turns the window into a fullscreen light show – no text, just a small energy bar at the bottom. All keys keep working (← → energy). Esc goes back.");
-                    row(ui, ph::FOLDER_SIMPLE, "Files", "File → Save as .bunker keeps the groove and the four patterns in one file. Open it from the menu or drag it onto the window. A song played with SONG is recorded – when it ends (or you stop it), save it as a WAV.");
+                    row(ui, ph::FOLDER_SIMPLE, "Files", "File → Save as .bunker keeps the groove and the four patterns in one file. Open it from the menu or drag it onto the window. A song played with SONG is recorded by itself; the red record button at the top records your whole set until you click it again. Then save it as a WAV wherever you like.");
                     row(ui, ph::GRID_FOUR, "Pads", "Tab switches to big pads and a classic grid. Hit RECORD and play along – your hits land on the beat.");
                     row(ui, ph::ARROW_COUNTER_CLOCKWISE, "Undo", "⌘/Ctrl + Z takes back any change – a shuffle too. ⌘/Ctrl + Shift + Z redoes it.");
                     row(ui, ph::KEYBOARD, "Keyboard", "Space play · Enter shuffle · A–K pads · 1–8 mute · ← → energy · B drop · Q W E  X C V effects (hold) · R record · Tab orbit/pads · P visuals · ⌘/Ctrl Z undo");

@@ -62,7 +62,7 @@ src/
 
 `render_offline` runs the same engine without a device – for tests and the demo loops.
 
-**Song recording**: from a song's first section, `keep_recording` appends every rendered buffer and sends `Event::Audio` pieces of `REC_CHUNK` samples; when the song ends or stops, `end_recording` adds two seconds of tail, then `finish_recording` sends the rest and `Event::Recorded`. The UI keeps the pieces as 16-bit (`wav::to_i16`), offers *Save WAV* and writes it on a thread (`wav::write_i16`).
+**Recording** – a song records itself from its first section; `Cmd::Capture(true)` records the whole session instead (`capturing`: it goes on across stops and songs until `Cmd::Capture(false)`). `keep_recording` appends every rendered buffer and sends `Event::Audio` pieces of `REC_CHUNK` samples; when it ends, `end_recording` sets `rec_tail` to two seconds, and once that is recorded `finish_recording` sends the rest and `Event::Recorded`. The UI keeps the pieces as 16-bit (`wav::to_i16`), offers *Save WAV* and writes it on a thread (`wav::write_i16`).
 
 Macros act live (energy: the layers, percussion density, hat length, bass brightness and the break zone; dark: kick length, rumble, tone; acid: filter and resonance – the auto mode sweeps it slowly; space: sends and feedback) and the generator uses Energy for density.
 

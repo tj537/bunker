@@ -73,6 +73,7 @@ mod tests {
             app.slot_now = Some(1);
             app.queued_slot = Some(2);
             app.song_form = Some(1);
+            app.capture = true;
             app.new_version = Some(crate::update::Release { version: "0.3.0".into() });
             app.fake_live = Some(Live {
                 part: Some((4, 9.4)),
