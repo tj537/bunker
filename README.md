@@ -23,147 +23,99 @@
   <a href="https://github.com/tj537/bunker/releases/latest/download/Bunker-windows-x64.zip"><img src="https://img.shields.io/badge/%E2%8A%9E%20Windows-Download-c8ff3d?style=for-the-badge&labelColor=333" alt="Download for Windows" height="44"></a>
 </p>
 
-![Bunker playing: the orbit, ten vibes on top, sounds per track on the left, live effects on the right, patterns below](docs/images/orbit.jpg)
+![Bunker playing: the orbit in the middle, tracks and mood on the left, live controls on the right, patterns below](docs/images/orbit.jpg)
 
-Every sound is a glowing ring, every step a dot, a beam of light circles like a radar. Pick one of **ten vibes**, give every track **its own sound**, keep grooves as **patterns** and let Bunker turn them into a **song** – or switch on the **auto mode** and let Bunker play a whole set with fills, breakdowns and drops while you ride the **energy fader** and the **live effects**. Then switch to the **visualizer** and put it on the big screen.
+Bunker is a techno drum machine written in Rust. Every sound is a glowing ring, every step a dot, and a beam of light circles like a radar. Kick, clap, hats, bass and a 303-style synth are synthesized live: no samples, no plug-ins, no account, no tracking. It's a download of a few megabytes for macOS and Windows.
 
-Written in Rust, every sound synthesized live – no samples, no account, no tracking.
+## Why Bunker
 
-> 🇩🇪 **Kurz auf Deutsch:** Bunker ist eine Techno-Drum-Machine zum Ausprobieren, ganz ohne Vorwissen. Jeder Sound ist ein leuchtender Ring, jeder Punkt ein Schritt – klicken, und es groovt. Oben wählst du einen von zehn **Vibes** (Dub bis Hard Techno), jede Spur hat mehrere **Sounds** (909, 808, Snare, Cowbell, Reese, Stab, Hoover …) mit **Tune & Decay** und lässt sich **sperren**. Mit dem **Energie-Fader** baust du den Groove ab und wieder auf, dann **DROP**. Vier **Patterns** speichern Grooves, ein Klick wechselt auf den nächsten Takt. **SONG** macht daraus einen ganzen Track (Intro, Groove, Break, Drop, Outro). Statt Fachbegriffen gibt es **Stimmungen** (Dark, Hypnotic, Deep, Sad, Euphoric) und **Groove**-Knöpfe (Straight bis Shuffle). Der **Auto-Modus** spielt selbstständig ein ganzes Set mit Energie-Kurve, Fills, Breakdowns und Drops. Dazu sechs **Live-Effekte**, **Pump**, **Master-EQ**, ein **Visualizer** für den Beamer, `.bunker`-Dateien, WAV-Export und MIDI-Keyboards. Läuft auf Mac und Windows, alles wird live synthetisiert, und Bunker sagt Bescheid, wenn es ein Update gibt.
+**You don't need to know anything about music to use it.**
 
----
+- **Grooves that already work.** Pick a vibe and Bunker rolls a pattern that follows the genre's rules: four on the floor, claps on 2 and 4, a bassline that dodges the kick, bass and synth on the same chord. It sounds like techno from the first second.
+- **Words instead of theory.** You don't pick a scale or a chord progression. You pick a mood: *Dark, Hypnotic, Deep, Sad, Euphoric*. Swing is *Straight, Loose, Bouncy* or *Shuffle*.
+- **Nothing can go off-beat.** Pattern switches, drops and song parts wait for the next bar. Recorded hits snap to the nearest step.
+- **A song without a timeline.** Save up to four patterns, press SONG, and Bunker plays a whole track with them: intro, groove, break, build-up, drop, outro.
+- **Nothing to break.** <kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>Z</kbd> undoes every change, a shuffle too. Your work is saved automatically.
 
-## ✨ What's inside
+**And if you do know what you're doing,** you still get per-step accents, slides and probability, polyrhythms, tune and decay per track, a master EQ, MIDI in and WAV export.
 
-<table>
-<tr>
-<td width="50%" valign="top">
+## What it does
 
-### 🎛️ Ten vibes
-**Dub · Minimal · Melodic · Hypnotic · Electro · Peak time · Acid · Rave · Industrial · Hard** – pick one from the **VIBE** dropdown at the top and it rolls a new groove that follows the rules of the genre: four on the floor (or broken electro kicks), claps on 2 and 4, a bassline that dodges the kick, chords that agree with the bass. Each vibe brings its own tempo, key, swing and sounds. **SHUFFLE** (<kbd>Enter</kbd>) rolls again.
+- **Ten vibes:** Dub, Minimal, Melodic, Hypnotic, Electro, Peak time, Acid, Rave, Industrial, Hard. Each has its own tempo, sounds and pattern rules. **SHUFFLE** (<kbd>Enter</kbd>) rolls a new groove.
+- **Eight tracks, 34 sounds:** five kicks (909, 808, Hard, Deep, Punch), clap, snare and snap, rim, cowbell, clave and toms, closed and open hats, rides, five basses (rolling, sub, reese, pulse, donk), and a synth that plays 303 saw or square, chord stabs, plucks or a rave hoover. Every track also has tune, decay, solo, mute, a dice for a new rhythm, and a lock that keeps shuffles away from it.
+- **The orbit:** click to switch a step, drag to paint, right-click for an accent or slide, shift-click for probability, scroll to change a note. Give a ring fewer steps and it drifts against the others. <kbd>Tab</kbd> switches to eight pads and a classic step grid with recording.
+- **Energy and drop:** the energy fader strips the groove down to hats and synth or builds it back up. **DROP** turns the groove itself into a two-bar build-up (a kick roll, running hats, the riff looping and lifting an octave), then half a beat of silence, then everything hits. Pushing the fader into its red **drop zone** (90 and up) does the same.
+- **Patterns and songs:** four pattern slots that switch on the next bar with a clap roll. **SONG** plays a form (*Short*, *Club* or *Hypnotic*) with your patterns and steers the energy, the breaks and the drops. Click a part in the song strip to jump there.
+- **Auto mode:** Bunker plays an endless set on its own. It changes one thing every 2, 4 or 8 bars, plays fills, breakdowns of four kinds, build-ups and drops, and sometimes starts a new chapter with a new bassline or key.
+- **Live effects (hold to use):** stutter, echo, wash, crush, gate and tape stop, plus a spring-back filter. The sound knobs are DARK, ACID, SPACE and PUMP. The master page has LOW, MID, HIGH and DRIVE.
+- **Visualizer:** <kbd>P</kbd> turns the window into a fullscreen light show (a spectrum ring, kick shockwaves, a star field) for the big screen. All keys keep working.
+- **Files:** `.bunker` files (plain text) keep the groove and all four patterns. You can also export a WAV of 4 to 64 bars.
+- **Plug and play:** headphones and MIDI keyboards are picked up while Bunker runs. On startup, Bunker asks GitHub once whether there is a new version. You can switch that off.
 
-### 🥁 A sound for every track
-Click the coloured pill under a track name (or scroll on it):
+## Under the hood
 
-| Track | Sounds |
-|---|---|
-| Kick | 909 · 808 · Hard · Deep · Punch |
-| Clap | Clap · Snare · Big clap · Snap |
-| Rim | Rim · Cowbell · Clave · Tom · Blip |
-| Hat / Open hat | 909 · 808 · Shaker · Tick / Sizzle |
-| Ride | Ride · Bell · Dark |
-| Bass | Rolling · Sub · Reese · Pulse · Donk |
-| Synth | 303 saw · 303 square · Stab · Pluck · Hoover |
+- **Rust 2021**, about 9k lines with no `unsafe` code. The UI is immediate-mode [egui](https://github.com/emilk/egui)/eframe 0.31. Audio goes out through [cpal](https://github.com/RustAudio/cpal), MIDI comes in through [midir](https://github.com/Boddlnagg/midir), and files are [RON](https://github.com/ron-rs/ron) via serde.
+- **Real-time audio thread.** The engine renders inside the device callback without locks, blocking or file I/O. The UI sends commands over an `mpsc` channel and reads the playhead, hit lights, levels and spectrum from atomics. When the engine changes the song itself (auto mode, song mode, recording), it sends the new song back as an event.
+- **Copyable song model.** A `Song` is plain fixed-size data with no `Vec` or `String`, so it can be swapped between threads cheaply. New fields use `#[serde(default)]`, so older saves and files keep loading.
+- **All DSP is hand-written:** TPT state-variable filters, PolyBLEP saws, a 303-style voice with accent and slide, 808-style metallic hats from six detuned squares, a Freeverb-style reverb, a ping-pong delay, a kick rumble, saturation and a limiter. Every sound is synthesized from scratch.
+- **Deterministic and tested.** Randomness comes from a seedable RNG, so patterns and renders are repeatable. The test suite checks the genre rules for every vibe, timing, drops, songs, clipping (peak ≤ 1.0) and the file format. An offscreen renderer draws the real UI to PNG for visual checks without touching the desktop.
+- **CI and releases** run on GitHub Actions. They check fmt, `clippy -D warnings` and the tests on Linux, macOS and Windows. A tag builds a universal (arm64 + x86_64) macOS app and a Windows exe and publishes them with SHA-256 checksums.
 
-Under the list: **Tune** (±12 semitones) and **Decay** (shorter or longer) for that track. **S** solos a track, the speaker mutes it, the 🎲 rolls a new rhythm for just that track, the 🔒 **locks** it – shuffle, vibes, the dice and the auto mode leave a locked track alone, in the orbit and in the pads.
+More detail is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-</td>
-<td width="50%" valign="top">
-<img src="docs/images/tracks.jpg" alt="Track list with sound pills, solo, mute and dice" width="100%">
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-<img src="docs/images/live.jpg" alt="Sound knobs, auto mode and the six live effects" width="100%">
-</td>
-<td width="50%" valign="top">
+## Keys
 
-### 📈 Energy & drop
-The **ENERGY** fader is the big lever: pull it down and the groove strips to hats and synth, push it up and kick, bass, clap, open hat and ride come back one by one (the coloured dots show where), with extra hats and drive at the top. Pull it down, hit **DROP** – from the next bar on the groove itself turns into the build-up: the kick rolls in quarters, 8ths, then 16ths, the hats run, bass and synth loop their first beat and jump an octave up, a clap roll and a noise riser on top – half a beat of silence, and everything hits. <kbd>←</kbd> <kbd>→</kbd> on the keyboard.
+- <kbd>Space</kbd>: play / stop
+- <kbd>Enter</kbd>: shuffle a new groove
+- <kbd>A</kbd>–<kbd>K</kbd>: the eight pads
+- <kbd>1</kbd>–<kbd>8</kbd>: mute / unmute a track
+- <kbd>←</kbd> <kbd>→</kbd>: energy down / up
+- <kbd>↑</kbd> <kbd>↓</kbd>: tempo
+- <kbd>B</kbd>: build-up and drop
+- <kbd>Q</kbd> <kbd>W</kbd> <kbd>E</kbd> <kbd>X</kbd> <kbd>C</kbd> <kbd>V</kbd> (hold): stutter, echo, wash, crush, gate, tape stop
+- <kbd>R</kbd>: record on / off
+- <kbd>Tab</kbd>: orbit ↔ pads
+- <kbd>P</kbd>: visualizer
+- <kbd>⌘</kbd>/<kbd>Ctrl</kbd>+<kbd>Z</kbd>: undo (add <kbd>Shift</kbd> to redo)
+- <kbd>Esc</kbd>: close a window or leave the visualizer
 
-The red end of the fader is the **drop zone**: push the energy to **90** or more and the build-up starts on the next bar, the drop lands two bars later. So pull it down, bring it back up slowly, and you know exactly when the drop comes. It starts again once you've been below 88.
+## MIDI
 
-### ♾️ Auto mode
-Bunker plays a whole set on its own. Every **2, 4 or 8 bars** it changes one thing – a new pattern, another sound, new notes, a polyrhythm, a track in or out. Every 8 bars a **fill**. Every 32 bars a **breakdown** – a different kind each time – a build-up and the drop. After some drops a **new chapter** starts: new bassline, new sounds, sometimes a new key. The **energy curve** (CURVE) moves the energy through the set; touch the fader and it's yours.
+Bunker connects to every MIDI keyboard it finds, including ones you plug in later.
 
-### 🔥 Live effects
-Hold them, combine them:
-**STUTTER** <kbd>Q</kbd> · **ECHO** <kbd>W</kbd> · **WASH** <kbd>E</kbd> (the beat drowns in a huge reverb that rings out when you let go) · **CRUSH** <kbd>X</kbd> · **GATE** <kbd>C</kbd> · **TAPE STOP** <kbd>V</kbd> – plus a **filter** that springs back.
+- **Keys below middle C** play the sounds: C kick, D clap, E rim, F hat, G open hat, A ride, B bass (the black keys fill in).
+- **Keys from middle C up** (hold) transpose bass and synth live.
+- **Mod wheel:** acid. **Pitch bend:** filter. **Sustain pedal:** echo.
+- **Knobs:** CC 70–73 (the Akai MPK mini default) or CC 74/71/91/93 control energy, dark, acid and space.
 
-### 🎚️ Sound & master
-**SOUND:** **DARK** closes the sound and adds rumble · **ACID** squeezes the synth filter · **SPACE** reverb and echo · **PUMP** everything ducks under the kick.
-**MASTER:** **LOW**, **MID**, **HIGH** (±12 dB each) and **DRIVE** for the whole mix.
+## Install
 
-</td>
-</tr>
-</table>
+**macOS 11+** (Apple Silicon and Intel): download [`Bunker-macos-universal.zip`](https://github.com/tj537/bunker/releases/latest/download/Bunker-macos-universal.zip), unzip it and move Bunker to Applications. The app isn't notarized yet, so on first launch right-click it and choose *Open*, or use *System Settings → Privacy & Security → Open Anyway*.
 
-### 🎬 Patterns & song
+**Windows 10/11:** download [`Bunker-windows-x64.zip`](https://github.com/tj537/bunker/releases/latest/download/Bunker-windows-x64.zip), unzip it and run `Bunker.exe`. There is no installer and no admin rights are needed. SmartScreen may ask once: *More info → Run anyway*.
 
-![Patterns A–D under the orbit, the SONG button and a song playing above them](docs/images/scenes.jpg)
+Every release has a `SHA256SUMS.txt`.
 
-Four memory slots under the orbit. Click **+** to keep the groove you hear, click a full pattern to switch to it – while the beat runs it comes in on the next bar, with a clap roll before. The lit one keeps your changes; right-click to overwrite or clear.
+## Build it yourself
 
-**SONG** turns your patterns into a whole track. Pick a form – **Short** (~2 min, one drop), **Club** (~4–5 min, two drops) or **Hypnotic** (long, one big drop) – and Bunker plays intro, groove, break, build-up, drop and outro with your patterns, steering the energy itself. The strip above the patterns shows the parts and where you are; click a part to jump there on the next bar. Jam along all the way: change the pattern, hit the effects, DROP or the energy fader (it's yours until the next part). Empty patterns are filled in from the others, so it works with just one. The song ends after the outro.
-
-### 🌌 Visualizer
-
-![The visualizer: radial spectrum, kick shockwaves, star field](docs/images/visualizer.jpg)
-
-<kbd>P</kbd> (or the screen icon at the top) turns the whole window into a fullscreen light show: a spectrum ring, shockwaves on every kick, a star field that speeds up with the energy, one moon per track. All keys keep working – play the drop and the effects while it runs. <kbd>Esc</kbd> goes back.
-
-### And also
-
-- **The orbit** – click a dot to switch a step, drag to paint, right-click for an accent (on the synth: slide), shift-click for chance, scroll on bass and synth dots to change the note. Give a ring fewer steps and it drifts against the others – polyrhythms you can *see*.
-- **Pads** – <kbd>Tab</kbd> for eight big pads and a classic step grid. Play with the mouse or <kbd>A</kbd>–<kbd>K</kbd>, hit **RECORD** and your hits land on the nearest step.
-- **Mood & groove** – **Dark · Hypnotic · Deep · Sad · Euphoric** pick the notes and chords bass and synth play (and give them fitting new notes), **Pitch** moves them lower or higher. **Straight · Loose · Bouncy · Shuffle** set the swing.
-- **.bunker files** – *File → Save as .bunker file* keeps the groove and all four patterns in one small text file – to back up or share. Open it again from the menu or drag it onto the window.
-- **Undo everything** – <kbd>⌘</kbd>/<kbd>Ctrl</kbd> + <kbd>Z</kbd> takes back any change, a shuffle too.
-- **Export WAV** – *File → Export audio*: 4 to 64 bars, 44.1 kHz stereo, auto mode included.
-- **Plug and play** – switch to headphones or plug in a MIDI keyboard while it runs; Bunker follows within a few seconds.
-- **Update check** – Bunker asks GitHub once at start whether there is a new version and shows a green button if there is. Nothing else is sent; switch it off in the help window (<kbd>?</kbd>).
-
-![Pads and step grid](docs/images/pads.jpg)
-
-## 🎹 MIDI keyboard
-
-Bunker connects to every MIDI keyboard it finds, also when you plug one in later.
-
-| On the keyboard | Does |
-|---|---|
-| Keys **below middle C** | Play the sounds: C kick, D clap, E rim, F hat, G open hat, A ride, B bass (black keys fill in) |
-| Keys **from middle C up** (hold) | Transpose bass and synth live – C4 is the original key |
-| Mod wheel | Acid |
-| Pitch bend | Filter |
-| Sustain pedal | Echo |
-| Knobs CC 70–73 (Akai MPK mini default) or CC 74/71/91/93 | Energy, Dark, Acid, Space |
-
-## ⌨️ Keys
-
-| Key | Does | | Key | Does |
-|---|---|---|---|---|
-| <kbd>Space</kbd> | Play / stop | | <kbd>Q</kbd> <kbd>W</kbd> <kbd>E</kbd> (hold) | Stutter, echo, wash |
-| <kbd>Enter</kbd> | Shuffle a new groove | | <kbd>X</kbd> <kbd>C</kbd> <kbd>V</kbd> (hold) | Crush, gate, tape stop |
-| <kbd>A</kbd> … <kbd>K</kbd> | The eight pads | | <kbd>B</kbd> | Build-up and drop |
-| <kbd>1</kbd> … <kbd>8</kbd> | Mute / unmute a track | | <kbd>R</kbd> | Record on / off |
-| <kbd>↑</kbd> / <kbd>↓</kbd> | Tempo | | <kbd>Tab</kbd> | Orbit ↔ pads |
-| <kbd>←</kbd> / <kbd>→</kbd> | Energy down / up | | <kbd>P</kbd> | Visualizer |
-| <kbd>⌘</kbd>/<kbd>Ctrl</kbd> + <kbd>Z</kbd> | Undo (with <kbd>Shift</kbd>: redo) | | <kbd>Esc</kbd> | Close a window, leave the visualizer |
-
-## ⬇️ Install
-
-| Platform | Download | First start |
-|---|---|---|
-| macOS 11+ (Apple Silicon & Intel) | [`Bunker-macos-universal.zip`](https://github.com/tj537/bunker/releases/latest/download/Bunker-macos-universal.zip) | Unzip, move to Applications. Not notarized yet: right-click → *Open*, or *System Settings → Privacy & Security → Open Anyway* |
-| Windows 10/11 | [`Bunker-windows-x64.zip`](https://github.com/tj537/bunker/releases/latest/download/Bunker-windows-x64.zip) | Unzip and run `Bunker.exe` – no installation, no admin rights. SmartScreen may ask once: *More info → Run anyway* |
-
-Checksums are in `SHA256SUMS.txt` on every release. Your beat, patterns and settings are saved automatically.
-
-## 🛠️ Build it yourself
-
-You need [Rust](https://rustup.rs). On Linux also `libasound2-dev` and `libgtk-3-dev`.
+You need [Rust](https://rustup.rs). On Linux you also need `libasound2-dev` and `libgtk-3-dev`.
 
 ```bash
-cargo run --release                       # start Bunker
-cargo test --release                      # tests
-cargo test --release render_ -- --ignored # screenshots + demo loops in target/snapshots/
-./scripts/build-mac.sh --install          # build Bunker.app and copy it to /Applications
+cargo run --release
 ```
 
-How the code fits together: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+```bash
+cargo test --release
+```
 
-## 🙏 Credits
+```bash
+cargo test --release render_ -- --ignored
+```
 
-Built with [egui](https://github.com/emilk/egui), [cpal](https://github.com/RustAudio/cpal) and [midir](https://github.com/Boddlnagg/midir). Fonts: [Space Grotesk](https://github.com/floriankarsten/space-grotesk) and [Anton](https://github.com/googlefonts/AntonFont) (SIL Open Font License), icons: [Phosphor](https://phosphoricons.com).
+The last command writes UI screenshots and demo loops (WAV) to `target/snapshots/`. On a Mac, `./scripts/build-mac.sh --install` builds `Bunker.app` and copies it to Applications.
+
+## Credits
+
+Built with [egui](https://github.com/emilk/egui), [cpal](https://github.com/RustAudio/cpal) and [midir](https://github.com/Boddlnagg/midir). The fonts are [Space Grotesk](https://github.com/floriankarsten/space-grotesk) and [Anton](https://github.com/googlefonts/AntonFont) (SIL Open Font License), and the icons are from [Phosphor](https://phosphoricons.com).
 
 Made by Tom, together with Claude. MIT licensed.

@@ -114,7 +114,7 @@ mod tests {
             app.song.prog = 3;
             app.fake_live = Some(playing(12.5, &[0]));
         });
-        // The pictures in the README (docs/images, see `readme_images` below)
+        // The README picture: docs/images/orbit.jpg (1600 px wide JPEG of this)
         render("readme_orbit", 1360.0, 860.0, |app| {
             use crate::song::{Vibe, Voice};
             let mut rng = crate::rng::Rng::new(77);

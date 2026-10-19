@@ -96,5 +96,5 @@ The UI fonts have no ♯, ◂ or ▸ – use `#` and words instead.
 
 There is no way to drive the real window from a terminal. Instead:
 
-- `cargo test --release render_ -- --ignored` writes screenshots to `target/snapshots/*.png` (orbit stopped/playing/build-up, a song with a waiting pattern + update button, pads, small window with master tab and locks, help, visualizer, and `readme_orbit` – the source of `docs/images/orbit.jpg`; `scenes.jpg` is cut from the song snapshot) and demo loops for every vibe plus a 68-bar auto-mode run to `target/snapshots/sounds/*.wav`.
+- `cargo test --release render_ -- --ignored` writes screenshots to `target/snapshots/*.png` (orbit stopped/playing/build-up, a song with a waiting pattern + update button, pads, small window with master tab and locks, help, visualizer, and `readme_orbit` – the source of `docs/images/orbit.jpg`, the README's only picture) and demo loops for every vibe plus a 68-bar auto-mode run to `target/snapshots/sounds/*.wav`.
 - `cargo test --release print_levels -- --ignored --nocapture` prints the loudness of each track and each of its sounds alone – for balancing the mix (sounds of one track should stay within ~3 dB of each other).
