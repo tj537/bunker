@@ -2,9 +2,10 @@
 //!
 //! It runs on the audio thread. The UI talks to it with [`Cmd`] messages and
 //! reads the playhead and hit lights from [`Shared`] atomics; when the engine
-//! itself changes the song (auto mode, recording, scene chain) it sends the new
+//! itself changes the song (auto mode, recording, song mode) it sends the new
 //! song back as an [`Event`]. The same engine renders WAV exports offline.
 
+use crate::form::{pattern_slot, Part, FORMS};
 use crate::gen::{self, Change};
 use crate::rng::Rng;
 use crate::song::{Song, Vibe, Voice, STEPS, TRACKS};
@@ -30,8 +31,13 @@ pub enum Cmd {
     Drop,
     /// Semitones for bass and acid (MIDI keyboard)
     Transpose(i8),
-    /// Play the saved scenes one after another (None: stop)
-    Chain(Option<Box<Chain>>),
+    /// Song mode: play a form with the patterns (None: stop). The same form again only
+    /// updates the patterns.
+    Arrange(Option<Box<Arrangement>>),
+    /// Song mode: go to this section on the next bar
+    Jump(usize),
+    /// Switch to this pattern (slot `usize`) on the next bar, with a fill before
+    Queue(Box<Song>, usize),
 }
 
 pub enum Event {
@@ -91,18 +97,17 @@ impl Fx {
     }
 }
 
-/// Scenes to play in turn: the next filled one every `bars` bars
-/// Song mode: the saved scenes in turn, each for its own number of bars
+/// Song mode: a form (`form::FORMS`) played with the saved patterns
 #[derive(Clone)]
-pub struct Chain {
-    pub songs: [Option<Song>; 4],
-    /// Length of each scene in bars
-    pub bars: [u8; 4],
-    /// Build up over the last two bars of the scene before, then drop into this one
-    pub drop_in: [bool; 4],
-    /// The scene playing now
-    pub at: usize,
+pub struct Arrangement {
+    pub patterns: [Option<Song>; 4],
+    pub form: usize,
+    /// What plays where no pattern is saved
+    pub fallback: Song,
 }
+
+/// `section_start` of a song that starts on the next bar
+const PENDING: u64 = u64::MAX;
 
 /// Bands of the spectrum the visualizer shows (centre frequencies in Hz)
 pub const BANDS: [f32; 8] = [55.0, 120.0, 260.0, 550.0, 1_200.0, 2_600.0, 5_500.0, 11_000.0];
@@ -122,6 +127,9 @@ pub struct Shared {
     pub level: AtomicU32,
     /// Build-up progress in thousandths, 0 = no build-up
     pub build: AtomicU32,
+    /// Song mode: section playing now + 1 (0 = no song) and the bar it started on
+    pub part: AtomicU32,
+    pub part_start: AtomicU64,
     pub transpose: AtomicI32,
     /// Loudness per `BANDS` band (f32 bits), for the visualizer
     pub bands: [AtomicU32; 8],
@@ -135,6 +143,8 @@ impl Shared {
             hits: Default::default(),
             level: AtomicU32::new(0),
             build: AtomicU32::new(0),
+            part: AtomicU32::new(0),
+            part_start: AtomicU64::new(0),
             transpose: AtomicI32::new(0),
             bands: Default::default(),
         })
@@ -308,9 +318,15 @@ pub struct Engine {
     breakdown: Option<Breakdown>,
     plan: Plan,
     fill: Option<(u64, Fill)>,
-    chain: Option<Box<Chain>>,
-    /// Bar where the current scene of the chain started
-    scene_start: u64,
+    arrangement: Option<Box<Arrangement>>,
+    /// Song mode: the section playing, the bar it started on (`PENDING`: next bar) and a jump
+    section: usize,
+    section_start: u64,
+    jump: Option<usize>,
+    /// A pattern waiting for the next bar
+    queued: Option<(Box<Song>, usize)>,
+    /// The slot whose pattern plays (as far as the engine changed it)
+    pattern_now: Option<usize>,
     /// The bar playing now (chord progression)
     bar_now: u64,
     phase: f64,
@@ -396,8 +412,12 @@ impl Engine {
             breakdown: None,
             plan: PLANS[0],
             fill: None,
-            chain: None,
-            scene_start: 0,
+            arrangement: None,
+            section: 0,
+            section_start: PENDING,
+            jump: None,
+            queued: None,
+            pattern_now: None,
             bar_now: 0,
             phase: 0.0,
             last_fired: None,
@@ -465,17 +485,17 @@ impl Engine {
     pub fn handle(&mut self, cmd: Cmd) {
         match cmd {
             Cmd::Song(s) => {
-                // With the energy curve on, the engine owns the energy
+                // With the energy curve on (auto or song mode), the engine owns the energy
                 let energy = self.song.macros.energy;
                 self.song = *s;
-                if self.song.auto && self.song.curve {
+                if (self.song.auto || self.arrangement.is_some()) && self.song.curve {
                     self.song.macros.energy = energy;
                 } else {
                     self.watch_drop_zone();
                 }
                 self.song.sanitize();
                 // Auto mode switched off in the middle of a breakdown: bring the beat back
-                if self.breakdown.is_some() && !self.song.auto {
+                if self.breakdown.is_some() && !self.song.auto && self.arrangement.is_none() {
                     self.end_breakdown();
                 }
             }
@@ -491,6 +511,9 @@ impl Engine {
             }
             Cmd::Stop => {
                 self.playing = false;
+                self.arrangement = None;
+                self.queued = None;
+                self.shared.part.store(0, Ordering::Relaxed);
                 if self.breakdown.is_some() {
                     self.end_breakdown();
                 }
@@ -523,20 +546,37 @@ impl Engine {
                 self.transpose = t;
                 self.shared.transpose.store(t as i32, Ordering::Relaxed);
             }
-            Cmd::Chain(c) => {
-                if c.is_some() && self.breakdown.is_some() {
+            Cmd::Arrange(Some(a)) => {
+                let same = self.arrangement.as_ref().is_some_and(|old| old.form == a.form);
+                if !same {
+                    if self.breakdown.is_some() {
+                        self.end_breakdown();
+                    }
+                    self.section = 0;
+                    self.section_start = PENDING;
+                    self.jump = None;
+                }
+                self.arrangement = Some(a);
+            }
+            Cmd::Arrange(None) => {
+                if self.arrangement.take().is_some() && self.breakdown.is_some() {
                     self.end_breakdown();
                 }
-                // A chain that starts (or another scene picked by hand) counts its bars from now
-                let restart = match (&self.chain, &c) {
-                    (None, Some(_)) => true,
-                    (Some(old), Some(new)) => old.at != new.at,
-                    _ => false,
-                };
-                if restart {
-                    self.scene_start = self.last_fired.map_or(0, |s| s / STEPS as u64 + 1);
+                self.shared.part.store(0, Ordering::Relaxed);
+            }
+            Cmd::Jump(i) => self.jump = Some(i),
+            Cmd::Queue(s, slot) => {
+                if self.playing {
+                    self.queued = Some((s, slot));
+                    // A clap roll leads into it, unless a build-up is on
+                    let bar = self.last_fired.map_or(0, |i| i / STEPS as u64);
+                    if self.build.is_none() {
+                        self.fill = Some((bar, Fill::Roll));
+                    }
+                } else {
+                    self.load_pattern(*s, Some(slot));
+                    self.send_song(Some(Change::Scene(slot)));
                 }
-                self.chain = c;
             }
         }
     }
@@ -661,37 +701,125 @@ impl Engine {
         self.send_song(Some(change));
     }
 
-    /// The scene after `at` that has a song
-    fn next_scene_index(c: &Chain) -> Option<usize> {
-        (1..=4).map(|k| (c.at + k) % 4).find(|&i| c.songs[i].is_some())
+    /// Put a pattern in place, keeping the live settings (volume, EQ, energy …); a running
+    /// break keeps its tracks out
+    fn load_pattern(&mut self, mut s: Song, slot: Option<usize>) {
+        s.master = self.song.master;
+        s.auto = self.song.auto && self.arrangement.is_none();
+        s.auto_bars = self.song.auto_bars;
+        s.curve = self.song.curve;
+        s.eq = self.song.eq;
+        s.macros.energy = self.song.macros.energy;
+        s.sanitize();
+        if let Some(b) = &mut self.breakdown {
+            b.before = s.tracks.map(|t| t.mute);
+            for &v in b.out {
+                s.track_mut(v).mute = true;
+            }
+        }
+        self.song = s;
+        self.pattern_now = slot;
     }
 
-    /// Song mode: switch scenes when one has played its bars, with a build-up
-    /// first if the next one wants a drop
-    fn chain_bar(&mut self, idx: u64, bar: u64) {
-        let Some(c) = &self.chain else { return };
-        let len = c.bars[c.at].clamp(1, 64) as u64;
-        let played = bar.saturating_sub(self.scene_start);
-        let Some(next) = Self::next_scene_index(c) else { return };
-        if played >= len {
-            let c = self.chain.as_mut().expect("checked above");
-            let mut s = c.songs[next].expect("found above");
-            c.at = next;
-            s.master = self.song.master;
-            s.auto = false;
-            s.auto_bars = self.song.auto_bars;
-            s.eq = self.song.eq;
-            s.sanitize();
-            self.song = s;
-            self.scene_start = bar;
-            self.send_song(Some(Change::Scene(next)));
-        } else if c.drop_in[next] && len >= 4 && played + 2 == len && self.build.is_none() {
+    /// Song mode at a bar start: the next section when one is over (or on a jump), the
+    /// energy curve, a break's build-up, fills
+    fn arrange_bar(&mut self, idx: u64, bar: u64, dropped: bool) {
+        let Some(a) = &self.arrangement else { return };
+        let form = &FORMS[a.form % FORMS.len()];
+        let full = a.patterns.map(|p| p.is_some());
+        let over = self.section_start == PENDING
+            || self.jump.is_some()
+            || bar >= self.section_start + form.sections[self.section.min(form.sections.len() - 1)].bars as u64;
+        if over {
+            let next = match self.jump.take() {
+                Some(j) => j,
+                None if self.section_start == PENDING => self.section,
+                None => self.section + 1,
+            };
+            if next >= form.sections.len() {
+                self.end_song();
+            } else {
+                self.enter_section(next, idx, bar, dropped);
+            }
+            return;
+        }
+        let sec = form.sections[self.section];
+        let (played, n) = (bar - self.section_start, sec.bars as u64);
+        if self.song.curve {
+            let e = sec.part.energy(played, n);
+            if (e - self.song.macros.energy).abs() > 0.005 {
+                self.song.macros.energy = e;
+                self.send_song(None);
+            }
+        }
+        if sec.part == Part::Break && played + 2 == n && self.build.is_none() {
             self.build = Some(Build {
                 start: idx,
                 len: 2 * STEPS as u64,
             });
             self.send_song(Some(Change::Build));
+        } else if played + 1 == n && sec.part != Part::Break {
+            // A clap roll into the next pattern
+            let next = form.sections.get(self.section + 1).map(|nx| pattern_slot(nx.pattern, full));
+            if next.is_some_and(|slot| slot != self.pattern_now) {
+                self.fill = Some((bar, Fill::Roll));
+            }
+        } else if matches!(sec.part, Part::Groove | Part::Peak)
+            && (played + 1).is_multiple_of(8)
+            && played + 1 < n
+            && self.auto_rng.chance(0.7)
+        {
+            self.fill = Some((bar, *self.auto_rng.pick(&FILLS)));
         }
+    }
+
+    fn enter_section(&mut self, i: usize, idx: u64, bar: u64, dropped: bool) {
+        let Some(a) = &self.arrangement else { return };
+        let sec = FORMS[a.form % FORMS.len()].sections[i];
+        let slot = pattern_slot(sec.pattern, a.patterns.map(|p| p.is_some()));
+        let pattern = slot.and_then(|k| a.patterns[k]).unwrap_or(a.fallback);
+        let first = self.section_start == PENDING;
+        // A jump out of a break: kick and bass come back, its build-up is off
+        if self.breakdown.is_some() {
+            self.restore_breakdown();
+        }
+        if !dropped && self.build.is_some() {
+            self.build = None;
+            self.shared.build.store(0, Ordering::Relaxed);
+        }
+        self.section = i;
+        self.section_start = bar;
+        if first || slot != self.pattern_now {
+            self.load_pattern(pattern, slot);
+        }
+        match sec.part {
+            Part::Break => {
+                let before = self.song.tracks.map(|t| t.mute);
+                let out: &'static [Voice] = &[Voice::Kick, Voice::Bass];
+                for &v in out {
+                    self.song.track_mut(v).mute = true;
+                }
+                self.breakdown = Some(Breakdown {
+                    start: idx,
+                    len: sec.bars as u64 * STEPS as u64,
+                    out,
+                    before,
+                    sweep: false,
+                });
+            }
+            Part::Peak if !dropped => self.drop_now(),
+            _ => {}
+        }
+        self.song.curve = true;
+        self.song.macros.energy = sec.part.energy(0, sec.bars as u64);
+        self.shared.part.store(i as u32 + 1, Ordering::Relaxed);
+        self.shared.part_start.store(bar, Ordering::Relaxed);
+        self.send_song(Some(Change::Part(sec.part, i, slot)));
+    }
+
+    fn end_song(&mut self) {
+        self.handle(Cmd::Stop);
+        self.send_song(Some(Change::SongEnd));
     }
 
     /// Auto mode's energy: settles after the drop, rises towards the breakdown,
@@ -709,7 +837,7 @@ impl Engine {
         }
     }
 
-    /// Bar starts: drops, the scene chain, and in auto mode the arrangement
+    /// Bar starts: drops, a waiting pattern, song mode, and in auto mode the arrangement
     fn new_bar(&mut self, idx: u64) {
         let bar = idx / STEPS as u64;
         // Each 32-bar cycle picks another kind of breakdown
@@ -724,8 +852,13 @@ impl Engine {
                 dropped = true;
             }
         }
-        if self.chain.is_some() {
-            self.chain_bar(idx, bar);
+        // A pattern picked during the bar comes in now
+        if let Some((s, slot)) = self.queued.take() {
+            self.load_pattern(*s, Some(slot));
+            self.send_song(Some(Change::Scene(slot)));
+        }
+        if self.arrangement.is_some() {
+            self.arrange_bar(idx, bar, dropped);
             return;
         }
         if dropped || !self.song.auto || bar == 0 {
@@ -1527,47 +1660,96 @@ mod tests {
         assert!(peak > 0.1 && rms > 0.02, "back to normal after the effects");
     }
 
-    #[test]
-    fn chain_plays_the_scenes_in_turn() {
-        let (tx, rx) = std::sync::mpsc::channel();
-        let a = gen::generate(Vibe::Dub, &Default::default(), &mut Rng::new(1));
-        let c = gen::generate(Vibe::Hard, &Default::default(), &mut Rng::new(2));
-        let mut e = Engine::new(22_050.0, a, Shared::new(), Some(tx), 1);
-        e.handle(Cmd::Chain(Some(Box::new(Chain {
-            songs: [Some(a), None, Some(c), None],
-            bars: [2; 4],
-            drop_in: [false; 4],
-            at: 0,
-        }))));
-        e.handle(Cmd::Play);
-        let bar = (e.step_len() * STEPS as f64) as usize;
-        let mut buf = vec![0.0; 2 * bar * 5 + 200];
-        e.render(&mut buf);
-        let scenes: Vec<Change> = rx.try_iter().filter_map(|Event::Song(_, c)| c).collect();
-        assert_eq!(scenes, vec![Change::Scene(2), Change::Scene(0)]);
-        assert_eq!(e.song.tracks, a.tracks);
+    fn patterns(bpm: f32) -> [Song; 3] {
+        [Vibe::Dub, Vibe::Peak, Vibe::Hard].map(|v| {
+            let mut s = gen::generate(v, &Default::default(), &mut Rng::new(v as u64 + 1));
+            s.bpm = bpm;
+            s
+        })
     }
 
     #[test]
-    fn song_mode_drops_into_a_scene() {
+    fn a_song_plays_its_parts_with_the_patterns() {
         let (tx, rx) = std::sync::mpsc::channel();
-        let a = gen::generate(Vibe::Minimal, &Default::default(), &mut Rng::new(1));
-        let b = gen::generate(Vibe::Peak, &Default::default(), &mut Rng::new(2));
-        let mut e = Engine::new(22_050.0, a, Shared::new(), Some(tx), 1);
-        e.handle(Cmd::Chain(Some(Box::new(Chain {
-            songs: [Some(a), Some(b), None, None],
-            bars: [4, 8, 8, 8],
-            drop_in: [false, true, false, false],
-            at: 0,
+        let [a, b, c] = patterns(180.0);
+        let mut e = Engine::new(11_025.0, a, Shared::new(), Some(tx), 1);
+        e.handle(Cmd::Arrange(Some(Box::new(Arrangement {
+            patterns: [Some(a), Some(b), Some(c), None],
+            form: 0,
+            fallback: a,
         }))));
         e.handle(Cmd::Play);
         let bar = (e.step_len() * STEPS as f64) as usize;
-        let mut buf = vec![0.0; 2 * bar * 5 + 200];
+        let mut buf = vec![0.0; 2 * bar];
+        let mut kick_in_break = None;
+        for _ in 0..(FORMS[0].bars() + 2) {
+            e.render(&mut buf);
+            assert!(buf.iter().all(|x| x.is_finite() && x.abs() <= 1.0));
+            if e.breakdown.is_some() {
+                kick_in_break = Some(e.song.track(Voice::Kick).mute);
+                assert_eq!(
+                    e.song.tracks.map(|t| t.steps),
+                    b.tracks.map(|t| t.steps),
+                    "the break plays pattern B"
+                );
+            }
+        }
+        let changes: Vec<Change> = rx.try_iter().filter_map(|Event::Song(_, c)| c).collect();
+        let parts: Vec<Part> = changes
+            .iter()
+            .filter_map(|c| if let Change::Part(p, ..) = c { Some(*p) } else { None })
+            .collect();
+        assert_eq!(parts, vec![Part::Intro, Part::Groove, Part::Break, Part::Peak, Part::Outro]);
+        assert_eq!(kick_in_break, Some(true), "no kick in the break");
+        let build = changes.iter().position(|c| *c == Change::Build).expect("a build-up");
+        let drop = changes.iter().position(|c| *c == Change::Drop).expect("a drop");
+        assert!(build < drop);
+        assert_eq!(changes.last(), Some(&Change::SongEnd));
+        assert!(!e.playing && e.arrangement.is_none(), "the song ends");
+    }
+
+    #[test]
+    fn a_jump_goes_to_a_part_on_the_next_bar() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let [a, b, _] = patterns(180.0);
+        let mut e = Engine::new(11_025.0, a, Shared::new(), Some(tx), 1);
+        e.handle(Cmd::Arrange(Some(Box::new(Arrangement {
+            patterns: [Some(a), Some(b), None, None],
+            form: 1,
+            fallback: a,
+        }))));
+        e.handle(Cmd::Play);
+        let bar = (e.step_len() * STEPS as f64) as usize;
+        let mut buf = vec![0.0; 2 * bar * 2 + 100];
+        e.render(&mut buf);
+        e.handle(Cmd::Jump(4)); // the first peak
+        let mut buf = vec![0.0; 2 * bar];
         e.render(&mut buf);
         let changes: Vec<Change> = rx.try_iter().filter_map(|Event::Song(_, c)| c).collect();
-        // Build-up in bars 2–3, then the drop and scene B on bar 4
-        assert_eq!(changes, vec![Change::Build, Change::Drop, Change::Scene(1)]);
-        assert_eq!(e.song.tracks, b.tracks);
+        assert!(changes.contains(&Change::Drop), "a peak starts with a drop: {changes:?}");
+        // Pattern C is empty: the peak falls back to B
+        assert!(changes.contains(&Change::Part(Part::Peak, 4, Some(1))), "{changes:?}");
+        assert_eq!(e.section, 4);
+        assert!(e.song.macros.energy > 0.9);
+    }
+
+    #[test]
+    fn a_pattern_picked_while_playing_comes_in_on_the_next_bar() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let [a, b, _] = patterns(130.0);
+        let mut e = Engine::new(22_050.0, a, Shared::new(), Some(tx), 1);
+        e.handle(Cmd::Play);
+        let step = e.step_len() as usize;
+        let mut buf = vec![0.0; 2 * step * 5];
+        e.render(&mut buf);
+        e.handle(Cmd::Queue(Box::new(b), 1));
+        assert_eq!(e.song.tracks, a.tracks, "not yet");
+        assert_eq!(e.fill, Some((0, Fill::Roll)), "a clap roll leads into it");
+        let mut buf = vec![0.0; 2 * step * 12];
+        e.render(&mut buf);
+        assert_eq!(e.song.tracks.map(|t| t.steps), b.tracks.map(|t| t.steps));
+        let changes: Vec<Change> = rx.try_iter().filter_map(|Event::Song(_, c)| c).collect();
+        assert_eq!(changes, vec![Change::Scene(1)]);
     }
 
     #[test]

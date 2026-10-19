@@ -5,6 +5,7 @@
 //! those, then varies density with the Energy macro and spices things up with
 //! Euclidean rhythms, so every roll sounds like techno but never the same.
 
+use crate::form::Part;
 use crate::rng::Rng;
 use crate::song::{Macros, Scale, Song, Step, Track, Vibe, Voice, PROGRESSIONS, STEPS, TRACKS};
 
@@ -572,8 +573,12 @@ pub enum Change {
     Drop,
     /// After a drop: new bassline and synth, maybe new sounds or a new key
     NewChapter,
-    /// The scene chain moved on to scene `0…3`
+    /// Another pattern `0…3` came in (picked during the bar, it waited for the next one)
     Scene(usize),
+    /// Song mode moved on to section `usize` of its form, playing pattern `Option<usize>`
+    Part(Part, usize, Option<usize>),
+    /// Song mode played its last bar
+    SongEnd,
 }
 
 impl Change {
@@ -590,7 +595,13 @@ impl Change {
             Change::Build => "Build-up".into(),
             Change::Drop => "Drop!".into(),
             Change::NewChapter => "Drop! New chapter".into(),
-            Change::Scene(i) => format!("Scene {}", ["A", "B", "C", "D"][i % 4]),
+            Change::Scene(i) => format!("Pattern {}", ["A", "B", "C", "D"][i % 4]),
+            Change::Part(Part::Peak, ..) => "Drop! Peak".into(),
+            Change::Part(p, _, slot) => match slot {
+                Some(i) => format!("{} · pattern {}", p.name(), ["A", "B", "C", "D"][i % 4]),
+                None => p.name().into(),
+            },
+            Change::SongEnd => "The end".into(),
         }
     }
 }
@@ -684,6 +695,22 @@ pub fn evolve(song: &mut Song, rng: &mut Rng) -> Option<Change> {
         Some(Change::Length(v, t.len))
     } else {
         Some(rotate(song, v, rng))
+    }
+}
+
+/// New notes on the same rhythm for bass and synth (not when locked), e.g. after the
+/// mood changed, so they follow the new scale and chords
+pub fn refit_notes(song: &mut Song, rng: &mut Rng) {
+    for v in [Voice::Bass, Voice::Acid] {
+        if song.track(v).lock {
+            continue;
+        }
+        let fresh = track_for(v, song.vibe, song.macros.energy, song, rng);
+        let t = song.track_mut(v);
+        let mut fresh_notes = fresh.steps.iter().filter(|s| s.on).map(|s| s.note).cycle();
+        for s in t.steps.iter_mut().filter(|s| s.on) {
+            s.note = fresh_notes.next().unwrap_or(s.note);
+        }
     }
 }
 

@@ -5,6 +5,7 @@ mod app;
 mod audio;
 mod engine;
 mod file;
+mod form;
 mod gen;
 mod midi;
 #[cfg(test)]

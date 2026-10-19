@@ -1,5 +1,6 @@
-//! `.bunker` files: the groove, the four scenes and the song-mode settings in
-//! one readable text file (RON), to keep or to share.
+//! `.bunker` files: the groove and the four patterns in one readable text file
+//! (RON), to keep or to share. (Older files also carry scene lengths and drops –
+//! they're ignored.)
 
 use crate::app::SLOTS;
 use crate::song::Song;
@@ -13,10 +14,8 @@ pub struct BunkerFile {
     /// Raised when the format changes in a way older versions can't read
     pub format: u32,
     pub song: Song,
+    /// The patterns A–D
     pub scenes: [Option<Song>; SLOTS],
-    /// Song mode: bars per scene and whether to drop into it
-    pub scene_bars: [u8; SLOTS],
-    pub scene_drop: [bool; SLOTS],
 }
 
 impl Default for BunkerFile {
@@ -25,8 +24,6 @@ impl Default for BunkerFile {
             format: 1,
             song: Song::default(),
             scenes: [None; SLOTS],
-            scene_bars: [8; SLOTS],
-            scene_drop: [false; SLOTS],
         }
     }
 }
@@ -43,9 +40,6 @@ impl BunkerFile {
         f.song.sanitize();
         for s in f.scenes.iter_mut().flatten() {
             s.sanitize();
-        }
-        for b in &mut f.scene_bars {
-            *b = (*b).clamp(1, 64);
         }
         Ok(f)
     }
@@ -74,8 +68,6 @@ mod tests {
             ..Default::default()
         };
         f.scenes[2] = Some(gen::generate(Vibe::Hard, &Default::default(), &mut Rng::new(2)));
-        f.scene_bars = [4, 8, 16, 2];
-        f.scene_drop[2] = true;
         f.song.tracks[3].tune = -5;
         f.song.tracks[3].lock = true;
         let back = BunkerFile::from_text(&f.to_text()).unwrap();
@@ -85,9 +77,8 @@ mod tests {
     #[test]
     fn repairs_and_rejects() {
         assert!(BunkerFile::from_text("hello").is_err());
-        // Missing fields fall back to defaults, broken values are repaired
+        // Missing fields fall back to defaults, broken values are repaired, old fields are ignored
         let f = BunkerFile::from_text("(song: (bpm: 999.0), scene_bars: (0, 8, 8, 200))").unwrap();
         assert_eq!(f.song.bpm, 180.0);
-        assert_eq!(f.scene_bars, [1, 8, 8, 64]);
     }
 }

@@ -265,6 +265,7 @@ pub enum Scale {
 }
 
 impl Scale {
+    #[cfg(test)]
     pub const ALL: [Scale; 6] = [
         Scale::Minor,
         Scale::Phrygian,
@@ -296,17 +297,6 @@ impl Scale {
         }
     }
 
-    pub fn blurb(self) -> &'static str {
-        match self {
-            Scale::Minor => "dark and classic",
-            Scale::Phrygian => "darker, a bit eastern",
-            Scale::Dorian => "minor, but warmer",
-            Scale::Harmonic => "minor with a dramatic, exotic step",
-            Scale::Pentatonic => "five notes – nothing can sound wrong",
-            Scale::Major => "bright and uplifting",
-        }
-    }
-
     /// Closest note of the scale at or below `semis`, then `steps` scale degrees further
     pub fn shift(self, semis: i8, steps: i32) -> i8 {
         let iv = self.intervals();
@@ -329,6 +319,23 @@ pub const PROGRESSIONS: [(&str, [i32; 4]); 7] = [
     ("i → VII → VI → VII", [0, -1, -2, -1]),
     ("i → iv → v → i", [0, 3, 4, 0]),
     ("i → II (dark)", [0, 1, 0, 1]),
+];
+
+/// Moods: a scale and a chord progression (index into `PROGRESSIONS`) that go together
+pub const MOODS: [(&str, &str, Scale, u8); 5] = [
+    ("Dark", "Tense and menacing – one dark step up and back", Scale::Phrygian, 6),
+    ("Hypnotic", "One chord, round and round", Scale::Minor, 0),
+    ("Deep", "Warm and soulful", Scale::Dorian, 2),
+    ("Sad", "Melancholic, two chords that long for each other", Scale::Minor, 1),
+    ("Euphoric", "Big uplifting chords, hands in the air", Scale::Minor, 3),
+];
+
+/// Swing presets: how late every second 16th lands
+pub const SWINGS: [(&str, &str, f32); 4] = [
+    ("Straight", "Every note right on the grid – driving, mechanical", 0.0),
+    ("Loose", "A touch of human feel", 0.18),
+    ("Bouncy", "Clearly swinging – house and minimal", 0.4),
+    ("Shuffle", "Full triplet shuffle – rolling and lazy", 0.67),
 ];
 
 /// The master section: three-band EQ and drive, each 0…1 (0.5 = flat)
@@ -491,13 +498,22 @@ impl Song {
         format!("{} {}", self.note_name(), self.scale.name())
     }
 
-    pub fn prog_name(&self) -> &'static str {
-        PROGRESSIONS[self.prog as usize % PROGRESSIONS.len()].0
-    }
-
     /// Scale degrees bass and synth move by in global bar `bar`
     pub fn prog_degree(&self, bar: u64) -> i32 {
         PROGRESSIONS[self.prog as usize % PROGRESSIONS.len()].1[(bar % 4) as usize]
+    }
+
+    /// The mood whose scale and chords the song uses, if any
+    pub fn mood(&self) -> Option<usize> {
+        MOODS
+            .iter()
+            .position(|&(_, _, scale, prog)| scale == self.scale && prog == self.prog)
+    }
+
+    /// The swing preset closest to the song's swing
+    pub fn swing_preset(&self) -> usize {
+        let d = |i: usize| (SWINGS[i].2 - self.swing).abs();
+        (0..SWINGS.len()).min_by(|&a, &b| d(a).total_cmp(&d(b))).unwrap_or(0)
     }
 
     pub fn sound_name(&self, v: Voice) -> &'static str {

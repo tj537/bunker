@@ -5,16 +5,17 @@ Bunker is one Rust binary: an [egui](https://github.com/emilk/egui) window (efra
 ```
 src/
   main.rs       window setup
-  app.rs        BunkerApp: panels (top bar with the vibe dropdown, tracks, sound|master/auto/live, scenes), keys, MIDI, files, export, help, persistence
+  app.rs        BunkerApp: panels (top bar with the vibe dropdown, tracks, mood/groove, sound|master/auto/live, patterns and song strip), keys, MIDI, files, export, help, persistence
   visual.rs     the visualizer: spectrum ring, kick shockwaves, star field – drawn from `Live` only
-  file.rs       .bunker files (RON): song, scenes, song-mode settings
+  file.rs       .bunker files (RON): song and patterns
+  form.rs       song forms (Short, Club, Hypnotic): parts, lengths, patterns, energy per part
   orbit.rs      the circular sequencer (drawing + mouse) and `Live`, the playback state the UI shows
   pads.rs       pads view: eight pads + step grid
   widgets.rs    knobs, chips, glowing buttons, effect buttons, the energy fader, the spring-back filter slider
   theme.rs      colours, fonts (Space Grotesk, Anton, Phosphor icons), egui style
-  song.rs       data model: Song → 8 Tracks (sound, tune, decay, lock) → 16 Steps, vibes, scales, chord progressions, macros, master EQ (all `Copy`)
+  song.rs       data model: Song → 8 Tracks (sound, tune, decay, lock) → 16 Steps, vibes, scales, chord progressions, moods, swing presets, macros, master EQ (all `Copy`)
   gen.rs        groove generator (vibes, sounds per vibe, per-track dice), `evolve` and `new_chapter` for the auto mode
-  engine.rs     sequencer clock, voices, mixer, master and live effects, drop, auto arrangement, scene chain
+  engine.rs     sequencer clock, voices, mixer, master and live effects, drop, auto arrangement, song mode, patterns on the next bar
   synth.rs      the sounds (every voice has several models) and effects (SVF filter, delay, reverb, rumble)
   audio.rs      cpal output: runs the engine in the device callback
   midi.rs       midir input: decode messages, connect every port
@@ -32,8 +33,8 @@ src/
  ───────────────                          ────────────────────────────
  BunkerApp.song ── Cmd::Song(Box<Song>) ──▶ Engine.song
  pads / keys    ── Cmd::Hit, Fx, Drop, … ──▶ Engine
- scenes         ── Cmd::Chain(slots)    ──▶ Engine
-               ◀── Event::Song(song, Change) ── auto mode, recording, scene chain
+ patterns, song ── Cmd::Queue, Arrange, Jump ──▶ Engine
+               ◀── Event::Song(song, Change) ── auto mode, recording, song mode
                ◀── Shared (atomics): step, hits per track, level, build-up, spectrum bands
  MIDI callback  ── Cmd (pads, transpose, filter, echo) ──▶ Engine   (no UI round trip)
                 ── Midi ──▶ UI (macros, display)
@@ -47,7 +48,7 @@ src/
 
 `Engine::render` fills an interleaved stereo buffer sample by sample:
 
-1. **Clock** – `phase` counts 16th steps; a step fires when the integer part changes (odd steps wait for the swing offset). Bar starts call `new_bar`: drops, the scene chain (next filled slot every `Chain::bars`), and in auto mode the 32-bar arrangement. Each cycle picks a `Plan` (classic, short and filtered, stripped, filtered): groove with `gen::evolve` every `auto_bars` (2/4/8) and a one-bar `Fill` before every 8-bar phrase, the breakdown (the plan's tracks muted, optionally under a low-pass that opens by itself), 2 bars build-up, drop. 45 % of drops start a `gen::new_chapter` (new bass and synth lines, maybe sounds and key). A breakdown restores the mutes it saved when it ends, also when the music stops, the auto mode is switched off or a chain starts. Every build-up (DROP, drop zone, auto mode, song mode) starts on a bar and lasts two bars and is made from the groove itself (`build_play`): the kick rolls (quarters, 8ths, 16ths – also when energy or a breakdown took it out, not when it's muted by hand), the hats run in 16ths, the open hat rests, bass, synth, rim and ride loop the second bar's first beat, then half a beat, the synths an octave up for the last quarter. The last `DROP_GAP` steps are silent, then `drop_now` lands on the bar after.
+1. **Clock** – `phase` counts 16th steps; a step fires when the integer part changes (odd steps wait for the swing offset). Bar starts call `new_bar`: drops, a pattern waiting from `Cmd::Queue` (it comes in now; a `Fill::Roll` led into it), song mode (`arrange_bar`), and in auto mode the 32-bar arrangement. Each cycle picks a `Plan` (classic, short and filtered, stripped, filtered): groove with `gen::evolve` every `auto_bars` (2/4/8) and a one-bar `Fill` before every 8-bar phrase, the breakdown (the plan's tracks muted, optionally under a low-pass that opens by itself), 2 bars build-up, drop. 45 % of drops start a `gen::new_chapter` (new bass and synth lines, maybe sounds and key). A breakdown restores the mutes it saved when it ends, also when the music stops, the auto mode is switched off or a song starts. Every build-up (DROP, drop zone, auto mode, song mode) starts on a bar and lasts two bars and is made from the groove itself (`build_play`): the kick rolls (quarters, 8ths, 16ths – also when energy or a breakdown took it out, not when it's muted by hand), the hats run in 16ths, the open hat rests, bass, synth, rim and ride loop the second bar's first beat, then half a beat, the synths an octave up for the last quarter. The last `DROP_GAP` steps are silent, then `drop_now` lands on the bar after.
 2. **Steps** – each track loops over its own length (`Track::step_at`), so lengths below 16 make polyrhythms. `chance` < 100 rolls the dice. A closed hat never plays on a step where the open hat plays. Energy gates the percussion live: below 45 it drops unaccented hits, above 60 it adds ghost hats (chosen by a hash of track, step and 2-bar block, so it forms a pattern). Synth steps whose next step slides get a longer gate and glide.
 3. **Voices** – `trigger` applies the track's `tune` and `decay` and, for bass and synth, the chord progression (`Song::prog_degree` of the bar, as scale degrees), then picks the model from `Track::sound` (`KICKS`, `HATS`, `OPEN_HATS`, `RIDES` tables in `synth.rs`; clap, rim, bass and synth switch on a `model` index). The synth's stab plays the scale's triad on the step's note.
 4. **Mixer** (pan, delay send, reverb send per track; stabs get extra echo; pump ducks everything but the kick and the returns with an envelope the kick restarts) → rumble (kick through dark resonant delays, ducked by the kick) → drop boom / crash → build-up riser (fades out in the gap before the drop).
@@ -55,7 +56,7 @@ src/
 
 **Energy** is also the arrangement: a track plays only while `energy ≥ LAYERS[track]` (hats and synth always, then rim, kick, bass, clap, open hat, ride). A drop lifts the energy to at least 0.85. Energy by hand that reaches `DROP_ZONE` (0.9) starts a build-up (`watch_drop_zone`); it arms again below `DROP_REARM` (0.88). In auto mode with `Song::curve` on, the engine owns the energy: `curve_target` sets it every bar (high after the drop, rising to the breakdown, low in it, climbing through the build-up) and a `Cmd::Song` from the UI can't change it. The UI's fader sets `curve = false` (by hand) – then the UI's value counts again.
 
-**Song mode** (`Chain`): every scene has its own length and an optional drop-in. `chain_bar` counts the bars since the scene started (`scene_start`), starts a 2-bar build-up before a scene with `drop_in`, and switches when the length is over – on that bar the build-up's drop lands first, then the new scene.
+**Song mode** (`Arrangement`: the patterns, a form from `form::FORMS`, and a fallback song for when no pattern is saved): `arrange_bar` moves to the next section when one is over or on a `Cmd::Jump`, and `enter_section` loads the section's pattern (`form::pattern_slot`: an empty slot falls back to the nearest full one before it), sets `curve` and the part's energy (`Part::energy`, every bar after), mutes kick and bass for a `Break` (a `Breakdown`, so a pattern change keeps them out) and drops into every `Peak`. A break builds up over its last two bars; a fill leads into a section with another pattern, plus random fills every 8 bars in grooves and peaks. After the last section the engine stops and sends `Change::SongEnd`. The section and the bar it started go to `Shared::part` / `part_start` for the strip.
 
 `render_offline` runs the same engine without a device – for WAV export and tests.
 
@@ -69,7 +70,8 @@ Live effects are `Cmd::Fx(Fx, bool)` – held down / let go. The UI sends a chan
 - **Locks** – `Track::lock`: shuffle uses `gen::generate_keeping` with the locked tracks, the dice is disabled, `gen::evolve` and `gen::new_chapter` skip them.
 - **Files** – *File* menu: WAV export, `.bunker` save/open (also by drag and drop). A loaded file is an ordinary edit, so undo goes back.
 - **Visualizer** – `visual: bool`; the window then shows only `visual::visual` in fullscreen, keys keep working, Esc leaves.
-- **Scenes A–D** – `slots: [Option<Song>; 4]`, `slot_now`, `scene_bars` and `scene_drop`, saved with the window state. A user edit also writes the song into the lit slot; a shuffle, undo or redo detaches it (`slot_now = None`) so a saved scene is never overwritten by surprise. With the chain on, every slot change sends `Cmd::Chain` again; the engine reports the scene it switched to with `Change::Scene`. Chain and auto mode exclude each other.
+- **Patterns A–D** – `slots: [Option<Song>; 4]` and `slot_now`, saved with the window state. A user edit also writes the song into the lit slot; a shuffle, undo or redo detaches it (`slot_now = None`) so a saved pattern is never overwritten by surprise. A click while playing sends `Cmd::Queue` and marks `queued_slot` (it blinks) until the engine reports `Change::Scene`; stopped, it switches at once. **Song** – `song_form` and `song_fallback`; every slot change sends `Cmd::Arrange` again (same form = patterns only), `Change::Part` tells the UI which pattern plays. Song and auto mode exclude each other; stopping ends the song.
+- **Mood & groove** – `song::MOODS` (scale + progression) and `SWINGS`; a new mood refits the bass and synth notes to it (`gen::refit_notes`).
 - **Sounds** – `Track::sound` indexes `Voice::sounds()`. Changing the synth between 303 / stab / pluck / hoover rolls a line written for the new sound (undo keeps the old one). Changing a sound while stopped plays a preview after the new song went out (`preview`).
 - **Update check** – `update::check` runs `curl` against the GitHub releases API on a thread at start (unless switched off in the help window, `check_updates`), compares the tag with `CARGO_PKG_VERSION` and the top bar shows an update button.
 - **Solo** – remembers everyone's mute state and puts it back when the solo ends.
@@ -86,7 +88,7 @@ Live effects are `Cmd::Fx(Fx, bool)` – held down / let go. The UI sends a chan
 
 Immediate mode: `BunkerApp::ui` draws everything every frame (continuously while playing). The orbit and pads are custom-painted with the egui painter (circles, arcs, a mesh for the beam). `Geometry` in `orbit.rs` maps steps to positions and back for hit testing.
 
-Layout: top bar (with the vibe dropdown and SHUFFLE), tracks on the left (row height adapts to the window; the sound pill opens sounds + tune/decay), SOUND|MASTER knobs / auto / energy, filter, effects, drop on the right, the orbit or pads in the middle with the scene strip below. Short windows get smaller effect buttons and DROP. Minimum window size is 1100 × 700.
+Layout: top bar (with the vibe dropdown and SHUFFLE), tracks on the left (row height adapts to the window; the sound pill opens sounds + tune/decay), SOUND|MASTER knobs / auto / energy, filter, effects, drop on the right, the orbit or pads in the middle with the pattern strip below (and the song strip above it while a song plays). No status bar: the shortcuts are in the help, the sound status is an icon in the top bar. Short windows get smaller effect buttons and DROP. Minimum window size is 1100 × 700.
 
 The UI fonts have no ♯, ◂ or ▸ – use `#` and words instead.
 
@@ -94,5 +96,5 @@ The UI fonts have no ♯, ◂ or ▸ – use `#` and words instead.
 
 There is no way to drive the real window from a terminal. Instead:
 
-- `cargo test --release render_ -- --ignored` writes screenshots to `target/snapshots/*.png` (orbit stopped/playing/build-up, song mode + update button, pads, small window with master tab and locks, help, visualizer, and `readme_orbit` – the source of the README pictures in `docs/images`) and demo loops for every vibe plus a 68-bar auto-mode run to `target/snapshots/sounds/*.wav`.
+- `cargo test --release render_ -- --ignored` writes screenshots to `target/snapshots/*.png` (orbit stopped/playing/build-up, a song with a waiting pattern + update button, pads, small window with master tab and locks, help, visualizer, and `readme_orbit` – the source of `docs/images/orbit.jpg`; `scenes.jpg` is cut from the song snapshot) and demo loops for every vibe plus a 68-bar auto-mode run to `target/snapshots/sounds/*.wav`.
 - `cargo test --release print_levels -- --ignored --nocapture` prints the loudness of each track and each of its sounds alone – for balancing the mix (sounds of one track should stay within ~3 dB of each other).

@@ -103,23 +103,33 @@ pub fn chip(ui: &mut Ui, text: &str, on: bool, color: Color32) -> Response {
 
 /// A chip with a fixed width (`None`: as wide as its text)
 pub fn chip_sized(ui: &mut Ui, text: &str, on: bool, color: Color32, width: Option<f32>) -> Response {
-    let galley = ui.painter().layout_no_wrap(text.to_string(), bold(13.0), TEXT);
-    let size = vec2(width.unwrap_or(galley.size().x + 22.0), 30.0);
+    chip_shaped(ui, text, on, color, width, 30.0, 13.0)
+}
+
+/// A smaller chip for rows of presets
+pub fn chip_small(ui: &mut Ui, text: &str, on: bool, color: Color32, width: f32) -> Response {
+    chip_shaped(ui, text, on, color, Some(width), 24.0, 11.5)
+}
+
+fn chip_shaped(ui: &mut Ui, text: &str, on: bool, color: Color32, width: Option<f32>, height: f32, font: f32) -> Response {
+    let galley = ui.painter().layout_no_wrap(text.to_string(), bold(font), TEXT);
+    let size = vec2(width.unwrap_or(galley.size().x + 22.0), height);
+    let r = height / 2.0;
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
     let p = ui.painter();
     let hot = resp.hovered();
     if on {
-        p.rect_filled(rect, 15.0, alpha(color, 0.16));
-        p.rect_stroke(rect, 15.0, stroke(1.2, color), egui::StrokeKind::Inside);
+        p.rect_filled(rect, r, alpha(color, 0.16));
+        p.rect_stroke(rect, r, stroke(1.2, color), egui::StrokeKind::Inside);
     } else {
-        p.rect_filled(rect, 15.0, if hot { PANEL_HI } else { Color32::TRANSPARENT });
-        p.rect_stroke(rect, 15.0, stroke(1.0, if hot { FAINT } else { LINE }), egui::StrokeKind::Inside);
+        p.rect_filled(rect, r, if hot { PANEL_HI } else { Color32::TRANSPARENT });
+        p.rect_stroke(rect, r, stroke(1.0, if hot { FAINT } else { LINE }), egui::StrokeKind::Inside);
     }
     p.text(
         rect.center(),
         Align2::CENTER_CENTER,
         text,
-        bold(13.0),
+        bold(font),
         if on {
             color
         } else if hot {
@@ -243,8 +253,6 @@ pub struct EnergyOut {
 /// mode's energy curve is (not) driving it – the pill switches it. The red end is the
 /// drop zone: pushed in there by hand, the energy starts a build-up.
 pub fn energy_fader(ui: &mut Ui, value: &mut f32, width: f32, height: f32, curve: Option<bool>) -> EnergyOut {
-    use crate::engine::LAYERS;
-    use crate::song::Voice;
     let (rect, resp) = ui.allocate_exact_size(vec2(width, height), Sense::click_and_drag());
     let mut out = EnergyOut {
         changed: false,
@@ -310,17 +318,7 @@ pub fn energy_fader(ui: &mut Ui, value: &mut f32, width: f32, height: f32, curve
     let knob = pos2(fill.right(), track.center().y);
     glow(p, knob, 7.0, hot_col, 0.6);
     p.circle_filled(knob, 8.0, TEXT);
-    // Where each track comes in
-    let y = track.bottom() + 8.0;
-    for (i, v) in Voice::ALL.into_iter().enumerate() {
-        if LAYERS[i] <= 0.0 {
-            continue;
-        }
-        let x = track.left() + track.width() * LAYERS[i];
-        let lit = *value >= LAYERS[i];
-        let c = crate::theme::track_color(v);
-        p.circle_filled(pos2(x, y), 3.0, if lit { c } else { alpha(c, 0.25) });
-    }
+    let y = track.bottom() + 1.0;
     if height > 52.0 {
         p.text(
             pos2(track.right(), y + 9.0),
@@ -333,7 +331,7 @@ pub fn energy_fader(ui: &mut Ui, value: &mut f32, width: f32, height: f32, curve
     }
     resp.on_hover_cursor(egui::CursorIcon::ResizeHorizontal).on_hover_text(
         "Energy: turn it down and the groove strips down to hats and synth, turn it up and kick, bass, clap, \
-         open hat and ride come back (the dots), plus extra hats and drive at the top. ← → on the keyboard.\n\
+         open hat and ride come back, plus extra hats and drive at the top. ← → on the keyboard.\n\
          Then hit DROP – the energy comes back with it.\n\
          The red end is the drop zone: push it to 90 or more and the build-up starts on the next bar, the drop two bars later.\n\
          In auto mode CURVE lets Bunker move it through the set; touching the fader takes over by hand.",

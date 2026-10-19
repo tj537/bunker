@@ -19,6 +19,8 @@ pub struct Live {
     pub hit_age: [f32; TRACKS],
     pub build: Option<f32>,
     pub bar: u64,
+    /// Song mode: the section playing and how many bars into it (with fraction)
+    pub part: Option<(usize, f64)>,
     pub caption: Option<(String, f32)>,
     /// Spectrum (engine::BANDS) and output peak, for the visualizer
     pub bands: [f32; 8],

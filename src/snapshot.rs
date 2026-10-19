@@ -34,6 +34,7 @@ mod tests {
             hit_age,
             build: None,
             bar: (pos / 16.0) as u64,
+            part: None,
             caption: Some(("New hat pattern".into(), 0.5)),
             bands: [0.22, 0.12, 0.05, 0.03, 0.035, 0.02, 0.015, 0.008],
             level: 0.7,
@@ -68,11 +69,13 @@ mod tests {
             }
             app.song = app.slots[1].unwrap();
             app.slot_now = Some(1);
-            app.chain = true;
-            app.scene_drop[2] = true;
-            app.scene_bars = [4, 8, 16, 8];
+            app.queued_slot = Some(2);
+            app.song_form = Some(1);
             app.new_version = Some(crate::update::Release { version: "0.3.0".into() });
-            app.fake_live = Some(playing(20.3, &[0, 7]));
+            app.fake_live = Some(Live {
+                part: Some((4, 9.4)),
+                ..playing(20.3, &[0, 7])
+            });
         });
         render("orbit_build", 1360.0, 860.0, |app| {
             app.fake_live = Some(Live {
@@ -127,8 +130,6 @@ mod tests {
             app.song.macros.pump = 0.4;
             app.song.tracks[0].lock = true;
             app.song.tracks[3].tune = 2;
-            app.scene_bars = [8, 16, 8, 8];
-            app.scene_drop[1] = true;
             app.slot_now = Some(1);
             app.fx_key[2] = true;
             app.fake_live = Some(Live {
