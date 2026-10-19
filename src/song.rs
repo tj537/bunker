@@ -339,6 +339,18 @@ fn yes() -> bool {
     true
 }
 
+/// The loop lengths that stay in step with the bar (16, 8, 4, 2, 1) – any other length
+/// (older saves had 12, 14, 15 …) is rounded to the nearest of them
+pub fn fit_len(len: u8) -> u8 {
+    match len {
+        0..=1 => 1,
+        2 => 2,
+        3..=5 => 4,
+        6..=11 => 8,
+        _ => 16,
+    }
+}
+
 /// Moods: a scale and a chord progression (index into `PROGRESSIONS`) that go together
 pub const MOODS: [(&str, &str, Scale, u8); 9] = [
     ("Dark", "Tense and menacing – one dark step up and back", Scale::Phrygian, 6),
@@ -471,7 +483,7 @@ impl Song {
     /// Repair values that would break the app (old or hand-edited saved state)
     pub fn sanitize(&mut self) {
         for (t, v) in self.tracks.iter_mut().zip(Voice::ALL) {
-            t.len = t.len.clamp(1, STEPS as u8);
+            t.len = fit_len(t.len);
             if t.sound as usize >= v.sounds().len() {
                 t.sound = 0;
             }
@@ -561,6 +573,9 @@ mod tests {
     fn sanitize_repairs_broken_values() {
         let mut s = Song::default();
         s.tracks[2].len = 0;
+        s.tracks[4].len = 12;
+        s.tracks[5].len = 6;
+        s.tracks[6].len = 15;
         s.tracks[3].volume = f32::NAN;
         s.bpm = 9999.0;
         s.root = 3;
@@ -571,6 +586,8 @@ mod tests {
         s.prog = 200;
         s.eq.low = f32::NAN;
         s.sanitize();
+        // Loops always fit the bar
+        assert_eq!([s.tracks[2].len, s.tracks[4].len, s.tracks[5].len, s.tracks[6].len], [1, 16, 8, 16]);
         assert_eq!(s.tracks[1].decay, 0.5);
         assert_eq!(s.tracks[1].tune, 12);
         assert_eq!(s.prog, 0);

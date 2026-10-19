@@ -1340,7 +1340,7 @@ impl BunkerApp {
             let lr = Rect::from_min_size(pos2(sound_rect.right() + 6.0, y), vec2(30.0, 18.0));
             let lresp = ui
                 .allocate_rect(lr, Sense::click())
-                .on_hover_text("Steps in this loop: click −1, right-click +1.\nFewer than 16 = it drifts against the beat (polyrhythm)");
+                .on_hover_text("Loop length: 16 = one bar, 8 = half a bar (plays twice), 4, 2, 1 …\nClick: shorter · right-click: longer – it always stays in step with the beat");
             p.rect_stroke(
                 lr,
                 9.0,
@@ -1357,10 +1357,10 @@ impl BunkerApp {
             );
             let len = &mut self.song.tracks[i].len;
             if lresp.clicked() {
-                *len = if *len <= 1 { 16 } else { *len - 1 };
+                *len = if *len <= 1 { 16 } else { *len / 2 };
             }
             if lresp.secondary_clicked() {
-                *len = if *len >= 16 { 1 } else { *len + 1 };
+                *len = if *len >= 16 { 1 } else { *len * 2 };
             }
             // Volume
             let vx = lr.right() + 8.0;
