@@ -208,7 +208,7 @@ impl BunkerApp {
         cc.egui_ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
         let mut song: Song = cc.storage.and_then(|s| eframe::get_value(s, "song")).unwrap_or_default();
         song.sanitize();
-        let view = cc.storage.and_then(|s| eframe::get_value(s, "view")).unwrap_or(View::Orbit);
+        let view = cc.storage.and_then(|s| eframe::get_value(s, "view")).unwrap_or(View::Planets);
         let mut app = Self::headless(song, view, true);
         // (Before 0.4.2 there were four slots)
         let slots = cc.storage.and_then(|s| {
@@ -874,11 +874,11 @@ impl BunkerApp {
         }
         let tab = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Tab));
         if tab {
-            // Orbit → planets → classic → orbit
+            // Planets → radar → classic → planets
             self.view = match self.view {
-                View::Orbit => View::Planets,
-                View::Planets => View::Pads,
-                View::Pads => View::Orbit,
+                View::Planets => View::Orbit,
+                View::Orbit => View::Pads,
+                View::Pads => View::Planets,
             };
         }
         let events = ctx.input(|i| i.events.clone());
@@ -1135,8 +1135,8 @@ impl BunkerApp {
                     self.show(&ctx, false);
                 }
                 ui.add_space(4.0);
-                // The view: ORBIT, PLANETS or CLASSIC (pads and grid)
-                let order = [View::Orbit, View::Planets, View::Pads];
+                // The view: PLANETS (the main one), RADAR (the orbit) or CLASSIC (pads and grid)
+                let order = [View::Planets, View::Orbit, View::Pads];
                 let picked = order.map(|v| self.view == v);
                 // In a small window only the view you're in has its name
                 let compact = ui.ctx().screen_rect().width() < 1250.0;
@@ -1148,10 +1148,13 @@ impl BunkerApp {
                     }
                 };
                 let views = [
-                    (label(0, ph::CIRCLES_THREE, "ORBIT"), "Orbit: the tracks as rings (Tab)"),
                     (
-                        label(1, ph::PLANET, "PLANETS"),
-                        "Planets: every track a planet going round the sun (Tab)",
+                        label(0, ph::PLANET, "PLANETS"),
+                        "Planets: every track an orbit round the sun, every step a planet (Tab)",
+                    ),
+                    (
+                        label(1, ph::CIRCLES_THREE, "RADAR"),
+                        "Radar: the tracks as rings with a sweeping beam (Tab)",
                     ),
                     (label(2, ph::GRID_FOUR, "CLASSIC"), "Classic: pads and a step grid (Tab)"),
                 ];
@@ -2345,18 +2348,18 @@ impl BunkerApp {
                 let max_h = ctx.screen_rect().height() - 200.0;
                 egui::ScrollArea::vertical().max_height(max_h).show(ui, |ui| {
                     row(ui, ph::PLAY, "1 · Press play", "Space, or the button in the middle. Pick a vibe at the top – every pick rolls a new groove in that style (Custom starts empty). SHUFFLE (Enter) rolls again. ⌘/Ctrl + Z undoes anything, a shuffle too.");
-                    row(ui, ph::CIRCLES_THREE, "2 · Read the orbit", "Each ring is one sound, once round is one bar of 16 steps, the numbers 1–4 are the beats and the beam is where it plays. A hollow circle is a step that's off, a filled dot one that plays. A white core: accent (louder). A coloured ring around it: it only plays sometimes. An arc to the dot before: the synth slides into it. A white ring: playing right now. A faded ring: that track is muted. PLANETS at the top shows the same groove as a solar system: every track an orbit, every step that plays a planet, a beam sweeping round – bass and synth notes float higher or lower.");
+                    row(ui, ph::PLANET, "2 · Read the planets", "Every track is an orbit round the sun, once round is one bar of 16 steps, the numbers 1–4 are the beats. Every step that plays is a planet; the beam sweeps round and lights up each one it passes. Bass and synth planets float higher or lower with their note. A ring like Saturn's: accent (louder). A coloured circle around it: it only plays sometimes. A trail to the planet before: the synth slides into it. A faded orbit: that track is muted. The sun is the play button. RADAR at the top shows the same as flat rings of dots, CLASSIC as pads and a step grid (Tab switches).");
                     row(ui, ph::HAND_POINTING, "3 · Change the groove", "Click a dot to switch it on or off, drag to paint. Right-click a dot (or a tile in CLASSIC, the pads and step grid – Tab) for its menu: on, accent, slide, how often it plays and – on bass and synth – its note. The mouse wheel on a bass or synth dot moves its note too.");
                     row(ui, ph::LIST, "4 · Tracks", "S solos a track, the speaker mutes it, the dice rolls a new rhythm for it (right-click: clear), the lock keeps shuffle and the auto mode away from it. The coloured pill is its sound – click it for the list, tune and decay.");
                     row(ui, ph::MUSIC_NOTES, "5 · Mood & pitch", "MOOD picks the notes and chords of bass and synth – from Dark and Hypnotic to Euphoric, Sunny or Mysterious. Pitch moves them lower or higher.");
                     row(ui, ph::LIGHTNING, "6 · Energy & drop", "The energy bar is the arrangement, not the volume (← →): under 30 a break with no kick and bass, then the tracks come in one by one, from 70 everything plays (a track the energy takes out says OUT next to its name), at 90 the build-up starts and two bars later it drops. DROP (B) does the same any time.");
                     row(ui, ph::WAVEFORM, "7 · Effects & sound", "Hold STUTTER (Q), ECHO (W), WASH (E), CRUSH (X), GATE (C) or TAPE STOP (V) and combine them; FILTER springs back when you let go. SOUND: DARK, ACID, SPACE and PUMP. MASTER: low, mid, high and drive.");
                     row(ui, ph::INFINITY, "8 · Auto mode", "Bunker keeps the groove moving: something changes every 2, 4 or 8 bars. With AUTO FX on it also steers the energy and plays breakdowns, build-ups and drops by itself. With AUTO FX off the energy bar is yours and no track is ever taken out.");
-                    row(ui, ph::STACK, "9 · Favorites & auto song", "Click + under the orbit to keep what you hear (twelve slots), click a full one to switch on the next bar, right-click to rename, save over or clear. AUTO SONG makes a whole track from favorite 1 – a quiet intro, two or three drops, favorite 2 after the first – while you jam along. Click a part in the strip to jump there.");
+                    row(ui, ph::STACK, "9 · Favorites & auto song", "Click + under the space window to keep what you hear (twelve slots), click a full one to switch on the next bar, right-click to rename, save over or clear. AUTO SONG makes a whole track from favorite 1 – a quiet intro, two or three drops, favorite 2 after the first – while you jam along. Click a part in the strip to jump there.");
                     row(ui, ph::RECORD, "10 · Record", "The red record button at the top (R) records everything you hear until you click it again – then save it as a WAV. An AUTO SONG records itself.");
                     row(ui, ph::SPARKLE, "11 · Visualizers", "Two fullscreen shows for a projector, with a small energy bar at the bottom: LIGHTS (P) – a spectrum ring, shockwaves and stars – and FACE (O) – a low-poly head that nods in time, glitches in a build-up, and on the drop screams with laser eyes, cracks and bursts apart. All keys keep working. Esc or a double-click goes back.");
                     row(ui, ph::FOLDER_SIMPLE, "12 · Files & settings", "File → Save keeps the groove and your favorites in a .bunker file; open it from the menu or drag it onto the window. The gear holds volume, sound output, MIDI keyboard and the update check.");
-                    row(ui, ph::KEYBOARD, "Keys", "Space play · Enter shuffle · A–K pads · 1–8 mute · ← → energy · ↑ ↓ tempo · B drop · Q W E  X C V effects (hold) · R record · Tab orbit/planets/classic · P lights · O face · ⌘/Ctrl Z undo · Esc close");
+                    row(ui, ph::KEYBOARD, "Keys", "Space play · Enter shuffle · A–K pads · 1–8 mute · ← → energy · ↑ ↓ tempo · B drop · Q W E  X C V effects (hold) · R record · Tab planets/radar/classic · P lights · O face · ⌘/Ctrl Z undo · Esc close");
                 });
             });
         self.help = open;

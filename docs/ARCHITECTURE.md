@@ -10,8 +10,8 @@ src/
   face.rs       the FACE visualizer: a procedural low-poly head (rings of a squared-off head profile + gaussian bumps, a jaw that starts to open late in a build-up and drops on the drop; empty, angular eye holes like a mask's, filled with what's behind (space plus the head's glow at that spot) and screen-fixed stars, burning with light in build-ups and drops, gone while it shatters; a black slit for the shut mouth that falls open with its corners down now and then (`gape`, a 7-second slot picked by hash)), flat-shaded mesh + wireframe, a nod on every beat, glitch bands and RGB split in build-ups, a drop in phases (zoom and scream with additive laser beams, glowing cracks, spinning shards that fly out and come back), every effect faded in and out so nothing switches at once
   file.rs       .bunker files (RON): song, favorites and their names
   form.rs       song forms (Short, Club, Hypnotic): parts, lengths, favorite 1 then 2, energy per part
-  orbit.rs      the circular sequencer (drawing + mouse) and `Live`, the playback state the UI shows
-  planets.rs    the Planets view (`View::Planets`): tilted orbits (`System`: place, lift, hit) all starting at the back like the orbit's 12 o'clock, a radar beam lying on the plane, steps drawn far to near around the sun as planets lit from the middle; same input as the orbit (`Paint`, `step_context_menu`)
+  orbit.rs      the Radar view (`View::Orbit`): the circular sequencer (drawing + mouse) and `Live`, the playback state the UI shows
+  planets.rs    the Planets view (`View::Planets`, the main one and the default): tilted orbits (`System`: place, lift, hit) all starting at the back like the orbit's 12 o'clock, a radar beam lying on the plane, steps drawn far to near around the sun as planets lit from the middle; same input as the orbit (`Paint`, `step_context_menu`)
   pads.rs       the Classic view (`View::Pads`): eight pads + step grid
   widgets.rs    macro sliders, chips, glowing buttons, effect buttons, the energy fader, the spring-back filter slider, concrete and stars
   theme.rs      colours, fonts (Space Grotesk, Anton, Phosphor icons), egui style

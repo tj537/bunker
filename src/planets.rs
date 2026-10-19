@@ -291,37 +291,30 @@ pub fn planets(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mu
     }
 
     // ── The sun: the play button ──
-    let time = ui.input(|i| i.time) as f32;
+    // A soft glowing ball: lime while it waits, warming slowly to orange when the beat
+    // starts, red through a build-up
+    let heat = ui.ctx().animate_bool_with_time(egui::Id::new("sun_heat"), live.playing, 1.5);
     let rs = sys.sun() * (1.0 + 0.06 * kick + 0.2 * build);
-    let warm = if live.playing {
-        mix(mix(RED, track_color(Voice::Clap), 0.55), RED, build)
-    } else {
-        ACID
-    };
+    let warm = mix(ACID, mix(mix(RED, track_color(Voice::Clap), 0.55), RED, build), heat);
     halo(
         &p,
         sys.c,
-        rs * 3.2,
+        rs * 3.0,
         warm,
-        0.35 + 0.4 * kick + 0.4 * build + if on_sun { 0.15 } else { 0.0 },
+        0.3 + 0.35 * kick + 0.4 * build + if on_sun { 0.15 } else { 0.0 },
     );
-    // Its corona: slow rays that reach out on the kick
-    let mut rays = Mesh::default();
-    for i in 0..16 {
-        let a = i as f32 / 16.0 * TAU + time * 0.15;
-        let reach = rs * (1.3 + 0.15 * (time * 1.7 + i as f32 * 2.3).sin() + 0.35 * kick);
-        let dir = vec2(a.cos(), a.sin());
-        let side = vec2(-dir.y, dir.x) * rs * 0.13;
-        let base = rays.vertices.len() as u32;
-        rays.colored_vertex(sys.c + dir * rs * 0.85 + side, additive(warm, 0.5));
-        rays.colored_vertex(sys.c + dir * rs * 0.85 - side, additive(warm, 0.5));
-        rays.colored_vertex(sys.c + dir * reach, Color32::TRANSPARENT);
-        rays.add_triangle(base, base + 1, base + 2);
+    // Bright where the light catches it, deeper towards the edge
+    let shine = sys.c - vec2(rs, rs) * 0.3;
+    let mut ball = Mesh::default();
+    ball.colored_vertex(shine, mix(warm, Color32::WHITE, 0.7 + 0.2 * kick));
+    let n = 64;
+    for i in 0..n {
+        let a = i as f32 / n as f32 * TAU;
+        ball.colored_vertex(sys.c + vec2(a.cos(), a.sin()) * rs, mix(warm, SPACE, 0.15));
+        ball.add_triangle(0, 1 + i, 1 + (i + 1) % n);
     }
-    p.add(egui::Shape::mesh(rays));
-    p.circle_filled(sys.c, rs, mix(warm, Color32::WHITE, 0.15));
-    p.circle_filled(sys.c - vec2(rs, rs) * 0.12, rs * 0.8, mix(warm, Color32::WHITE, 0.45));
-    p.circle_filled(sys.c - vec2(rs, rs) * 0.22, rs * 0.45, mix(warm, Color32::WHITE, 0.75));
+    p.add(egui::Shape::mesh(ball));
+    p.circle_stroke(sys.c, rs, stroke(1.0, alpha(mix(warm, Color32::WHITE, 0.5), 0.6)));
     let icon = if live.playing { ph::STOP } else { ph::PLAY };
     let ink = mix(warm, SPACE, 0.8);
     p.text(sys.c - vec2(0.0, rs * 0.16), Align2::CENTER_CENTER, icon, body(rs * 0.6), ink);
