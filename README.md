@@ -54,7 +54,7 @@ Bunker is a techno drum machine written in Rust. Every sound is a glowing ring, 
 - **Live effects (hold to use):** stutter, echo, wash, crush, gate and tape stop, plus a spring-back filter. When Bunker uses one by itself – the gate in every build-up – its button lights up and flickers with the chop. The sound sliders are DARK, ACID, SPACE and PUMP; the master page has LOW, MID, HIGH and DRIVE.
 - **Two visualizers** for the big screen, fullscreen with no text, just a small energy bar at the bottom:
   - **LIGHTS** (<kbd>P</kbd>): a spectrum ring, kick shockwaves and a star field.
-  - **FACE** (<kbd>O</kbd>): a low-poly head in space that nods in time. Its eyes glow with the kick, its edges flicker with the hats. In a build-up it warps, glitches, splits into red and blue and nods twice as fast; on the drop it rushes at you, tears its mouth open and screams with blazing eyes, bursts into shards that fly out of the picture and pulls itself back together.
+  - **FACE** (<kbd>O</kbd>): a low-poly head in space that nods in time. Its eyes glow with the kick, its edges flicker with the hats. In a build-up it warps, glitches, splits into red and blue and nods twice as fast; on the drop it rushes at you, tears its mouth open and screams with lasers blazing from its eyes, cracks glow through its face, and it bursts into shards that fly out of the picture and come back together.
 
   All keys keep working, so <kbd>←</kbd> <kbd>→</kbd> take the set from break to drop.
 - **Files:** `.bunker` files (plain text) keep the groove and all twelve favorites with their names.

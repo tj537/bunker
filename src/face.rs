@@ -139,18 +139,39 @@ struct Moment {
     drop_at: f64,
 }
 
+/// A colour that adds light (premultiplied with no alpha), `k` 0…1 of it
+fn additive(color: Color32, k: f32) -> Color32 {
+    let k = k.clamp(0.0, 1.0);
+    Color32::from_rgba_premultiplied(
+        (color.r() as f32 * k) as u8,
+        (color.g() as f32 * k) as u8,
+        (color.b() as f32 * k) as u8,
+        0,
+    )
+}
+
+/// A beam of light from `from` along `dir`: brightest along its middle and at its start,
+/// soft at the edges, `w0` wide at the start and `w1` at the end
+#[allow(clippy::too_many_arguments)]
+fn beam(p: &egui::Painter, from: Pos2, dir: egui::Vec2, len: f32, w0: f32, w1: f32, color: Color32, k: f32) {
+    let n = vec2(-dir.y, dir.x);
+    let to = from + dir * len;
+    let mut mesh = Mesh::default();
+    mesh.colored_vertex(from, additive(color, k));
+    mesh.colored_vertex(to, additive(color, k * 0.12));
+    for q in [from + n * w0, to + n * w1, from - n * w0, to - n * w1] {
+        mesh.colored_vertex(q, Color32::TRANSPARENT);
+    }
+    for [a, b, c] in [[0, 2, 3], [0, 3, 1], [0, 4, 5], [0, 5, 1]] {
+        mesh.add_triangle(a, b, c);
+    }
+    p.add(egui::Shape::mesh(mesh));
+}
+
 /// A soft round light: bright in the middle, fading smoothly to nothing (added on top)
 fn halo(p: &egui::Painter, c: Pos2, r: f32, color: Color32, k: f32) {
     let k = k.clamp(0.0, 1.0);
-    let light = |f: f32| {
-        let f = k * f;
-        Color32::from_rgba_premultiplied(
-            (color.r() as f32 * f) as u8,
-            (color.g() as f32 * f) as u8,
-            (color.b() as f32 * f) as u8,
-            0,
-        )
-    };
+    let light = |f: f32| additive(color, k * f);
     let mut mesh = Mesh::default();
     mesh.colored_vertex(c, light(1.0));
     const N: u32 = 48;
@@ -196,42 +217,60 @@ pub fn face(ui: &mut Ui, rect: Rect, song: &Song, live: &Live, now: f64) {
     ui.data_mut(|d| d.insert_temp(id, m));
     let since = if m.drop_at > 0.0 { (now - m.drop_at) as f32 } else { 99.0 };
 
-    // Rush at you, burst into shards, pull back together
-    let rush = if since < 0.4 {
+    // The drop, in phases (seconds after it): rush at you, tear the mouth open and scream
+    // with lasers in the eyes; cracks glow through the face; the shards fly out at you,
+    // spinning, and come back to make the head again
+    const CRACK: f32 = 1.4;
+    const FLY: f32 = 1.65;
+    const BACK: f32 = 2.45;
+    const DONE: f32 = 3.7;
+    let rush = if since < BACK {
         ease(since / 0.4)
-    } else if since < 1.7 {
-        1.0
     } else {
-        1.0 - ease((since - 1.7) / 1.4)
+        1.0 - ease((since - BACK) / (DONE - BACK))
     };
-    // 0…1: how far the shards are out
-    let burst = if (0.75..1.7).contains(&since) {
-        ((since - 0.75) / 0.95).powf(0.8)
-    } else if (1.7..3.1).contains(&since) {
-        (1.0 - ease((since - 1.7) / 1.4)).powi(2)
+    // 0…1: how far out the shards are – faster and faster on the way out, slowing to land
+    let fly = if (FLY..BACK).contains(&since) {
+        ((since - FLY) / (BACK - FLY)).powi(2)
+    } else if (BACK..DONE).contains(&since) {
+        1.0 - ease((since - BACK) / (DONE - BACK))
     } else {
         0.0
     };
-    let screaming = since < 1.1;
+    let crack = if since < CRACK {
+        0.0
+    } else if since < BACK {
+        ease((since - CRACK) / 0.25)
+    } else {
+        1.0 - ease((since - BACK) / (DONE - BACK))
+    };
+    // The hit: in fast, out slowly – nothing switches on or off at once
+    let scream = ease(since / 0.15) * (1.0 - ease((since - 0.5) / 1.0));
+    let laser = ease((since - 0.1) / 0.25) * (1.0 - ease((since - 1.2) / 0.35));
+    // Distortion: grows slowly through the build-up, fades out after the drop
+    let warp = build * build + 0.7 * scream;
 
     // How the head moves and feels
     // The mouth stays shut – it only tears open on the drop
-    let jaw = if since < 1.3 {
-        ease(since / 0.12) * (1.0 - ease((since - 1.0) / 0.3))
+    let jaw = if since < BACK {
+        ease(since / 0.12)
     } else {
-        0.0
+        1.0 - ease((since - BACK) / 0.5)
     };
     // It nods on every beat (on every 8th late in a build-up): down on the hit, back up
     let beat = live.pos / if build > 0.5 { 2.0 } else { 4.0 };
     let nod = if playing { (1.0 - beat.fract() as f32).powi(3) } else { 0.0 };
-    let yaw = 0.3 * (t * 0.27).sin() + 0.08 * build * (t * 7.0).sin();
+    let yaw = 0.3 * (t * 0.27).sin() + 0.08 * warp * (t * 7.0).sin();
     let pitch = 0.06 * (t * 0.21).sin() - 0.02 - 0.13 * nod;
-    let jitter = 0.004 + 0.006 * hats + 0.06 * build * build;
+    let jitter = 0.004 + 0.006 * hats + 0.05 * warp;
     let zoom = 1.0 + 0.035 * kick + 0.55 * rush;
     let size = rect.width().min(rect.height()) * 0.34 * zoom;
     let c = rect.center() + vec2(0.0, -rect.height() * 0.02 + size * 0.035 * nod);
     let cool = track_color(Voice::OpenHat);
-    let tint = mix(crate::visual::mood(energy), RED, build * 0.7);
+    let hot = mix(RED, track_color(Voice::Clap), 0.4);
+    // Redder through the build-up, and it stays red for a while after the drop
+    let red = (build * 0.7).max(0.7 * (1.0 - ease((since - 0.3) / 2.5)));
+    let tint = mix(crate::visual::mood(energy), RED, red);
 
     // Space
     p.rect_filled(rect, 0.0, SPACE);
@@ -240,11 +279,11 @@ pub fn face(ui: &mut Ui, rect: Rect, song: &Song, live: &Live, now: f64) {
 
     // Glitch: a few horizontal bands shifted sideways, new ones ten times a second
     let seed = (t * 10.0) as u32;
-    let bands: Vec<(f32, f32, f32)> = (0..((build * 6.0) as u32 + if screaming { 4 } else { 0 }))
+    let bands: Vec<(f32, f32, f32)> = (0..(warp * 7.0).round() as u32)
         .map(|k| {
             let y0 = rect.top() + hash(seed * 31 + k) * rect.height();
             let h = 6.0 + hash(seed * 31 + k + 7) * 40.0;
-            let dx = (hash(seed * 31 + k + 13) - 0.5) * 90.0 * (build + if screaming { 0.6 } else { 0.0 });
+            let dx = (hash(seed * 31 + k + 13) - 0.5) * 110.0 * warp;
             (y0, y0 + h, dx)
         })
         .collect();
@@ -302,22 +341,26 @@ pub fn face(ui: &mut Ui, rect: Rect, song: &Song, live: &Live, now: f64) {
     let shards: Vec<_> = tris
         .iter()
         .map(|&(a, b, d, id)| {
-            // Each shard flies out from the centre, towards you and out of the picture
             let mid = [(a[0] + b[0] + d[0]) / 3.0, (a[1] + b[1] + d[1]) / 3.0, (a[2] + b[2] + d[2]) / 3.0];
-            // …mostly sideways, spinning down to a sliver as they go
-            let dir = norm([mid[0], mid[1] - 0.1, 0.25]);
-            let k = burst * (1.2 + hash(id + 5) * 2.4);
-            let off = [dir[0] * k, dir[1] * k, dir[2] * k * 0.5];
-            let shrink = 1.0 - 0.7 * burst;
+            // Facing you as part of the head? (a spinning shard still shows both sides)
+            let (ra, rb, rd) = (rotate(a, yaw, pitch), rotate(b, yaw, pitch), rotate(d, yaw, pitch));
+            let facing = cross(sub(rb, ra), sub(rd, ra))[2] > 0.0;
+            // Cracks: every facet pulls back a little, leaving gaps that glow; then it flies
+            // out and towards you, spinning its own way
+            let shrink = 1.0 - 0.14 * crack - 0.4 * fly;
+            let dir = norm([mid[0], mid[1] - 0.1, 0.5]);
+            let k = fly * (1.5 + hash(id + 5) * 2.5);
+            let off = [dir[0] * k, dir[1] * k, dir[2] * k * 0.6];
+            let (s1, s2) = ((hash(id + 11) - 0.5) * 7.0 * fly, (hash(id + 17) - 0.5) * 7.0 * fly);
             let mv = |q: [f32; 3]| {
-                let q = [
-                    mid[0] + (q[0] - mid[0]) * shrink + off[0],
-                    mid[1] + (q[1] - mid[1]) * shrink + off[1],
-                    mid[2] + (q[2] - mid[2]) * shrink + off[2],
-                ];
-                rotate(q, yaw, pitch)
+                let r = rotate(
+                    [(q[0] - mid[0]) * shrink, (q[1] - mid[1]) * shrink, (q[2] - mid[2]) * shrink],
+                    s1,
+                    s2,
+                );
+                rotate([mid[0] + r[0] + off[0], mid[1] + r[1] + off[1], mid[2] + r[2] + off[2]], yaw, pitch)
             };
-            (mv(a), mv(b), mv(d), id)
+            (mv(a), mv(b), mv(d), id, facing)
         })
         .collect();
     let mut order: Vec<usize> = (0..shards.len()).collect();
@@ -333,7 +376,7 @@ pub fn face(ui: &mut Ui, rect: Rect, song: &Song, live: &Live, now: f64) {
             (up[0].abs() < MOUTH_W && up[2] > 0.0).then_some((rotate(up, yaw, pitch), rotate(down, yaw, pitch)))
         })
         .collect();
-    if jaw > 0.1 && burst < 0.05 {
+    if jaw > 0.1 && fly < 0.02 {
         let hot = mix(RED, track_color(Voice::Clap), 0.4);
         let mut mesh = Mesh::default();
         for w in lips.windows(2) {
@@ -365,56 +408,56 @@ pub fn face(ui: &mut Ui, rect: Rect, song: &Song, live: &Live, now: f64) {
         }
     }
 
-    let fade = (1.0 - burst).clamp(0.0, 1.0);
-    let split = 2.0 + build * 9.0 + if screaming { 8.0 } else { 0.0 };
+    // Shards fade as they fly; the colour channels drift apart with the distortion, but
+    // not while it breaks, so the shatter stays clean
+    let fade = 1.0 - fly;
+    let split = (9.0 * build * build + 8.0 * scream) * (1.0 - crack);
+    let line = mix(tint, Color32::WHITE, 0.35);
     let mut mesh = Mesh::default();
-    let mut edges: Vec<(Pos2, Pos2, f32)> = Vec::new();
+    let mut edges: Vec<(Pos2, Pos2, f32, Color32)> = Vec::new();
     for &i in &order {
-        let (a, b, d, id) = shards[i];
-        let n = norm(cross(sub(b, a), sub(d, a)));
-        if n[2] <= 0.0 || a[2].max(b[2]).max(d[2]) > CAMERA - 0.6 {
+        let (a, b, d, id, facing) = shards[i];
+        if !facing || a[2].max(b[2]).max(d[2]) > CAMERA - 0.6 {
             continue;
         }
-        let shade = (n[0] * light[0] + n[1] * light[1] + n[2] * light[2]).max(0.0);
+        let n = norm(cross(sub(b, a), sub(d, a)));
+        let shade = (n[0] * light[0] + n[1] * light[1] + n[2] * light[2]).abs();
         let (pa, _) = project(a);
         let (pb, _) = project(b);
         let (pd, _) = project(d);
         // Flat-shaded facets: the light picks out every plane
-        let fill = mix(
-            SPACE,
-            mix(tint, Color32::WHITE, 0.2),
-            (0.05 + 0.55 * shade.powf(1.6)) * (0.4 + 0.6 * fade),
-        );
+        let fill = mix(SPACE, mix(tint, Color32::WHITE, 0.2), 0.05 + 0.55 * shade.powf(1.6) + 0.25 * fly).gamma_multiply(fade.sqrt());
         let base = mesh.vertices.len() as u32;
         for q in [pa, pb, pd] {
             mesh.colored_vertex(q, fill);
         }
         mesh.add_triangle(base, base + 1, base + 2);
-        // Some edges flash with the hats
+        // Some edges flash with the hats; cracks burn hot
         let flash = if hash(id * 13 + (t * 12.0) as u32) < 0.08 + hats * 0.25 {
             1.0
         } else {
             0.0
         };
-        let bright = (0.06 + 0.16 * shade + 0.5 * flash + 0.12 * kick) * fade;
-        edges.extend([(pa, pb, bright), (pb, pd, bright), (pd, pa, bright)]);
+        let k = 0.06 + 0.16 * shade + 0.5 * flash + 0.12 * kick;
+        // (outlines go first, so flying shards are glowing facets, not wire)
+        let col = alpha(mix(line, hot, crack), ((k + 0.8 * crack) * fade.powi(4)).min(1.0));
+        edges.extend([(pa, pb, k, col), (pb, pd, k, col), (pd, pa, k, col)]);
     }
     p.add(egui::Shape::mesh(mesh));
-    // The colour channels drift apart in a build-up and on the drop
-    if split > 3.0 {
-        for &(a, b, k) in &edges {
-            let o = vec2(split, 0.0);
-            p.line_segment([a - o, b - o], stroke(1.0, alpha(RED, k * 0.35)));
-            p.line_segment([a + o, b + o], stroke(1.0, alpha(cool, k * 0.35)));
+    if split > 0.5 {
+        let o = vec2(split, 0.0);
+        let s = (split / 4.0).min(1.0) * 0.35;
+        for &(a, b, k, _) in &edges {
+            p.line_segment([a - o, b - o], stroke(1.0, alpha(RED, k * s)));
+            p.line_segment([a + o, b + o], stroke(1.0, alpha(cool, k * s)));
         }
     }
-    let line = mix(tint, Color32::WHITE, 0.35);
-    for &(a, b, k) in &edges {
-        p.line_segment([a, b], stroke(1.0, alpha(line, k.min(1.0))));
+    for &(a, b, _, col) in &edges {
+        p.line_segment([a, b], stroke(1.0 + crack, col));
     }
 
     // The shut mouth: a dark line where the lips meet
-    if jaw <= 0.1 && burst < 0.05 && lips.len() > 1 {
+    if jaw <= 0.1 && fly < 0.02 && lips.len() > 1 {
         let seam: Vec<Pos2> = lips
             .iter()
             .map(|&(up, down)| project([(up[0] + down[0]) / 2.0, (up[1] + down[1]) / 2.0, (up[2] + down[2]) / 2.0]).0)
@@ -423,22 +466,33 @@ pub fn face(ui: &mut Ui, rect: Rect, song: &Song, live: &Live, now: f64) {
     }
 
     // Eyes: they glow with the beat, burn in the build-up and blaze on the drop
-    let eye_glow = (0.35 + 0.7 * kick + 1.4 * build + if screaming { 2.0 } else { 0.0 }) * (0.3 + 0.7 * fade);
-    let eye_col = if screaming || build > 0.6 {
-        mix(RED, Color32::WHITE, 0.3)
-    } else {
-        mix(tint, Color32::WHITE, 0.5)
-    };
+    let eye_glow = (0.35 + 0.7 * kick + 1.4 * build + 2.0 * scream.max(laser)) * (0.3 + 0.7 * fade);
+    let eye_col = mix(
+        mix(tint, Color32::WHITE, 0.5),
+        mix(RED, Color32::WHITE, 0.3),
+        (build * 1.6 - 0.6).max(laser).clamp(0.0, 1.0),
+    );
+    // Lasers: charging late in the build-up, full blast on the drop, sweeping slowly
+    let blast = laser.max(((build - 0.75) / 0.25).clamp(0.0, 1.0) * 0.3) * (0.85 + 0.15 * kick);
+    let reach = rect.width().hypot(rect.height());
     for side in [-1.0f32, 1.0] {
         let [x, y, z] = head(column_at(0.25 * side, -0.1), -0.1, 0.0);
         let (eye, _) = project(rotate([x, y, z + 0.02], yaw, pitch));
         halo(&p, eye, size * (0.12 + 0.05 * eye_glow.min(3.0)), eye_col, 0.25 * eye_glow);
-        p.circle_filled(eye, size * 0.026 * (1.0 + eye_glow * 0.2), mix(eye_col, Color32::WHITE, 0.6));
-        // Beams when they blaze
-        if eye_glow > 1.6 {
-            let dir = vec2(side * 0.35, 1.0) * size * 2.0;
-            p.line_segment([eye, eye + dir], stroke(2.0, alpha(eye_col, (eye_glow - 1.6) * 0.25)));
+        if blast > 0.01 {
+            let a = side * (0.55 + 0.2 * (t * 1.3 + side).sin());
+            let dir = vec2(a.sin(), a.cos());
+            let w = size * 0.035;
+            beam(&p, eye, dir, reach, w * 5.0, size * 0.9, RED, 0.35 * blast);
+            beam(&p, eye, dir, reach, w * 2.2, size * 0.4, mix(RED, hot, 0.5), 0.7 * blast);
+            beam(&p, eye, dir, reach, w * 0.8, size * 0.1, mix(eye_col, Color32::WHITE, 0.6), blast);
+            // A flare across the eye
+            for flare in [vec2(1.0, 0.0), vec2(-1.0, 0.0)] {
+                beam(&p, eye, flare, size * 0.8 * blast, w * 0.5, 0.0, Color32::WHITE, 0.8 * blast);
+            }
+            halo(&p, eye, size * 0.5 * blast, eye_col, blast);
         }
+        p.circle_filled(eye, size * 0.026 * (1.0 + eye_glow * 0.2), mix(eye_col, Color32::WHITE, 0.6));
     }
 
     crate::visual::energy_bar(&p, rect, energy, tint);
