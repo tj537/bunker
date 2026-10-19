@@ -62,6 +62,11 @@ pub fn generate(vibe: Vibe, m: &Macros, rng: &mut Rng) -> Song {
 
 /// A whole new groove that keeps the given tracks (the locked ones) as they are
 pub fn generate_keeping(vibe: Vibe, m: &Macros, rng: &mut Rng, keep: &[Option<Track>; TRACKS]) -> Song {
+    if vibe == Vibe::Custom {
+        let mut song = generate_keeping(vibe.rules(), m, rng, keep);
+        song.vibe = vibe;
+        return song;
+    }
     let mut song = Song::empty();
     song.vibe = vibe;
     song.macros = *m;
@@ -82,7 +87,7 @@ pub fn generate_keeping(vibe: Vibe, m: &Macros, rng: &mut Rng, keep: &[Option<Tr
     };
     song.prog = *rng.pick(match vibe {
         Vibe::Melodic | Vibe::Dub | Vibe::Rave => &[1u8, 3, 4, 1, 0][..],
-        Vibe::Hypnotic | Vibe::Minimal => &[0, 0, 0, 2, 6],
+        Vibe::Hypnotic | Vibe::Custom | Vibe::Minimal => &[0, 0, 0, 2, 6],
         Vibe::Peak => &[0, 1, 3],
         Vibe::Electro => &[0, 2, 5],
         Vibe::Acid | Vibe::Industrial | Vibe::Hard => &[0, 0, 6],
@@ -111,13 +116,14 @@ pub fn sound_for(v: Voice, vibe: Vibe, rng: &mut Rng) -> u8 {
 /// The sounds that suit the vibe on a track (some twice: more likely)
 fn sounds_for(v: Voice, vibe: Vibe) -> &'static [u8] {
     use Vibe::*;
+    let vibe = vibe.rules();
     match v {
         // 909, 808, Hard, Deep, Punch
         Voice::Kick => match vibe {
             Dub => &[3, 1, 3],
             Minimal => &[4, 0, 3],
             Melodic => &[0, 3, 4],
-            Hypnotic => &[0, 3, 0],
+            Hypnotic | Custom => &[0, 3, 0],
             Electro => &[1],
             Peak | Acid => &[0, 4, 0],
             Rave => &[2, 0],
@@ -128,7 +134,7 @@ fn sounds_for(v: Voice, vibe: Vibe) -> &'static [u8] {
         Voice::Clap => match vibe {
             Dub | Minimal => &[3, 0],
             Melodic => &[2, 0],
-            Hypnotic => &[0, 3],
+            Hypnotic | Custom => &[0, 3],
             Electro => &[1],
             Peak => &[0, 2],
             Acid => &[0, 1],
@@ -141,7 +147,7 @@ fn sounds_for(v: Voice, vibe: Vibe) -> &'static [u8] {
             Dub => &[0, 4],
             Minimal => &[0, 2, 4],
             Melodic => &[2, 0, 3],
-            Hypnotic => &[0, 3],
+            Hypnotic | Custom => &[0, 3],
             Electro => &[1, 2],
             Peak => &[0, 3],
             Acid => &[0, 1],
@@ -176,7 +182,7 @@ fn sounds_for(v: Voice, vibe: Vibe) -> &'static [u8] {
             Dub => &[1],
             Minimal => &[1, 3, 0],
             Melodic => &[1, 2],
-            Hypnotic => &[0, 2, 0],
+            Hypnotic | Custom => &[0, 2, 0],
             Electro => &[3, 1],
             Peak => &[0, 3],
             Acid => &[0, 1],
@@ -189,7 +195,7 @@ fn sounds_for(v: Voice, vibe: Vibe) -> &'static [u8] {
             Dub => &[2],
             Minimal => &[3, 1, 2],
             Melodic => &[3, 3, 2],
-            Hypnotic => &[0, 3, 2],
+            Hypnotic | Custom => &[0, 3, 2],
             Electro => &[1, 3],
             Peak => &[2, 0],
             Acid => &[0, 1, 0],
@@ -202,6 +208,7 @@ fn sounds_for(v: Voice, vibe: Vibe) -> &'static [u8] {
 
 /// A fresh pattern for one track that fits the vibe (keeps the track's sound)
 pub fn track_for(v: Voice, vibe: Vibe, energy: f32, song: &Song, rng: &mut Rng) -> Track {
+    let vibe = vibe.rules();
     let e = energy.clamp(0.0, 1.0);
     let old = *song.track(v);
     let sound = old.sound;
@@ -419,7 +426,7 @@ fn bass(vibe: Vibe, e: f32, song: &Song, rng: &mut Rng) -> Track {
     let scale = song.scale;
     // Rolling bass lives between the kicks
     let template: &[usize] = match vibe {
-        Vibe::Hypnotic | Vibe::Industrial => {
+        Vibe::Hypnotic | Vibe::Custom | Vibe::Industrial => {
             if rng.chance(0.6) {
                 &[1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15]
             } else {

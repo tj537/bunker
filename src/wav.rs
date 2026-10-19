@@ -1,9 +1,19 @@
-//! WAV export: 16-bit stereo PCM, written by hand (the format is tiny).
+//! WAV files: 16-bit stereo PCM, written by hand (the format is tiny).
 
 use std::io::{self, Write};
 use std::path::Path;
 
+/// A float sample as 16 bits
+pub fn to_i16(s: f32) -> i16 {
+    (s.clamp(-1.0, 1.0) * 32767.0).round() as i16
+}
+
+#[cfg(test)]
 pub fn encode(samples: &[f32], sr: u32) -> Vec<u8> {
+    encode_i16(&samples.iter().map(|&s| to_i16(s)).collect::<Vec<_>>(), sr)
+}
+
+pub fn encode_i16(samples: &[i16], sr: u32) -> Vec<u8> {
     let data_len = (samples.len() * 2) as u32;
     let mut out = Vec::with_capacity(44 + data_len as usize);
     out.extend_from_slice(b"RIFF");
@@ -18,21 +28,24 @@ pub fn encode(samples: &[f32], sr: u32) -> Vec<u8> {
     out.extend_from_slice(&16u16.to_le_bytes()); // bits
     out.extend_from_slice(b"data");
     out.extend_from_slice(&data_len.to_le_bytes());
-    for &s in samples {
-        let v = (s.clamp(-1.0, 1.0) * 32767.0).round() as i16;
+    for &v in samples {
         out.extend_from_slice(&v.to_le_bytes());
     }
     out
 }
 
-pub fn write(path: &Path, samples: &[f32], sr: u32) -> io::Result<()> {
+pub fn write_i16(path: &Path, samples: &[i16], sr: u32) -> io::Result<()> {
     let mut f = std::fs::File::create(path)?;
-    f.write_all(&encode(samples, sr))
+    f.write_all(&encode_i16(samples, sr))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn write(path: &Path, samples: &[f32], sr: u32) -> io::Result<()> {
+        std::fs::write(path, encode(samples, sr))
+    }
 
     #[test]
     fn header_is_valid() {

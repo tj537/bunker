@@ -185,6 +185,8 @@ pub enum Vibe {
     Rave,
     Industrial,
     Hard,
+    /// Starts empty – you build the groove; shuffle and auto mode use hypnotic rules
+    Custom,
 }
 
 impl Vibe {
@@ -214,6 +216,7 @@ impl Vibe {
             Vibe::Rave => "Rave",
             Vibe::Industrial => "Industrial",
             Vibe::Hard => "Hard",
+            Vibe::Custom => "Custom",
         }
     }
 
@@ -229,6 +232,7 @@ impl Vibe {
             Vibe::Rave => "90s hoovers, stabs and a reese bass",
             Vibe::Industrial => "Fast, dark and distorted",
             Vibe::Hard => "Distorted kicks and a donk bass, 150 BPM",
+            Vibe::Custom => "An empty pattern – paint your own groove",
         }
     }
 
@@ -245,6 +249,16 @@ impl Vibe {
             Vibe::Rave => (138.0, 145.0),
             Vibe::Industrial => (138.0, 146.0),
             Vibe::Hard => (148.0, 156.0),
+            Vibe::Custom => (126.0, 132.0),
+        }
+    }
+
+    /// The vibe whose rules shuffle and the auto mode follow (custom plays like hypnotic)
+    pub fn rules(self) -> Vibe {
+        if self == Vibe::Custom {
+            Vibe::Hypnotic
+        } else {
+            self
         }
     }
 
@@ -328,14 +342,6 @@ pub const MOODS: [(&str, &str, Scale, u8); 5] = [
     ("Deep", "Warm and soulful", Scale::Dorian, 2),
     ("Sad", "Melancholic, two chords that long for each other", Scale::Minor, 1),
     ("Euphoric", "Big uplifting chords, hands in the air", Scale::Minor, 3),
-];
-
-/// Swing presets: how late every second 16th lands
-pub const SWINGS: [(&str, &str, f32); 4] = [
-    ("Straight", "Every note right on the grid – driving, mechanical", 0.0),
-    ("Loose", "A touch of human feel", 0.18),
-    ("Bouncy", "Clearly swinging – house and minimal", 0.4),
-    ("Shuffle", "Full triplet shuffle – rolling and lazy", 0.67),
 ];
 
 /// The master section: three-band EQ and drive, each 0…1 (0.5 = flat)
@@ -508,12 +514,6 @@ impl Song {
         MOODS
             .iter()
             .position(|&(_, _, scale, prog)| scale == self.scale && prog == self.prog)
-    }
-
-    /// The swing preset closest to the song's swing
-    pub fn swing_preset(&self) -> usize {
-        let d = |i: usize| (SWINGS[i].2 - self.swing).abs();
-        (0..SWINGS.len()).min_by(|&a, &b| d(a).total_cmp(&d(b))).unwrap_or(0)
     }
 
     pub fn sound_name(&self, v: Voice) -> &'static str {

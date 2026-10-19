@@ -2,7 +2,7 @@
 //! below, sound knobs, auto mode and live effects.
 
 use crate::audio::{self, Audio};
-use crate::engine::{self, Arrangement, Cmd, Event, Fx, Shared};
+use crate::engine::{Arrangement, Cmd, Event, Fx, Shared};
 use crate::file::{self, BunkerFile};
 use crate::form::FORMS;
 use crate::gen;
@@ -10,7 +10,7 @@ use crate::midi::{Midi, MidiIn};
 use crate::orbit::{self, Live, Paint};
 use crate::pads;
 use crate::rng::Rng;
-use crate::song::{Song, Track, Vibe, Voice, MOODS, STEPS, SWINGS, TRACKS};
+use crate::song::{Song, Step, Track, Vibe, Voice, MOODS, STEPS, TRACKS};
 use crate::theme::*;
 use crate::update::{self, Release};
 use crate::visual;
@@ -71,10 +71,11 @@ pub enum View {
     Pads,
 }
 
+/// The recording of a song (SONG): offered for saving when it ends
 enum Export {
     Closed,
-    Open { bars: u32 },
-    Rendering(Receiver<Result<PathBuf, String>>),
+    Recorded,
+    Saving(Receiver<Result<PathBuf, String>>),
 }
 
 pub struct BunkerApp {
@@ -106,6 +107,10 @@ pub struct BunkerApp {
     fx_sent: [bool; 6],
     key_down: [bool; TRACKS],
     export: Export,
+    /// Song mode: the performance as 16-bit stereo, its sample rate, and whether it's still coming in
+    recording: Vec<i16>,
+    rec_sr: u32,
+    rec_live: bool,
     pub help: bool,
     audio_failed: Arc<AtomicBool>,
     audio_device: Option<String>,
@@ -217,6 +222,9 @@ impl BunkerApp {
             fx_sent: [false; 6],
             key_down: [false; TRACKS],
             export: Export::Closed,
+            recording: Vec::new(),
+            rec_sr: 44_100,
+            rec_live: false,
             help: false,
             audio_device: if with_audio { audio::default_device_name() } else { None },
             audio_failed,
@@ -360,6 +368,10 @@ impl BunkerApp {
 
     /// Song mode: play a form with the patterns, from the top
     fn start_song(&mut self, form: usize, now: f64) {
+        // Everything you hear from here on is recorded, to save as a WAV at the end
+        self.recording.clear();
+        self.rec_live = true;
+        self.rec_sr = self.audio.as_ref().map_or(44_100, |a| a.sample_rate);
         self.song.auto = false;
         self.song.curve = true;
         self.song_fallback = self.song;
@@ -488,7 +500,7 @@ impl BunkerApp {
         self.solo = None;
         // A new groove is not the scene it was rolled in – keep the scene as it was
         let keep = if self.slot_now.take().is_some() || self.slots.iter().any(|s| s.is_some()) {
-            " · click an empty scene to keep it"
+            " · click an empty pattern to keep it"
         } else {
             ""
         };
@@ -496,6 +508,21 @@ impl BunkerApp {
             format!("{} · {} · {} BPM{keep}", vibe.name(), self.song.root_name(), self.song.bpm),
             now,
         );
+    }
+
+    /// The custom vibe: every track empty (locked ones stay), sounds, mood and tempo stay
+    fn custom(&mut self, now: f64) {
+        let mut s = self.song;
+        s.vibe = Vibe::Custom;
+        for t in s.tracks.iter_mut().filter(|t| !t.lock) {
+            t.steps = [Step::default(); STEPS];
+            t.len = STEPS as u8;
+            t.mute = false;
+        }
+        self.song = s;
+        self.solo = None;
+        self.slot_now = None;
+        self.say("Custom – an empty pattern: click the rings to paint your groove", now);
     }
 
     /// Energy by hand: the auto mode's curve lets go
@@ -559,7 +586,23 @@ impl BunkerApp {
     // ───────────── Per-frame state from the engine ─────────────
 
     fn sync(&mut self, ctx: &egui::Context, now: f64, dt: f32) -> Live {
-        while let Ok(Event::Song(song, change)) = self.events.try_recv() {
+        while let Ok(ev) = self.events.try_recv() {
+            let (song, change) = match ev {
+                Event::Song(song, change) => (song, change),
+                Event::Audio(piece) => {
+                    if self.rec_live {
+                        self.recording.extend(piece.iter().map(|&s| crate::wav::to_i16(s)));
+                    }
+                    continue;
+                }
+                Event::Recorded => {
+                    // At least two seconds: worth keeping
+                    if std::mem::take(&mut self.rec_live) && self.recording.len() > self.rec_sr as usize * 4 {
+                        self.export = Export::Recorded;
+                    }
+                    continue;
+                }
+            };
             self.song = *song;
             self.sent = self.song;
             if let Some(c) = change {
@@ -694,9 +737,6 @@ impl BunkerApp {
                     self.toggle_visual(ctx);
                 }
                 self.help = false;
-                if matches!(self.export, Export::Open { .. }) {
-                    self.export = Export::Closed;
-                }
                 continue;
             }
             if let Some(i) = pad_keys.iter().position(|&k| k == key) {
@@ -804,7 +844,6 @@ impl BunkerApp {
                 ui.menu_button(egui::RichText::new(format!("{}  File", ph::FOLDER_SIMPLE)).font(bold(13.0)), |ui| {
                     ui.set_min_width(230.0);
                     for (i, label) in [
-                        format!("{}  Export audio (WAV)…", ph::WAVEFORM),
                         format!("{}  Save as .bunker file…", ph::FLOPPY_DISK),
                         format!("{}  Open .bunker file…", ph::FOLDER_OPEN),
                     ]
@@ -823,9 +862,8 @@ impl BunkerApp {
                     );
                 });
                 match action {
-                    Some(0) => self.export = Export::Open { bars: 16 },
-                    Some(1) => self.save_file(now),
-                    Some(2) => self.open_file(None, now),
+                    Some(0) => self.save_file(now),
+                    Some(1) => self.open_file(None, now),
                     _ => {}
                 }
                 for (icon, tip, is_redo) in [
@@ -854,21 +892,26 @@ impl BunkerApp {
                 } else {
                     "No MIDI keyboard connected".into()
                 });
-                // Sound output: quiet when it works, red when it doesn't
+                // Sound output and volume: click for the slider, scroll on it; red when there is no sound
+                // (tests and screenshots run without a sound card)
                 match &self.audio {
-                    Ok(a) => ui
-                        .label(egui::RichText::new(ph::SPEAKER_HIGH).size(19.0).color(FAINT))
-                        .on_hover_text(format!("Sound: {} · {} Hz", a.device, a.sample_rate)),
-                    // (Tests and screenshots run without a sound card)
-                    Err(_) if !self.with_devices => ui.label(""),
-                    Err(e) => ui
-                        .label(
+                    Err(e) if self.with_devices => {
+                        let e = e.clone();
+                        ui.label(
                             egui::RichText::new(format!("{}  No sound", ph::SPEAKER_SLASH))
                                 .font(bold(13.0))
                                 .color(RED),
                         )
-                        .on_hover_text(e.to_string()),
-                };
+                        .on_hover_text(e);
+                    }
+                    audio => {
+                        let device = audio
+                            .as_ref()
+                            .map(|a| format!("{} · {} Hz", a.device, a.sample_rate))
+                            .unwrap_or_default();
+                        self.volume_button(ui, &device);
+                    }
+                }
                 ui.add_space(8.0);
                 if chip(ui, ph::MONITOR_PLAY, self.visual, ACID)
                     .on_hover_text("Visualizer: the whole screen becomes a light show (P)")
@@ -909,7 +952,10 @@ impl BunkerApp {
         }
         egui::popup_below_widget(ui, popup, &resp, egui::PopupCloseBehavior::CloseOnClick, |ui| {
             ui.set_min_width(320.0);
-            for v in Vibe::ALL {
+            for v in Vibe::ALL.into_iter().chain([Vibe::Custom]) {
+                if v == Vibe::Custom {
+                    ui.separator();
+                }
                 let (lo, hi) = v.bpm();
                 let mut job = egui::text::LayoutJob::default();
                 let fmt = |font, color| egui::TextFormat {
@@ -918,10 +964,16 @@ impl BunkerApp {
                     ..Default::default()
                 };
                 job.append(v.name(), 0.0, fmt(bold(13.5), if v == vibe { ACID } else { TEXT }));
-                job.append(&format!("   {lo:.0}–{hi:.0} BPM\n"), 0.0, fmt(body(11.0), FAINT));
-                job.append(v.blurb(), 0.0, fmt(body(11.5), DIM));
+                if v != Vibe::Custom {
+                    job.append(&format!("   {lo:.0}–{hi:.0} BPM"), 0.0, fmt(body(11.0), FAINT));
+                }
+                job.append(&format!("\n{}", v.blurb()), 0.0, fmt(body(11.5), DIM));
                 if ui.selectable_label(v == vibe, job).clicked() {
-                    self.shuffle(v, now);
+                    if v == Vibe::Custom {
+                        self.custom(now);
+                    } else {
+                        self.shuffle(v, now);
+                    }
                 }
             }
         });
@@ -937,6 +989,52 @@ impl BunkerApp {
         {
             self.shuffle(self.song.vibe, now);
         }
+    }
+
+    /// The speaker in the top bar: master volume (click: slider, scroll: up and down)
+    fn volume_button(&mut self, ui: &mut Ui, device: &str) {
+        let v = self.song.master;
+        let icon = if v < 0.01 {
+            ph::SPEAKER_X
+        } else if v < 0.5 {
+            ph::SPEAKER_LOW
+        } else {
+            ph::SPEAKER_HIGH
+        };
+        let resp = ui
+            .add(egui::Button::new(egui::RichText::new(icon).size(19.0).color(DIM)).frame(false))
+            .on_hover_text(format!(
+                "Volume {:.0} – click for the slider, or scroll\nSound: {device}",
+                v * 100.0
+            ))
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        if resp.hovered() {
+            let s = ui.input(|i| i.raw_scroll_delta.y);
+            if s != 0.0 {
+                self.song.master = (self.song.master + s * 0.002).clamp(0.0, 1.0);
+            }
+        }
+        let popup = ui.make_persistent_id("volume");
+        if resp.clicked() {
+            ui.memory_mut(|m| m.toggle_popup(popup));
+        }
+        egui::popup_below_widget(ui, popup, &resp, egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
+            ui.set_min_width(220.0);
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Volume").font(bold(12.5)).color(TEXT));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        egui::RichText::new(format!("{:.0}", self.song.master * 100.0))
+                            .font(bold(12.0))
+                            .color(FAINT),
+                    );
+                });
+            });
+            widgets::bar_slider(ui, &mut self.song.master, 210.0, TEXT);
+            if !device.is_empty() {
+                ui.label(egui::RichText::new(device).font(body(11.0)).color(FAINT));
+            }
+        });
     }
 
     fn bpm_box(&mut self, ui: &mut Ui) {
@@ -1283,33 +1381,6 @@ impl BunkerApp {
                 ui.label(egui::RichText::new(format!("{tr:+}")).font(bold(12.0)).color(ACID))
                     .on_hover_text("Transposed by the MIDI keyboard");
             }
-        });
-        ui.add_space(4.0);
-        heading(ui, "GROOVE");
-        let feel = self.song.swing_preset();
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            let cw = (full_w - 12.0) / 4.0;
-            for (k, &(name, blurb, swing)) in SWINGS.iter().enumerate() {
-                if chip_small(ui, name, feel == k, ACID, cw).on_hover_text(blurb).clicked() {
-                    self.song.swing = swing;
-                }
-            }
-        });
-        let w = ui.available_width() - 100.0;
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            ui.add_sized(
-                vec2(52.0, 22.0),
-                egui::Label::new(egui::RichText::new("Volume").font(body(12.5)).color(DIM)).sense(Sense::hover()),
-            )
-            .on_hover_text("Master volume");
-            widgets::bar_slider(ui, &mut self.song.master, w, TEXT);
-            ui.label(
-                egui::RichText::new(format!("{:.0}", self.song.master * 100.0))
-                    .font(bold(11.0))
-                    .color(FAINT),
-            );
         });
         // Output level
         let level = self.shared.level().min(1.0);
@@ -1663,18 +1734,6 @@ impl BunkerApp {
                             if current || queued { TEXT } else { DIM },
                         );
                     }
-                    // Tiny dots: which tracks play in this pattern
-                    let dots_w = (r.width() - 20.0).min(80.0);
-                    for (t, v) in Voice::ALL.into_iter().enumerate() {
-                        let tr = song.tracks[t];
-                        let x = r.left() + 10.0 + t as f32 * dots_w / 7.0;
-                        let c = if tr.mute || tr.hits() == 0 {
-                            alpha(FAINT, 0.5)
-                        } else {
-                            track_color(v)
-                        };
-                        p.circle_filled(pos2(x, r.bottom() - 9.0), 2.2, c);
-                    }
                 }
                 None => {
                     p.rect_stroke(r, 10.0, stroke(1.0, if hot { FAINT } else { LINE }), egui::StrokeKind::Inside);
@@ -1875,72 +1934,68 @@ impl BunkerApp {
         }
     }
 
+    /// A recorded song: save it as a WAV or let it go
     fn export_window(&mut self, ctx: &egui::Context, now: f64) {
+        let mut save = false;
         let mut close = false;
-        let mut start: Option<u32> = None;
-        match &mut self.export {
+        match &self.export {
             Export::Closed => return,
-            Export::Open { bars } => {
-                egui::Window::new("Export WAV")
+            Export::Recorded => {
+                let secs = self.recording.len() as f32 / 2.0 / self.rec_sr as f32;
+                egui::Window::new("Your song is recorded")
                     .collapsible(false)
                     .resizable(false)
                     .anchor(Align2::CENTER_CENTER, vec2(0.0, 0.0))
                     .show(ctx, |ui| {
-                        ui.label(egui::RichText::new("How long should the recording be?").color(DIM));
-                        ui.horizontal(|ui| {
-                            for b in [4u32, 8, 16, 32, 64] {
-                                if chip(ui, &format!("{b} bars"), *bars == b, ACID).clicked() {
-                                    *bars = b;
-                                }
-                            }
-                        });
-                        let secs = *bars as f32 * 4.0 * 60.0 / self.song.bpm;
-                        let auto = if self.song.auto { " · auto mode included" } else { "" };
                         ui.label(
-                            egui::RichText::new(format!("{:.0} seconds · 44.1 kHz stereo{auto}", secs))
-                                .font(body(12.0))
-                                .color(FAINT),
+                            egui::RichText::new(format!(
+                                "{}:{:02} · everything you heard, live moves included · {} Hz stereo",
+                                secs as u32 / 60,
+                                secs as u32 % 60,
+                                self.rec_sr
+                            ))
+                            .color(DIM),
                         );
                         ui.add_space(6.0);
                         ui.horizontal(|ui| {
                             if ui
-                                .button(egui::RichText::new(format!("{}  Save…", ph::DOWNLOAD_SIMPLE)).font(bold(14.0)))
+                                .button(egui::RichText::new(format!("{}  Save WAV…", ph::DOWNLOAD_SIMPLE)).font(bold(14.0)))
                                 .clicked()
                             {
-                                start = Some(*bars);
+                                save = true;
                             }
-                            if ui.button("Cancel").clicked() {
+                            if ui.button("Discard").clicked() {
                                 close = true;
                             }
                         });
                     });
             }
-            Export::Rendering(rx) => match rx.try_recv() {
+            Export::Saving(rx) => match rx.try_recv() {
                 Ok(Ok(path)) => {
                     let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
                     self.say(format!("Saved {name}"), now);
                     close = true;
                 }
                 Ok(Err(e)) => {
-                    self.say(format!("Export failed: {e}"), now);
+                    self.say(format!("Could not save: {e}"), now);
                     close = true;
                 }
                 Err(_) => {
-                    egui::Window::new("Export WAV")
+                    egui::Window::new("Saving")
                         .collapsible(false)
                         .resizable(false)
                         .anchor(Align2::CENTER_CENTER, vec2(0.0, 0.0))
                         .show(ctx, |ui| {
                             ui.horizontal(|ui| {
                                 ui.spinner();
-                                ui.label("Rendering…");
+                                ui.label("Writing the WAV…");
                             });
                         });
                     ctx.request_repaint_after(std::time::Duration::from_millis(100));
                 }
             },
         }
-        if let Some(bars) = start {
+        if save {
             let name = format!(
                 "bunker-{}-{:.0}bpm.wav",
                 self.song.vibe.name().to_lowercase().replace(' ', "-"),
@@ -1952,16 +2007,16 @@ impl BunkerApp {
                 .save_file()
             {
                 let (tx, rx) = channel();
-                let song = self.song;
+                let samples = std::mem::take(&mut self.recording);
+                let sr = self.rec_sr;
                 std::thread::spawn(move || {
-                    let sr = 44_100;
-                    let buf = engine::render_offline(&song, bars, sr, 1);
-                    let _ = tx.send(crate::wav::write(&path, &buf, sr).map(|_| path).map_err(|e| e.to_string()));
+                    let _ = tx.send(crate::wav::write_i16(&path, &samples, sr).map(|_| path).map_err(|e| e.to_string()));
                 });
-                self.export = Export::Rendering(rx);
+                self.export = Export::Saving(rx);
             }
         } else if close {
             self.export = Export::Closed;
+            self.recording = Vec::new();
         }
     }
 
@@ -1989,13 +2044,13 @@ impl BunkerApp {
                     row(ui, ph::PLAY, "Press play", "Space or the button in the middle. Pick a vibe in the list at the top – each pick rolls a fresh groove in that style. SHUFFLE rolls again.");
                     row(ui, ph::CIRCLES_THREE, "The orbit", "Each ring is one sound, each dot one step. Click to switch a dot on or off, drag to paint. Right-click: accent (on the synth: slide). Scroll on bass/synth dots to change the note. Shift-click: chance.");
                     row(ui, ph::LIST, "Tracks", "S solos a track, the speaker mutes it, the dice rolls a new rhythm for just that track (right-click: clear), the lock keeps shuffle, vibes, dice and auto mode away from it. The coloured pill is its sound – click it for the list, tune and decay, or scroll on it. The number is the loop length: under 16 it drifts against the beat.");
-                    row(ui, ph::MUSIC_NOTES, "Mood & groove", "MOOD picks which notes and chords bass and synth play – Dark, Hypnotic, Deep, Sad or Euphoric – and gives them fitting new notes. Pitch moves them lower or higher. GROOVE: Straight, Loose, Bouncy or Shuffle.");
+                    row(ui, ph::MUSIC_NOTES, "Mood", "MOOD picks which notes and chords bass and synth play – Dark, Hypnotic, Deep, Sad or Euphoric – and gives them fitting new notes. Pitch moves them lower or higher. The speaker at the top sets the volume.");
                     row(ui, ph::STACK, "Patterns & song", "Four memory slots under the orbit. Click + to keep what you hear, click a full pattern to switch – while playing it comes in on the next bar, with a clap roll. The lit one keeps your changes. SONG turns your patterns into a whole track (Short, Club or Hypnotic): intro, groove, break, drop, outro – Bunker steers the energy, you jam along. Click a part in the strip to jump there.");
-                    row(ui, ph::INFINITY, "Auto mode", "Bunker changes something every 2, 4 or 8 bars – patterns, sounds, notes, fills – and every 32 bars plays a breakdown, a build-up and a drop. Sometimes the drop starts a new chapter with a new bassline or key. With CURVE on the energy fader it also moves the energy; touch the fader to take over.");
+                    row(ui, ph::INFINITY, "Auto mode", "Bunker changes something every 2, 4 or 8 bars – patterns, sounds, notes, fills – and every 32 to 64 bars plays a breakdown, a build-up (each time a bit different) and a drop. Sometimes the drop starts a new chapter with a new bassline or key. A drop you play by hand makes the next automatic one wait. With CURVE on the energy fader it also moves the energy; touch the fader to take over.");
                     row(ui, ph::SLIDERS, "Sound & master", "DARK closes the sound and adds rumble. ACID opens the synth filter. SPACE: reverb and echo. PUMP ducks everything under the kick. MASTER: low, mid and high EQ and drive for the whole mix.");
                     row(ui, ph::LIGHTNING, "Live effects", "ENERGY strips the groove down or builds it up (← →) – pull it down, hit DROP and everything comes back. Pushed up to 90 or more, the fader starts the build-up itself – the drop lands two bars after the next bar starts. FILTER springs back when you let go. Hold STUTTER (Q), ECHO (W), WASH (E), CRUSH (X), GATE (C) or TAPE STOP (V) – combine them.");
                     row(ui, ph::MONITOR_PLAY, "Visualizer", "P turns the window into a fullscreen light show – all keys keep working. Esc goes back.");
-                    row(ui, ph::FOLDER_SIMPLE, "Files", "File → Save as .bunker keeps the groove and the four patterns in one file. Open it from the menu or drag it onto the window. File → Export audio writes a WAV.");
+                    row(ui, ph::FOLDER_SIMPLE, "Files", "File → Save as .bunker keeps the groove and the four patterns in one file. Open it from the menu or drag it onto the window. A song played with SONG is recorded – when it ends (or you stop it), save it as a WAV.");
                     row(ui, ph::GRID_FOUR, "Pads", "Tab switches to big pads and a classic grid. Hit RECORD and play along – your hits land on the beat.");
                     row(ui, ph::ARROW_COUNTER_CLOCKWISE, "Undo", "⌘/Ctrl + Z takes back any change – a shuffle too. ⌘/Ctrl + Shift + Z redoes it.");
                     row(ui, ph::KEYBOARD, "Keyboard", "Space play · Enter shuffle · A–K pads · 1–8 mute · ← → energy · B drop · Q W E  X C V effects (hold) · R record · Tab orbit/pads · P visuals · ⌘/Ctrl Z undo");

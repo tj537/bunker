@@ -79,6 +79,17 @@ impl Geometry {
         self.r_in + (track as f32 + 0.5) * self.spacing()
     }
 
+    /// Dots drawn on a ring: a loop that fits into the bar (8, 4, 2 …) is drawn repeated
+    /// all the way round, so it turns with the beam; a real polyrhythm (12, 15 …) gets its own
+    pub fn shown(len: usize) -> usize {
+        let len = len.max(1);
+        if STEPS.is_multiple_of(len) {
+            STEPS
+        } else {
+            len
+        }
+    }
+
     pub fn angle(step: usize, len: usize) -> f32 {
         -PI / 2.0 + TAU * step as f32 / len.max(1) as f32
     }
@@ -102,10 +113,11 @@ impl Geometry {
         }
         let track = (((dist - self.r_in) / self.spacing()) as usize).min(TRACKS - 1);
         let len = (song.tracks[track].len as usize).max(1);
+        let shown = Self::shown(len);
         let a = (d.y.atan2(d.x) + PI / 2.0).rem_euclid(TAU);
-        let step = ((a / TAU * len as f32).round() as usize) % len;
-        let dot = self.dot(track, step, len);
-        (dot.distance(p) < self.dot_radius(track, len) * 2.0).then_some((track, step))
+        let k = ((a / TAU * shown as f32).round() as usize) % shown;
+        let dot = self.dot(track, k, shown);
+        (dot.distance(p) < self.dot_radius(track, shown) * 2.0).then_some((track, k % len))
     }
 }
 
@@ -225,18 +237,20 @@ pub fn orbit(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mut 
 
     for (t, voice) in Voice::ALL.into_iter().enumerate() {
         let track = &song.tracks[t];
-        let len = track.len as usize;
+        let len = (track.len as usize).max(1);
+        let shown = Geometry::shown(len);
         let color = track_color(voice);
         let r = g.ring(t);
         let flash = live.flash(t);
         let muted = track.mute;
         let base = if muted { 0.07 } else { 0.16 + flash * 0.4 };
         p.circle_stroke(g.c, r, stroke(1.0 + flash * 1.5, alpha(color, base)));
-        let current = live.playing.then(|| track.step_at(live.step()));
-        let dr = g.dot_radius(t, len);
+        // The dot playing now, in drawn positions
+        let current = live.playing.then(|| (live.step() % shown as u64) as usize);
+        let dr = g.dot_radius(t, shown);
         if track.lock {
             // Locked: a small lock between the first two steps
-            let a = Geometry::angle(0, len) + TAU / len.max(1) as f32 / 2.0;
+            let a = Geometry::angle(0, shown) + TAU / shown as f32 / 2.0;
             let at = g.c + vec2(a.cos(), a.sin()) * r;
             p.text(
                 at,
@@ -247,11 +261,12 @@ pub fn orbit(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mut 
             );
         }
 
-        for s in 0..len {
+        for k in 0..shown {
+            let s = k % len;
             let step = track.steps[s];
-            let at = g.dot(t, s, len);
+            let at = g.dot(t, k, shown);
             let is_hover = hovered == Some((t, s));
-            let is_now = current == Some(s);
+            let is_now = current == Some(k);
             if step.on {
                 let strength = if muted { 0.25 } else { 0.45 + 0.55 * step.chance as f32 / 100.0 };
                 let rad = if step.accent { dr * 1.2 } else { dr };
@@ -260,8 +275,8 @@ pub fn orbit(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mut 
                 }
                 // Slides: a short line along the ring to the previous dot
                 if step.slide && s > 0 {
-                    let a0 = Geometry::angle(s - 1, len);
-                    let a1 = Geometry::angle(s, len);
+                    let a0 = Geometry::angle(k - 1, shown);
+                    let a1 = Geometry::angle(k, shown);
                     arc(&p, g.c, r, a0, a1, stroke(2.0, alpha(color, strength * 0.7)));
                 }
                 p.circle_filled(at, rad * (1.0 + if is_now { flash * 0.25 } else { 0.0 }), alpha(color, strength));
@@ -379,4 +394,25 @@ fn beam(p: &egui::Painter, c: Pos2, r0: f32, r1: f32, a: f32, build: f32) {
     p.add(mesh);
     let dir = vec2(a.cos(), a.sin());
     p.line_segment([c + dir * r0, c + dir * r1], stroke(1.5, alpha(tint, 0.35)));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loops_that_fit_the_bar_turn_with_the_beam() {
+        assert_eq!(Geometry::shown(16), 16);
+        assert_eq!(Geometry::shown(8), 16);
+        assert_eq!(Geometry::shown(4), 16);
+        assert_eq!(Geometry::shown(12), 12);
+        assert_eq!(Geometry::shown(15), 15);
+        // A click on the second copy of an 8-step loop edits the step it repeats
+        let g = Geometry::new(Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 800.0)));
+        let mut song = Song::empty();
+        let t = Voice::OpenHat.index();
+        song.tracks[t].len = 8;
+        let second_copy_of_step_2 = g.dot(t, 10, 16);
+        assert_eq!(g.hit(second_copy_of_step_2, &song), Some((t, 2)));
+    }
 }

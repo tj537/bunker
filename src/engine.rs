@@ -42,7 +42,24 @@ pub enum Cmd {
 
 pub enum Event {
     Song(Box<Song>, Option<Change>),
+    /// Song mode records what plays: the next piece of interleaved stereo
+    Audio(Vec<f32>),
+    /// The recording is complete (song over or stopped, plus the tail)
+    Recorded,
 }
+
+impl Event {
+    #[cfg(test)]
+    pub fn change(self) -> Option<Change> {
+        match self {
+            Event::Song(_, c) => c,
+            _ => None,
+        }
+    }
+}
+
+/// Samples per recorded piece sent to the UI
+const REC_CHUNK: usize = 32_768;
 
 /// The live effects you hold down
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -174,7 +191,30 @@ const VERB_SEND: [f32; TRACKS] = [0.04, 0.55, 0.4, 0.15, 0.3, 0.35, 0.0, 0.25];
 struct Build {
     start: u64,
     len: u64,
+    style: BuildStyle,
 }
+
+/// How a build-up sounds on top of the groove turning into it. DROP by hand is always
+/// classic; the auto mode and songs vary it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum BuildStyle {
+    /// A high-pass opens upwards
+    Classic,
+    /// A low-pass slowly closes, the drop throws it open
+    Lowpass,
+    /// The gate chops harder and harder
+    Gate,
+    /// Classic, and the last hits are thrown into the echo for the silence
+    Echo,
+}
+
+const STYLES: [BuildStyle; 5] = [
+    BuildStyle::Classic,
+    BuildStyle::Lowpass,
+    BuildStyle::Gate,
+    BuildStyle::Echo,
+    BuildStyle::Lowpass,
+];
 
 /// How much of the mix goes into the reverb at full wash
 const WASH_SEND: f32 = 1.2;
@@ -317,6 +357,9 @@ pub struct Engine {
     playing: bool,
     breakdown: Option<Breakdown>,
     plan: Plan,
+    /// Auto mode: the bar the current cycle started on and its length in bars
+    cycle_start: u64,
+    cycle_len: u64,
     fill: Option<(u64, Fill)>,
     arrangement: Option<Box<Arrangement>>,
     /// Song mode: the section playing, the bar it started on (`PENDING`: next bar) and a jump
@@ -392,6 +435,8 @@ pub struct Engine {
     build: Option<Build>,
     /// Build-up filter amount; it lets go quickly after the drop instead of jumping
     build_cut: f32,
+    /// The style of the last build-up – its filter lets go in the same style
+    cut_style: BuildStyle,
     riser_gain: f32,
     /// The energy was below the drop zone since the last drop
     zone_armed: bool,
@@ -401,6 +446,10 @@ pub struct Engine {
 
     shared: Arc<Shared>,
     events: Option<Sender<Event>>,
+    /// Song mode recording: on while a song plays, then `rec_tail` more frames for the reverb
+    recording: bool,
+    rec: Vec<f32>,
+    rec_tail: u32,
 }
 
 impl Engine {
@@ -411,6 +460,8 @@ impl Engine {
             playing: false,
             breakdown: None,
             plan: PLANS[0],
+            cycle_start: 0,
+            cycle_len: 32,
             fill: None,
             arrangement: None,
             section: 0,
@@ -472,6 +523,7 @@ impl Engine {
             stutter: None,
             build: None,
             build_cut: 0.0,
+            cut_style: BuildStyle::Classic,
             riser_gain: 0.0,
             zone_armed: false,
             transpose: 0,
@@ -479,6 +531,9 @@ impl Engine {
             peak: 0.0,
             shared,
             events,
+            recording: false,
+            rec: Vec::new(),
+            rec_tail: 0,
         }
     }
 
@@ -507,11 +562,14 @@ impl Engine {
                     self.half_fired = None;
                     self.fill = None;
                     self.plan = PLANS[0];
+                    self.cycle_start = 0;
+                    self.cycle_len = 32;
                 }
             }
             Cmd::Stop => {
                 self.playing = false;
                 self.arrangement = None;
+                self.end_recording();
                 self.queued = None;
                 self.shared.part.store(0, Ordering::Relaxed);
                 if self.breakdown.is_some() {
@@ -562,6 +620,7 @@ impl Engine {
                 if self.arrangement.take().is_some() && self.breakdown.is_some() {
                     self.end_breakdown();
                 }
+                self.end_recording();
                 self.shared.part.store(0, Ordering::Relaxed);
             }
             Cmd::Jump(i) => self.jump = Some(i),
@@ -616,6 +675,17 @@ impl Engine {
         self.build = Some(Build {
             start: next.div_ceil(STEPS as u64) * STEPS as u64,
             len: 2 * STEPS as u64,
+            style: BuildStyle::Classic,
+        });
+        self.send_song(Some(Change::Build));
+    }
+
+    /// A build-up the arrangement starts now (auto mode, song mode), in a random style
+    fn auto_build(&mut self, idx: u64) {
+        self.build = Some(Build {
+            start: idx,
+            len: 2 * STEPS as u64,
+            style: *self.auto_rng.pick(&STYLES),
         });
         self.send_song(Some(Change::Build));
     }
@@ -654,7 +724,7 @@ impl Engine {
         }
         self.breakdown = Some(Breakdown {
             start: idx,
-            len: (30 - plan.breakdown_at) * STEPS as u64,
+            len: (self.cycle_len - 2).saturating_sub(self.breakdown_at()).max(1) * STEPS as u64,
             out: plan.out,
             before,
             sweep: plan.sweep,
@@ -689,6 +759,7 @@ impl Engine {
         m.energy = m.energy.max(0.85);
         let mut change = Change::Drop;
         if self.song.auto {
+            self.new_cycle(self.bar_now);
             if self.auto_rng.chance(0.45) {
                 change = gen::new_chapter(&mut self.song, &mut self.auto_rng);
             } else {
@@ -753,11 +824,7 @@ impl Engine {
             }
         }
         if sec.part == Part::Break && played + 2 == n && self.build.is_none() {
-            self.build = Some(Build {
-                start: idx,
-                len: 2 * STEPS as u64,
-            });
-            self.send_song(Some(Change::Build));
+            self.auto_build(idx);
         } else if played + 1 == n && sec.part != Part::Break {
             // A clap roll into the next pattern
             let next = form.sections.get(self.section + 1).map(|nx| pattern_slot(nx.pattern, full));
@@ -779,6 +846,11 @@ impl Engine {
         let slot = pattern_slot(sec.pattern, a.patterns.map(|p| p.is_some()));
         let pattern = slot.and_then(|k| a.patterns[k]).unwrap_or(a.fallback);
         let first = self.section_start == PENDING;
+        if first && self.events.is_some() {
+            self.finish_recording();
+            self.recording = true;
+            self.rec = Vec::with_capacity(REC_CHUNK + 4096);
+        }
         // A jump out of a break: kick and bass come back, its build-up is off
         if self.breakdown.is_some() {
             self.restore_breakdown();
@@ -817,6 +889,51 @@ impl Engine {
         self.send_song(Some(Change::Part(sec.part, i, slot)));
     }
 
+    /// The song is over: two more seconds for the tail, then the recording is complete
+    fn end_recording(&mut self) {
+        if self.recording && self.rec_tail == 0 {
+            self.rec_tail = (self.sr * 2.0) as u32;
+        }
+    }
+
+    /// Send what's left of the recording and say it's complete
+    fn finish_recording(&mut self) {
+        if !self.recording {
+            return;
+        }
+        self.recording = false;
+        self.rec_tail = 0;
+        if let Some(tx) = &self.events {
+            let _ = tx.send(Event::Audio(std::mem::take(&mut self.rec)));
+            let _ = tx.send(Event::Recorded);
+        }
+    }
+
+    /// Song mode: keep what was just rendered
+    fn keep_recording(&mut self, out: &[f32]) {
+        if !self.recording {
+            return;
+        }
+        let frames = out.len() / 2;
+        let take = if self.rec_tail > 0 {
+            let n = frames.min(self.rec_tail as usize);
+            self.rec_tail -= n as u32;
+            n
+        } else {
+            frames
+        };
+        self.rec.extend_from_slice(&out[..take * 2]);
+        if self.rec.len() >= REC_CHUNK {
+            if let Some(tx) = &self.events {
+                let full = std::mem::replace(&mut self.rec, Vec::with_capacity(REC_CHUNK + 4096));
+                let _ = tx.send(Event::Audio(full));
+            }
+        }
+        if take < frames || (self.rec_tail == 0 && !self.playing) {
+            self.finish_recording();
+        }
+    }
+
     fn end_song(&mut self) {
         self.handle(Cmd::Stop);
         self.send_song(Some(Change::SongEnd));
@@ -825,25 +942,38 @@ impl Engine {
     /// Auto mode's energy: settles after the drop, rises towards the breakdown,
     /// drops low in it and climbs through the build-up
     fn curve_target(&self, b: u64) -> f32 {
-        let at = self.plan.breakdown_at;
+        let (at, build) = (self.breakdown_at(), self.cycle_len - 2);
         if b < 8 {
             0.95 - 0.35 * b as f32 / 8.0
         } else if b < at {
             0.6 + 0.32 * (b - 8) as f32 / (at - 8).max(1) as f32
-        } else if b < 30 {
+        } else if b < build {
             0.22
         } else {
-            0.4 + (b - 30) as f32 * 0.2
+            0.4 + (b - build) as f32 * 0.2
         }
+    }
+
+    /// Bar of the auto cycle where the breakdown starts – as far before its end as the plan says
+    fn breakdown_at(&self) -> u64 {
+        self.cycle_len - (32 - self.plan.breakdown_at)
+    }
+
+    /// A new auto cycle from `bar` on: another kind of breakdown and, in the calmer vibes,
+    /// sometimes a longer groove before it
+    fn new_cycle(&mut self, bar: u64) {
+        self.cycle_start = bar;
+        self.plan = PLANS[self.auto_rng.below(PLANS.len() as u32) as usize];
+        let lens: &[u64] = match self.song.vibe.rules() {
+            Vibe::Hypnotic | Vibe::Minimal | Vibe::Dub | Vibe::Melodic => &[32, 48, 64, 48],
+            _ => &[32, 32, 48],
+        };
+        self.cycle_len = *self.auto_rng.pick(lens);
     }
 
     /// Bar starts: drops, a waiting pattern, song mode, and in auto mode the arrangement
     fn new_bar(&mut self, idx: u64) {
         let bar = idx / STEPS as u64;
-        // Each 32-bar cycle picks another kind of breakdown
-        if self.song.auto && bar > 0 && bar.is_multiple_of(32) {
-            self.plan = PLANS[self.auto_rng.below(PLANS.len() as u32) as usize];
-        }
         self.bar_now = bar;
         let mut dropped = false;
         if let Some(b) = &self.build {
@@ -864,8 +994,12 @@ impl Engine {
         if dropped || !self.song.auto || bar == 0 {
             return;
         }
-        // 32-bar cycle: groove (changing every few bars, a fill every 8), breakdown, 2 bars build-up, drop
-        let b = bar % 32;
+        // A cycle of 32–64 bars: groove (changing every few bars, a fill every 8), breakdown,
+        // 2 bars build-up, drop. Every drop – also one by hand – starts the next cycle.
+        if bar < self.cycle_start || bar - self.cycle_start >= self.cycle_len {
+            self.new_cycle(bar);
+        }
+        let b = bar - self.cycle_start;
         if self.song.curve {
             let e = self.curve_target(b);
             if (e - self.song.macros.energy).abs() > 0.005 {
@@ -873,15 +1007,11 @@ impl Engine {
                 self.send_song(None);
             }
         }
-        let at = self.plan.breakdown_at;
-        if b == at {
+        let at = self.breakdown_at();
+        if b == at && self.build.is_none() {
             self.start_breakdown(idx);
-        } else if b == 30 && self.build.is_none() {
-            self.build = Some(Build {
-                start: idx,
-                len: 2 * STEPS as u64,
-            });
-            self.send_song(Some(Change::Build));
+        } else if b == self.cycle_len - 2 && self.build.is_none() {
+            self.auto_build(idx);
         } else if b < at && bar.is_multiple_of(self.song.auto_bars.max(1) as u64) {
             if let Some(change) = gen::evolve(&mut self.song, &mut self.auto_rng) {
                 self.send_song(Some(change));
@@ -899,6 +1029,12 @@ impl Engine {
         self.shared.step.store(idx, Ordering::Relaxed);
         let build = self.build_progress(idx as f64);
         let gap = self.in_drop_gap(idx as f64);
+        // Echo build-up: the last hits fly into the echo for the silence
+        if let Some(b) = &self.build {
+            if b.style == BuildStyle::Echo && idx == b.start + b.len - DROP_GAP {
+                self.throw = 1.0;
+            }
+        }
         let play_idx = match self.stutter {
             Some(origin) if idx >= origin => origin + (idx - origin) % 2,
             _ => idx,
@@ -1205,10 +1341,13 @@ impl Engine {
                 0.0
             };
             self.riser_gain += (riser_want - self.riser_gain) * 0.0015;
-            match build {
-                Some(p) => self.build_cut = p,
+            match (build, &self.build) {
+                (Some(p), Some(b)) => {
+                    self.build_cut = p;
+                    self.cut_style = b.style;
+                }
                 // After the drop the build-up filter lets go within a few milliseconds
-                None => self.build_cut *= 0.998,
+                _ => self.build_cut *= 0.998,
             }
             if self.riser_gain > 1e-4 {
                 let p = self.build_cut;
@@ -1274,11 +1413,18 @@ impl Engine {
                 r = self.filter_r.run(r).hp;
             }
             if self.build_cut > 0.002 {
-                let fc = 20.0 * 80f32.powf(self.build_cut);
+                // Classic and echo: a high-pass opens upwards; gate: a lighter one;
+                // low-pass: the sound closes down to a muffle
+                let cut = self.build_cut;
+                let (fc, low) = match self.cut_style {
+                    BuildStyle::Lowpass => (18_000.0 * 0.025f32.powf(cut), true),
+                    BuildStyle::Gate => (20.0 * 80f32.powf(cut * 0.6), false),
+                    BuildStyle::Classic | BuildStyle::Echo => (20.0 * 80f32.powf(cut), false),
+                };
                 self.build_hp_l.set(fc, 0.9, sr);
                 self.build_hp_r.set(fc, 0.9, sr);
-                l = self.build_hp_l.run(l).hp;
-                r = self.build_hp_r.run(r).hp;
+                let (ol, or) = (self.build_hp_l.run(l), self.build_hp_r.run(r));
+                (l, r) = if low { (ol.lp, or.lp) } else { (ol.hp, or.hp) };
             }
             l = self.tone_l.run(l).lp;
             r = self.tone_r.run(r).lp;
@@ -1296,8 +1442,13 @@ impl Engine {
                 l += (self.crush_hold.0 * 1.3 - l) * self.crush;
                 r += (self.crush_hold.1 * 1.3 - r) * self.crush;
             }
-            // Gate: open for the first half of every 16th
-            self.gate += ((if gate_on { 1.0 } else { 0.0 }) - self.gate) * 0.002;
+            // Gate: open for the first half of every 16th (a gate build-up chops harder and harder)
+            let build_gate = match build {
+                Some(p) if self.cut_style == BuildStyle::Gate => (p * 1.3).min(1.0),
+                _ => 0.0,
+            };
+            let gate_want = if gate_on { 1.0 } else { build_gate };
+            self.gate += (gate_want - self.gate) * 0.002;
             if self.gate > 0.002 {
                 let open = !self.playing || self.phase.fract() < 0.5;
                 self.gate_env += ((if open { 1.0 } else { 0.0 }) - self.gate_env) * 0.01;
@@ -1377,10 +1528,12 @@ impl Engine {
         self.shared.level.store(fallen.to_bits(), Ordering::Relaxed);
         self.peak = 0.0;
         self.shared.playing.store(self.playing, Ordering::Relaxed);
+        self.keep_recording(out);
     }
 }
 
-/// Render `bars` bars of the song (plus a reverb tail) into interleaved stereo
+/// Render `bars` bars of the song (plus a reverb tail) into interleaved stereo (tests, demo loops)
+#[cfg(test)]
 pub fn render_offline(song: &Song, bars: u32, sr: u32, seed: u64) -> Vec<f32> {
     let mut e = Engine::new(sr as f32, *song, Shared::new(), None, seed);
     e.handle(Cmd::Play);
@@ -1400,6 +1553,7 @@ pub fn render_offline(song: &Song, bars: u32, sr: u32, seed: u64) -> Vec<f32> {
 mod tests {
     use super::*;
     use crate::song::Vibe;
+    use std::collections::HashSet;
 
     fn stats(buf: &[f32]) -> (f32, f32) {
         let peak = buf.iter().fold(0.0f32, |m, x| m.max(x.abs()));
@@ -1446,7 +1600,7 @@ mod tests {
         let bar = (e.step_len() * STEPS as f64) as usize;
         let mut buf = vec![0.0; 2 * bar * 33];
         e.render(&mut buf);
-        let changes: Vec<Change> = rx.try_iter().filter_map(|Event::Song(_, c)| c).collect();
+        let changes: Vec<Change> = rx.try_iter().filter_map(Event::change).collect();
         assert!(changes.contains(&Change::Breakdown), "{changes:?}");
         assert!(changes.contains(&Change::Build));
         assert!(matches!(changes.last(), Some(Change::Drop | Change::NewChapter)), "{changes:?}");
@@ -1505,7 +1659,7 @@ mod tests {
         let mut buf = vec![0.0; 2 * step * 2];
         e.render(&mut buf);
         assert!(e.build.is_none(), "drop on step 48");
-        let changes: Vec<Change> = rx.try_iter().filter_map(|Event::Song(_, c)| c).collect();
+        let changes: Vec<Change> = rx.try_iter().filter_map(Event::change).collect();
         assert_eq!(changes, vec![Change::Build, Change::Drop]);
     }
 
@@ -1611,8 +1765,8 @@ mod tests {
 
     #[test]
     fn auto_mode_varies_and_always_brings_the_beat_back() {
-        // Several 32-bar cycles: different breakdowns, fills, chapters – and after every
-        // drop the kick plays again
+        // Several cycles: different lengths, breakdowns, build-ups, fills, chapters – and
+        // outside a breakdown the kick always plays
         let (tx, rx) = std::sync::mpsc::channel();
         let mut song = gen::generate(Vibe::Hypnotic, &Default::default(), &mut Rng::new(8));
         song.auto = true;
@@ -1622,19 +1776,48 @@ mod tests {
         e.handle(Cmd::Play);
         let bar = (e.step_len() * STEPS as f64) as usize;
         let mut buf = vec![0.0; 2 * bar];
-        let mut kinds = std::collections::HashSet::new();
-        for b in 0..(32 * 6 + 1) {
+        let (mut kinds, mut lens, mut styles) = (HashSet::new(), HashSet::new(), HashSet::new());
+        for b in 0..(32 * 10) {
             e.render(&mut buf);
             assert!(buf.iter().all(|x| x.is_finite() && x.abs() <= 1.0));
-            if b % 32 == 1 && b > 32 {
-                assert!(!e.song.track(Voice::Kick).mute, "kick back after the drop (bar {b})");
+            if e.breakdown.is_none() && e.build.is_none() && b > 0 {
+                assert!(!e.song.track(Voice::Kick).mute, "kick plays (bar {b})");
             }
             kinds.insert(e.plan.breakdown_at * 100 + e.plan.out.len() as u64 * 10 + e.plan.sweep as u64);
+            lens.insert(e.cycle_len);
+            if let Some(b) = &e.build {
+                styles.insert(format!("{:?}", b.style));
+            }
         }
         assert!(kinds.len() >= 2, "different breakdowns");
-        let changes: Vec<Change> = rx.try_iter().filter_map(|Event::Song(_, c)| c).collect();
+        assert!(lens.len() >= 2, "different cycle lengths: {lens:?}");
+        assert!(styles.len() >= 2, "different build-ups: {styles:?}");
+        let changes: Vec<Change> = rx.try_iter().filter_map(Event::change).collect();
         assert!(changes.iter().any(|c| matches!(c, Change::NewSound(..))), "{changes:?}");
         assert!(changes.iter().filter(|c| matches!(c, Change::Drop | Change::NewChapter)).count() >= 5);
+    }
+
+    #[test]
+    fn a_drop_by_hand_pushes_the_next_auto_drop_back() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut song = gen::generate(Vibe::Peak, &Default::default(), &mut Rng::new(8));
+        song.auto = true;
+        song.bpm = 180.0;
+        let mut e = Engine::new(11_025.0, song, Shared::new(), Some(tx), 4);
+        e.handle(Cmd::Play);
+        let bar = (e.step_len() * STEPS as f64) as usize;
+        let mut buf = vec![0.0; 2 * bar * 20 + 200];
+        e.render(&mut buf); // into bar 20, just before the auto breakdown
+        e.handle(Cmd::Drop); // build-up in bars 21–22, drop on 23
+        let mut buf = vec![0.0; 2 * bar * 3];
+        e.render(&mut buf);
+        assert_eq!(e.cycle_start, 23, "the drop starts a new cycle");
+        let _ = rx.try_iter().count();
+        let mut buf = vec![0.0; 2 * bar * 20];
+        e.render(&mut buf);
+        let changes: Vec<Change> = rx.try_iter().filter_map(Event::change).collect();
+        assert!(!changes.contains(&Change::Breakdown), "no breakdown right after: {changes:?}");
+        assert!(!changes.contains(&Change::Drop));
     }
 
     #[test]
@@ -1694,7 +1877,7 @@ mod tests {
                 );
             }
         }
-        let changes: Vec<Change> = rx.try_iter().filter_map(|Event::Song(_, c)| c).collect();
+        let changes: Vec<Change> = rx.try_iter().filter_map(Event::change).collect();
         let parts: Vec<Part> = changes
             .iter()
             .filter_map(|c| if let Change::Part(p, ..) = c { Some(*p) } else { None })
@@ -1706,6 +1889,45 @@ mod tests {
         assert!(build < drop);
         assert_eq!(changes.last(), Some(&Change::SongEnd));
         assert!(!e.playing && e.arrangement.is_none(), "the song ends");
+    }
+
+    #[test]
+    fn a_song_is_recorded_with_its_tail() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let [a, b, _] = patterns(180.0);
+        let sr = 11_025.0;
+        let mut e = Engine::new(sr, a, Shared::new(), Some(tx), 1);
+        e.handle(Cmd::Arrange(Some(Box::new(Arrangement {
+            patterns: [Some(a), Some(b), None, None],
+            form: 0,
+            fallback: a,
+        }))));
+        e.handle(Cmd::Play);
+        let bar = (e.step_len() * STEPS as f64) as usize;
+        let mut buf = vec![0.0; 2 * bar];
+        for _ in 0..(FORMS[0].bars() + 3) {
+            e.render(&mut buf);
+        }
+        let (mut samples, mut done) = (0, false);
+        for ev in rx.try_iter() {
+            match ev {
+                Event::Audio(piece) => {
+                    assert!(!done, "nothing after the end");
+                    samples += piece.len();
+                }
+                Event::Recorded => done = true,
+                Event::Song(..) => {}
+            }
+        }
+        assert!(done, "the recording is complete");
+        let frames = samples / 2;
+        let song = FORMS[0].bars() as usize * bar;
+        let tail = (sr * 2.0) as usize;
+        assert!(
+            frames >= song + tail - bar && frames <= song + tail + bar,
+            "{frames} vs {}",
+            song + tail
+        );
     }
 
     #[test]
@@ -1725,7 +1947,7 @@ mod tests {
         e.handle(Cmd::Jump(4)); // the first peak
         let mut buf = vec![0.0; 2 * bar];
         e.render(&mut buf);
-        let changes: Vec<Change> = rx.try_iter().filter_map(|Event::Song(_, c)| c).collect();
+        let changes: Vec<Change> = rx.try_iter().filter_map(Event::change).collect();
         assert!(changes.contains(&Change::Drop), "a peak starts with a drop: {changes:?}");
         // Pattern C is empty: the peak falls back to B
         assert!(changes.contains(&Change::Part(Part::Peak, 4, Some(1))), "{changes:?}");
@@ -1748,7 +1970,7 @@ mod tests {
         let mut buf = vec![0.0; 2 * step * 12];
         e.render(&mut buf);
         assert_eq!(e.song.tracks.map(|t| t.steps), b.tracks.map(|t| t.steps));
-        let changes: Vec<Change> = rx.try_iter().filter_map(|Event::Song(_, c)| c).collect();
+        let changes: Vec<Change> = rx.try_iter().filter_map(Event::change).collect();
         assert_eq!(changes, vec![Change::Scene(1)]);
     }
 
@@ -1787,7 +2009,10 @@ mod tests {
         let mut buf = vec![0.0; 2 * bar * 25 + 100];
         e.render(&mut buf); // into the breakdown
         assert!(e.song.macros.energy < 0.3, "low in the breakdown: {}", e.song.macros.energy);
-        let sent: Vec<f32> = rx.try_iter().map(|Event::Song(s, _)| s.macros.energy).collect();
+        let sent: Vec<f32> = rx
+            .try_iter()
+            .filter_map(|ev| if let Event::Song(s, _) = ev { Some(s.macros.energy) } else { None })
+            .collect();
         assert!(sent.iter().any(|&x| x > 0.85), "high after the start: {sent:?}");
         // The UI can't override it while the curve is on …
         let mut ui_song = e.song;
