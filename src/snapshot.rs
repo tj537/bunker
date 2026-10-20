@@ -59,6 +59,54 @@ mod tests {
         render_face("face_back", &[(10.0, Some(0.99)), (10.02, None), (13.0, None)]);
     }
 
+    /// The planets view alone, a bass or synth planet held and dragged up by `dy`
+    fn render_note_drag(name: &str, track: usize, step: usize, dy: f32) {
+        use crate::planets::{planets, System};
+        use eframe::egui::{self, pos2, vec2, Event, PointerButton, Rect};
+        let (w, h) = (900.0, 640.0);
+        let mut snap = Offscreen::retina(w, h, 2.0);
+        crate::theme::install(&snap.ctx);
+        let mut song = crate::gen::generate(crate::song::Vibe::Acid, &Default::default(), &mut crate::rng::Rng::new(4));
+        song.tracks[track].steps[step].on = true;
+        song.tracks[track].mute = false;
+        let rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(w, h));
+        let sys = System::new(rect);
+        let voice = crate::song::Voice::ALL[track];
+        let (start, _) = sys.place(track, step, sys.lift(voice, song.tracks[track].steps[step].note));
+        let live = playing(20.3, &[0]);
+        let mut paint = crate::orbit::Paint::default();
+        let press = Event::PointerButton {
+            pos: start,
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: Default::default(),
+        };
+        let mut frames = vec![vec![Event::PointerMoved(start)], vec![press]];
+        for i in 1..=8 {
+            frames.push(vec![Event::PointerMoved(start + vec2(0.0, dy * i as f32 / 8.0))]);
+        }
+        frames.push(vec![]);
+        let mut shapes = Vec::new();
+        for (i, events) in frames.into_iter().enumerate() {
+            shapes = snap.frame_with_events(10.0 + i as f64 * 0.016, events, |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE.fill(crate::theme::BG))
+                    .show(ctx, |ui| {
+                        planets(ui, rect, &mut song, &live, &mut paint);
+                    });
+            });
+        }
+        snap.save(&shapes, Path::new(&format!("target/snapshots/{name}.png")));
+    }
+
+    #[test]
+    #[ignore]
+    fn render_note_drags() {
+        render_note_drag("planets_drag_up", 7, 9, -45.0);
+        render_note_drag("planets_drag_down", 6, 12, 30.0);
+        render_note_drag("planets_drag_right", 7, 4, -80.0);
+    }
+
     fn playing(pos: f64, recent: &[usize]) -> Live {
         let mut hit_age = [2.0; TRACKS];
         for &t in recent {

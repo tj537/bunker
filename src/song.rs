@@ -6,6 +6,14 @@ use serde::{Deserialize, Serialize};
 
 pub const TRACKS: usize = 8;
 pub const STEPS: usize = 16;
+/// The notes you can pick by hand, in semitones from the root: an octave below to two above
+pub const NOTES: std::ops::RangeInclusive<i8> = -12..=24;
+pub const NOTE_NAMES: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+
+/// The name of a note `semis` above the MIDI note `root`, e.g. "F#"
+pub fn note_name(root: u8, semis: i8) -> &'static str {
+    NOTE_NAMES[(root as i32 + semis as i32).rem_euclid(12) as usize]
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Voice {
@@ -325,12 +333,18 @@ impl Scale {
     pub fn shift(self, semis: i8, steps: i32) -> i8 {
         let iv = self.intervals();
         let n = iv.len() as i32;
+        let d = self.degree(semis) + steps;
+        let (o, k) = (d.div_euclid(n), d.rem_euclid(n));
+        (o * 12 + iv[k as usize] as i32).clamp(-24, 36) as i8
+    }
+
+    /// How many scale degrees the closest note at or below `semis` lies above the root
+    /// (0 = the root, negative below it)
+    pub fn degree(self, semis: i8) -> i32 {
+        let iv = self.intervals();
         let octave = (semis as i32).div_euclid(12);
         let within = (semis as i32).rem_euclid(12) as i8;
-        let degree = iv.iter().rposition(|&i| i <= within).unwrap_or(0) as i32;
-        let d = degree + steps;
-        let (o, k) = (d.div_euclid(n), d.rem_euclid(n));
-        ((octave + o) * 12 + iv[k as usize] as i32).clamp(-24, 36) as i8
+        octave * iv.len() as i32 + iv.iter().rposition(|&i| i <= within).unwrap_or(0) as i32
     }
 }
 
@@ -577,6 +591,21 @@ mod tests {
             }
         }
         assert_eq!(Scale::Pentatonic.shift(0, 5), 12);
+    }
+
+    #[test]
+    fn degrees_count_from_the_root() {
+        let s = Scale::Minor;
+        assert_eq!(s.degree(0), 0);
+        assert_eq!(s.degree(3), 2);
+        assert_eq!(s.degree(12), 7);
+        assert_eq!(s.degree(-2), -1);
+        assert_eq!(s.degree(1), 0); // C♯ counts as C
+        for sc in Scale::ALL {
+            for d in -10..=14 {
+                assert_eq!(sc.degree(sc.shift(0, d)), d, "{sc:?} {d}");
+            }
+        }
     }
 
     #[test]

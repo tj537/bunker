@@ -2,7 +2,7 @@
 //! circles like a radar. Shorter tracks have fewer dots and drift against the
 //! others – polyrhythms you can see.
 
-use crate::song::{Song, Voice, STEPS, TRACKS};
+use crate::song::{note_name, Song, Voice, NOTES, STEPS, TRACKS};
 use crate::theme::*;
 use crate::widgets::{arc, glow};
 use eframe::egui::{self, epaint::Vertex, pos2, vec2, Align2, Color32, Mesh, Pos2, Rect, Sense, Ui};
@@ -45,6 +45,8 @@ pub struct Paint {
     pub active: bool,
     /// Scroll collected over frames: trackpads send many tiny deltas
     pub scroll: f32,
+    /// A bass or synth planet held down (planets view): dragged up or down it changes its note
+    pub note: Option<crate::planets::NoteDrag>,
 }
 
 /// Collect scrolling and return whole notches (±1 per `step` points)
@@ -135,7 +137,6 @@ pub fn step_context_menu(ui: &Ui, resp: &egui::Response, song: &mut Song, hovere
 
 /// Everything about one step: on, accent, slide, how often it plays, and its note
 fn step_menu(ui: &mut Ui, song: &mut Song, t: usize, s: usize) {
-    const NAMES: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
     let voice = Voice::ALL[t];
     let (scale, root) = (song.scale, song.root);
     ui.set_min_width(250.0);
@@ -166,11 +167,11 @@ fn step_menu(ui: &mut Ui, song: &mut Song, t: usize, s: usize) {
         ui.add_space(4.0);
         ui.label(egui::RichText::new("Note").font(bold(11.0)).color(FAINT));
         // The scale's notes from an octave below the root to two above
-        let notes: Vec<i8> = (-7..=14).map(|d| scale.shift(0, d)).filter(|n| (-12..=24).contains(n)).collect();
+        let notes: Vec<i8> = (-7..=14).map(|d| scale.shift(0, d)).filter(|n| NOTES.contains(n)).collect();
         for row in notes.chunks(7) {
             ui.horizontal(|ui| {
                 for &n in row {
-                    let name = NAMES[(root as i32 + n as i32).rem_euclid(12) as usize];
+                    let name = note_name(root, n);
                     let mark = if n < 0 {
                         "↓"
                     } else if n >= 12 {
@@ -228,6 +229,7 @@ pub fn orbit(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mut 
                     on: !step.on,
                     active: true,
                     scroll: 0.0,
+                    note: None,
                 };
                 step.on = paint.on;
             }
