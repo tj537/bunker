@@ -5,7 +5,7 @@
 <h1 align="center">BUNKER</h1>
 
 <p align="center">
-  <b>Techno beats in orbit.</b><br>
+  <b>Generative techno from another planet.</b><br>
   A drum machine for people who have never used one – press play, pick a vibe, hit DROP.
 </p>
 
