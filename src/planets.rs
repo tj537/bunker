@@ -6,7 +6,7 @@
 
 use crate::face::{additive, halo};
 use crate::orbit::{scroll_notches, step_context_menu, Live, OrbitOut, Paint};
-use crate::song::{note_name, Scale, Song, Voice, NOTES, STEPS, TRACKS};
+use crate::song::{note_name, Song, Step, Voice, NOTE_LIMITS, STEPS, TRACKS};
 use crate::theme::*;
 use crate::widgets::glow;
 use eframe::egui::{self, pos2, vec2, Align2, Color32, Mesh, Pos2, Rect, Sense, Ui};
@@ -32,18 +32,6 @@ pub struct NoteDrag {
     pub note: i8,
     /// Dragged far enough up or down: now it changes the note
     pub moved: bool,
-}
-
-/// `degrees` scale degrees from `note`, as far as `NOTES` goes
-fn note_at(scale: Scale, note: i8, degrees: i32) -> i8 {
-    let mut d = degrees;
-    loop {
-        let n = scale.shift(note, d);
-        if d == 0 || NOTES.contains(&n) {
-            return n;
-        }
-        d -= d.signum();
-    }
 }
 
 /// A repeatable random number 0…1
@@ -113,21 +101,35 @@ impl System {
         (self.r_max * 0.022).clamp(3.5, 8.5)
     }
 
-    /// The step under `p`, if any – the nearest, the front one on a tie
+    /// How big a planet is drawn: nearer ones bigger, accents bigger still
+    fn body(&self, step: Step, depth: f32) -> f32 {
+        self.planet_radius() * (1.0 + 0.18 * depth) * if step.accent { 1.35 } else { 1.0 }
+    }
+
+    /// The step under `p`, if any. On a planet it's the planet you see there – the one
+    /// drawn last, as `planets` draws far to near and track by track. Elsewhere it's the
+    /// nearest, counting from a planet's edge, so a bass or synth planet lifted over the
+    /// inner orbits wins against the little specks it hangs over
     pub fn hit(&self, p: Pos2, song: &Song) -> Option<(usize, usize)> {
         let mut best: Option<(f32, usize, usize)> = None;
+        let mut on_top: Option<(f32, usize, usize)> = None;
         for (t, voice) in Voice::ALL.into_iter().enumerate() {
             for s in 0..STEPS {
                 let step = song.tracks[t].steps[s];
                 let h = if step.on { self.lift(voice, step.note) } else { 0.0 };
                 let (at, depth) = self.place(t, s, h);
-                let d = at.distance(p) - depth * 0.5;
-                if d < self.planet_radius() * 2.0 && best.is_none_or(|b| d < b.0) {
+                let near = at.distance(p);
+                let body = if step.on { self.body(step, depth) } else { 0.0 };
+                if near < body && on_top.is_none_or(|top| depth >= top.0) {
+                    on_top = Some((depth, t, s));
+                }
+                let d = near - depth * 0.5 - body;
+                if near < self.planet_radius() * 2.0 && best.is_none_or(|b| d < b.0) {
                     best = Some((d, t, s));
                 }
             }
         }
-        best.map(|(_, t, s)| (t, s))
+        on_top.or(best).map(|(_, t, s)| (t, s))
     }
 }
 
@@ -195,7 +197,7 @@ pub fn planets(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mu
         }
         if drag.moved {
             let degrees = (-d.y / DEGREE_PX).round() as i32;
-            song.tracks[drag.track].steps[drag.step].note = note_at(song.scale, drag.note, degrees);
+            song.tracks[drag.track].steps[drag.step].note = song.scale.shift(drag.note, degrees);
             paint.note = Some(drag);
         } else if let Some((t, s)) = hovered.filter(|&(t, s)| t == drag.track && s != drag.step) {
             // Along the orbit instead: paint the planets off, this one first
@@ -335,7 +337,7 @@ pub fn planets(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mu
             let (from, _) = sys.place(t, s - 1, sys.lift(voice, prev.note));
             p.line_segment([from, at], stroke(2.0, alpha(color, strength * 0.7)));
         }
-        let r = pr * scale * if step.accent { 1.35 } else { 1.0 };
+        let r = sys.body(step, depth);
         let lit = if now == Some(s) && !muted { live.flash(t) } else { 0.0 };
         if lit > 0.01 {
             halo(&p, at, r * 4.0, color, 0.7 * lit);
@@ -493,7 +495,7 @@ fn degree_ladder(p: &egui::Painter, sys: &System, rect: Rect, song: &Song, drag:
     let scale = song.scale;
     let per_octave = scale.intervals().len() as i32;
     let (start, now) = (scale.degree(drag.note), scale.degree(note));
-    let (lo, hi) = (scale.degree(*NOTES.start()), scale.degree(*NOTES.end()));
+    let (lo, hi) = (scale.degree(*NOTE_LIMITS.start()), scale.degree(*NOTE_LIMITS.end()));
     let (at, _) = sys.place(drag.track, drag.step, sys.lift(voice, note));
     // Beside the planet, on whichever side has room
     let side = if at.x + 120.0 > rect.right() { -1.0 } else { 1.0 };
@@ -575,12 +577,47 @@ mod tests {
         assert_eq!(sys.hit(sys.c, &song), None);
     }
 
+    #[test]
+    fn a_lifted_planet_wins_over_the_specks_it_hangs_over() {
+        let sys = System::new(Rect::from_min_size(pos2(0.0, 0.0), vec2(1160.0, 1000.0)));
+        let mut overlaps = 0;
+        for t in [6, 7] {
+            let voice = Voice::ALL[t];
+            for s in 0..STEPS {
+                for note in NOTE_LIMITS {
+                    let mut song = Song::default();
+                    song.tracks[t - 1].steps[s].on = false;
+                    song.tracks[t].steps[s] = Step {
+                        on: true,
+                        note,
+                        ..Step::default()
+                    };
+                    let (below, _) = sys.place(t - 1, s, 0.0);
+                    let (at, depth) = sys.place(t, s, sys.lift(voice, note));
+                    let body = sys.body(song.tracks[t].steps[s], depth);
+                    // Only where the planet hangs over the resting step of the orbit inside
+                    if !(0.5..body).contains(&at.distance(below)) {
+                        continue;
+                    }
+                    overlaps += 1;
+                    // Clicked off-centre, towards the speck below: still the planet
+                    let p = at + (below - at).normalized() * body * 0.8;
+                    assert_eq!(sys.hit(p, &song), Some((t, s)), "track {t} step {s} note {note}");
+                }
+            }
+        }
+        assert!(overlaps > 10, "{overlaps}");
+    }
+
     /// Press on a step of the default song's bass, move the pointer by `moves` (one frame
     /// each) and let go; returns the song after
     fn press_and_drag(moves: &[Vec2]) -> (Song, usize, usize) {
+        press_and_drag_from(Song::default(), moves)
+    }
+
+    fn press_and_drag_from(mut song: Song, moves: &[Vec2]) -> (Song, usize, usize) {
         use crate::offscreen::Offscreen;
         use egui::{Event, PointerButton};
-        let mut song = Song::default();
         let t = Voice::ALL.iter().position(|v| v.is_synth()).unwrap();
         let s = (0..STEPS).find(|&s| song.tracks[t].steps[s].on).unwrap();
         let rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(900.0, 700.0));
@@ -623,9 +660,20 @@ mod tests {
         assert_eq!(now.note, song.scale.shift(was.note, 3));
         assert_eq!(song.scale.degree(now.note), song.scale.degree(was.note) + 3);
 
-        // Far down it stops at the lowest note you can pick
+        // A generated line may sit higher than the step menu goes: it moves all the same
+        let mut high = Song::default();
+        let t = Voice::ALL.iter().position(|v| v.is_synth()).unwrap();
+        for step in &mut high.tracks[t].steps {
+            step.note = 31;
+        }
+        let (song, t, s) = press_and_drag_from(high, &[up]);
+        assert_eq!(song.tracks[t].steps[s].note, high.scale.shift(31, 1));
+        let (song, t, s) = press_and_drag_from(high, &[-up, -up]);
+        assert_eq!(song.tracks[t].steps[s].note, high.scale.shift(31, -2));
+
+        // Far down it stops at the lowest note a step can hold
         let (song, t, s) = press_and_drag(&[vec2(0.0, 400.0), vec2(0.0, 400.0)]);
-        assert_eq!(song.tracks[t].steps[s].note, *NOTES.start());
+        assert_eq!(song.tracks[t].steps[s].note, *NOTE_LIMITS.start());
     }
 
     #[test]

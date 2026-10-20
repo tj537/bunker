@@ -6,8 +6,10 @@ use serde::{Deserialize, Serialize};
 
 pub const TRACKS: usize = 8;
 pub const STEPS: usize = 16;
-/// The notes you can pick by hand, in semitones from the root: an octave below to two above
+/// The notes the step menu offers, in semitones from the root: an octave below to two above
 pub const NOTES: std::ops::RangeInclusive<i8> = -12..=24;
+/// Every note a step can hold: two octaves below the root to three above
+pub const NOTE_LIMITS: std::ops::RangeInclusive<i8> = -24..=36;
 pub const NOTE_NAMES: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
 /// The name of a note `semis` above the MIDI note `root`, e.g. "F#"
@@ -335,7 +337,7 @@ impl Scale {
         let n = iv.len() as i32;
         let d = self.degree(semis) + steps;
         let (o, k) = (d.div_euclid(n), d.rem_euclid(n));
-        (o * 12 + iv[k as usize] as i32).clamp(-24, 36) as i8
+        (o * 12 + iv[k as usize] as i32).clamp(*NOTE_LIMITS.start() as i32, *NOTE_LIMITS.end() as i32) as i8
     }
 
     /// How many scale degrees the closest note at or below `semis` lies above the root
@@ -516,7 +518,7 @@ impl Song {
             t.decay = if t.decay.is_finite() { t.decay.clamp(0.0, 1.0) } else { 0.5 };
             for s in &mut t.steps {
                 s.chance = s.chance.min(100);
-                s.note = s.note.clamp(-24, 36);
+                s.note = s.note.clamp(*NOTE_LIMITS.start(), *NOTE_LIMITS.end());
             }
         }
         let fix = |v: f32, lo: f32, hi: f32, def: f32| if v.is_finite() { v.clamp(lo, hi) } else { def };
