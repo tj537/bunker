@@ -125,24 +125,64 @@ fn chip_shaped(ui: &mut Ui, text: &str, on: bool, color: Color32, width: Option<
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-/// The record button: red even when idle, filled and pulsing while it records
-pub fn rec_chip(ui: &mut Ui, text: &str, on: bool, now: f64) -> Response {
+/// The record button with an arrow beside it in one pill: (record, arrow)
+pub fn rec_split(ui: &mut Ui, text: &str, on: bool, now: f64) -> (Response, Response) {
     let galley = ui.painter().layout_no_wrap(text.to_string(), bold(13.0), TEXT);
-    let size = vec2((galley.size().x + 22.0).max(40.0), 30.0);
-    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+    let (main_w, arrow_w) = ((galley.size().x + 22.0).max(40.0), 24.0);
+    let (all, _) = ui.allocate_exact_size(vec2(main_w + arrow_w, 30.0), Sense::hover());
+    let main = Rect::from_min_size(all.min, vec2(main_w, 30.0));
+    let arrow = Rect::from_min_max(pos2(main.right(), all.top()), all.max);
+    let rec = ui.interact(main, ui.id().with("rec"), Sense::click());
+    let more = ui.interact(arrow, ui.id().with("rec_more"), Sense::click());
     let p = ui.painter();
-    let hot = resp.hovered();
     if on {
         let pulse = 0.5 + 0.5 * (now as f32 * 4.0).sin();
-        glow_rect(p, rect, 15.0, RED, 0.4 + 0.4 * pulse);
-        p.rect_filled(rect, 15.0, mix(PANEL, RED, 0.75 + 0.15 * pulse));
-        p.text(rect.center(), Align2::CENTER_CENTER, text, bold(13.0), TEXT);
+        glow_rect(p, all, 15.0, RED, 0.4 + 0.4 * pulse);
+        p.rect_filled(all, 15.0, mix(PANEL, RED, 0.75 + 0.15 * pulse));
     } else {
-        p.rect_filled(rect, 15.0, mix(PANEL, RED, if hot { 0.3 } else { 0.14 }));
-        p.rect_stroke(rect, 15.0, stroke(1.2, RED), egui::StrokeKind::Inside);
-        p.text(rect.center(), Align2::CENTER_CENTER, text, bold(13.0), RED);
+        p.rect_filled(all, 15.0, mix(PANEL, RED, 0.14));
+        for (r, hot, rounding) in [
+            (
+                main,
+                rec.hovered(),
+                egui::CornerRadius {
+                    nw: 15,
+                    sw: 15,
+                    ne: 0,
+                    se: 0,
+                },
+            ),
+            (
+                arrow,
+                more.hovered(),
+                egui::CornerRadius {
+                    nw: 0,
+                    sw: 0,
+                    ne: 15,
+                    se: 15,
+                },
+            ),
+        ] {
+            if hot {
+                p.rect_filled(r, rounding, mix(PANEL, RED, 0.3));
+            }
+        }
+        p.rect_stroke(all, 15.0, stroke(1.2, RED), egui::StrokeKind::Inside);
     }
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+    let ink = if on { TEXT } else { RED };
+    p.line_segment(
+        [pos2(main.right(), all.top() + 7.0), pos2(main.right(), all.bottom() - 7.0)],
+        stroke(1.0, alpha(ink, 0.5)),
+    );
+    p.text(main.center(), Align2::CENTER_CENTER, text, bold(13.0), ink);
+    p.text(
+        arrow.center() - vec2(2.0, 0.0),
+        Align2::CENTER_CENTER,
+        egui_phosphor::regular::CARET_DOWN,
+        body(12.0),
+        ink,
+    );
+    (rec.on_hover_cursor(egui::CursorIcon::PointingHand), more)
 }
 
 /// Side-by-side choices in one pill; the picked one is filled. Returns the one clicked.

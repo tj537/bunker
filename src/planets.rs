@@ -347,20 +347,26 @@ pub fn planets(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mu
                 p.circle_stroke(at, r + age * 80.0, stroke(1.5, alpha(color, 0.6 * (1.0 - age / 0.45))));
             }
         }
-        // A little planet, lit from the sun: dark with its bright side to the middle
+        // Accents wear a ring, like Saturn: its far half behind the planet, its near half in front
         let ink = |c: Color32| alpha(c, strength);
-        p.circle_filled(at, r, ink(mix(SPACE, color, 0.4)));
-        let to_sun = (sys.c - at).normalized();
-        p.circle_filled(at + to_sun * r * 0.22, r * 0.78, ink(mix(color, Color32::WHITE, 0.1 + 0.6 * lit)));
-        if step.accent {
-            // Accents wear a ring, like Saturn
-            let ring: Vec<Pos2> = (0..=40)
+        let ring = |from: f32| {
+            let pts: Vec<Pos2> = (0..=20)
                 .map(|i| {
-                    let b = i as f32 / 40.0 * TAU;
+                    let b = from + i as f32 / 20.0 * PI;
                     at + vec2(b.cos() * r * 1.8, b.sin() * r * 0.5)
                 })
                 .collect();
-            p.add(egui::Shape::line(ring, stroke(1.5, ink(mix(color, Color32::WHITE, 0.3)))));
+            egui::Shape::line(pts, stroke(1.5, ink(mix(color, Color32::WHITE, 0.3))))
+        };
+        if step.accent {
+            p.add(ring(PI));
+        }
+        // A little planet, lit from the sun: its own colour, a little darker on the far side
+        p.circle_filled(at, r, ink(mix(SPACE, color, 0.72)));
+        let to_sun = (sys.c - at).normalized();
+        p.circle_filled(at + to_sun * r * 0.14, r * 0.86, ink(mix(color, Color32::WHITE, 0.03 + 0.6 * lit)));
+        if step.accent {
+            p.add(ring(0.0));
         }
         if step.chance < 100 {
             p.circle_stroke(at, r + 3.0, stroke(1.0, alpha(color, 0.5)));

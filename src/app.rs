@@ -196,6 +196,10 @@ pub struct BunkerApp {
     update_rx: Option<Receiver<Release>>,
     pub new_version: Option<Release>,
     pub check_updates: bool,
+    /// The Radar view (the old orbit) is offered next to Planets and Classic
+    pub radar: bool,
+    /// FACE runs in a window of its own (for a projector), next to the main one
+    face_window: bool,
     /// For screenshots: pretend to play at this position
     pub fake_live: Option<Live>,
 }
@@ -240,6 +244,10 @@ impl BunkerApp {
         let seen: bool = cc.storage.and_then(|s| eframe::get_value(s, "seen_help")).unwrap_or(false);
         app.help = !seen;
         app.check_updates = cc.storage.and_then(|s| eframe::get_value(s, "check_updates")).unwrap_or(true);
+        app.radar = cc.storage.and_then(|s| eframe::get_value(s, "radar")).unwrap_or(false);
+        if !app.radar && app.view == View::Orbit {
+            app.view = View::Planets;
+        }
         let ctx = cc.egui_ctx.clone();
         if app.check_updates {
             let c = ctx.clone();
@@ -323,6 +331,8 @@ impl BunkerApp {
             update_rx: None,
             new_version: None,
             check_updates: true,
+            radar: view == View::Orbit,
+            face_window: false,
             fake_live: None,
         }
     }
@@ -617,13 +627,19 @@ impl BunkerApp {
     fn shuffle(&mut self, vibe: Vibe, now: f64) {
         let keep_bpm = self.playing() && vibe == self.song.vibe;
         let keep = self.song.tracks.map(|t| t.lock.then_some(t));
-        let mut s = gen::generate_keeping(vibe, &self.song.macros, &mut self.rng, &keep);
+        let mut s = gen::shuffle(vibe, &self.song.macros, &mut self.rng, &keep, &self.song);
         s = keep_live_settings(s, &self.song);
         for (t, old) in s.tracks.iter_mut().zip(&self.song.tracks) {
             t.volume = old.volume;
         }
         if keep_bpm {
             s.bpm = self.song.bpm;
+        }
+        if self.song.mood_hold {
+            s.mood_hold = true;
+            s.scale = self.song.scale;
+            s.prog = self.song.prog;
+            gen::refit_notes(&mut s, &mut self.rng);
         }
         self.song = s;
         self.solo = None;
@@ -874,9 +890,10 @@ impl BunkerApp {
         }
         let tab = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Tab));
         if tab {
-            // Planets → radar → classic → planets
+            // Planets → (radar →) classic → planets
             self.view = match self.view {
-                View::Planets => View::Orbit,
+                View::Planets if self.radar => View::Orbit,
+                View::Planets => View::Pads,
                 View::Orbit => View::Pads,
                 View::Pads => View::Planets,
             };
@@ -976,12 +993,46 @@ impl BunkerApp {
 
     /// LIGHTS or FACE: opens that visualizer, switches to it, or closes it if it's on
     fn show(&mut self, ctx: &egui::Context, face: bool) {
+        // FACE opens a window of its own, so Bunker stays usable beside it
+        if face && self.with_devices {
+            self.face_window = !self.face_window;
+            return;
+        }
         if self.visual && self.face != face {
             self.face = face;
         } else {
             self.face = face;
             self.toggle_visual(ctx);
         }
+    }
+
+    /// FACE in its own window: drag it to the projector; double-click or F goes fullscreen,
+    /// Esc leaves fullscreen, closing the window ends it
+    fn face_viewport(&mut self, ctx: &egui::Context, live: &Live, now: f64) {
+        let id = egui::ViewportId::from_hash_of("face");
+        let builder = egui::ViewportBuilder::default()
+            .with_title("Bunker – Face")
+            .with_inner_size([960.0, 600.0])
+            .with_min_inner_size([320.0, 200.0]);
+        let mut open = true;
+        ctx.show_viewport_immediate(id, builder, |ctx, _| {
+            egui::CentralPanel::default().frame(egui::Frame::new().fill(SPACE)).show(ctx, |ui| {
+                let rect = ui.max_rect();
+                crate::face::face(ui, rect, &self.song, live, now);
+                let full = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+                let toggle = ui.interact(rect, ui.id().with("face_window"), Sense::click()).double_clicked()
+                    || ctx.input(|i| i.key_pressed(Key::F))
+                    || (full && ctx.input(|i| i.key_pressed(Key::Escape)));
+                if toggle {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!full));
+                }
+            });
+            if ctx.input(|i| i.viewport().close_requested()) {
+                open = false;
+            }
+            ctx.request_repaint();
+        });
+        self.face_window = open;
     }
 
     fn toggle_visual(&mut self, ctx: &egui::Context) {
@@ -1108,7 +1159,8 @@ impl BunkerApp {
                 } else {
                     ph::RECORD.to_string()
                 };
-                if widgets::rec_chip(ui, &text, self.capture, now)
+                let (rec, more) = widgets::rec_split(ui, &text, self.capture || self.song_form.is_some(), now);
+                if rec
                     .on_hover_text(if self.capture {
                         "Recording – click to stop and save it as a WAV (R)"
                     } else {
@@ -1118,10 +1170,11 @@ impl BunkerApp {
                 {
                     self.toggle_capture(now);
                 }
+                self.song_menu(ui, more, now);
                 ui.add_space(4.0);
                 // Two visualizers for a projector: double-click or Esc comes back
-                if chip(ui, ph::MASK_HAPPY, self.visual && self.face, RED)
-                    .on_hover_text("FACE: a low-poly head that nods in time – it screams on the drop (O)")
+                if chip(ui, ph::MASK_HAPPY, self.face_window || (self.visual && self.face), RED)
+                    .on_hover_text("FACE: a low-poly head that nods in time – it screams on the drop. Opens in its own window – drag it to the projector, double-click for fullscreen (O)")
                     .clicked()
                 {
                     let ctx = ui.ctx().clone();
@@ -1135,29 +1188,33 @@ impl BunkerApp {
                     self.show(&ctx, false);
                 }
                 ui.add_space(4.0);
-                // The view: PLANETS (the main one), RADAR (the orbit) or CLASSIC (pads and grid)
-                let order = [View::Planets, View::Orbit, View::Pads];
-                let picked = order.map(|v| self.view == v);
+                // The view: PLANETS (the main one), CLASSIC (pads and grid), and RADAR (the old
+                // orbit) when the settings ask for it
+                let order: &[View] = if self.radar {
+                    &[View::Planets, View::Orbit, View::Pads]
+                } else {
+                    &[View::Planets, View::Pads]
+                };
+                let picked: Vec<bool> = order.iter().map(|&v| self.view == v).collect();
                 // In a small window only the view you're in has its name
                 let compact = ui.ctx().screen_rect().width() < 1250.0;
-                let label = |i: usize, icon: &str, name: &str| {
-                    if compact && !picked[i] {
-                        icon.to_string()
-                    } else {
-                        format!("{icon}  {name}")
-                    }
-                };
-                let views = [
-                    (
-                        label(0, ph::PLANET, "PLANETS"),
-                        "Planets: every track an orbit round the sun, every step a planet (Tab)",
-                    ),
-                    (
-                        label(1, ph::CIRCLES_THREE, "RADAR"),
-                        "Radar: the tracks as rings with a sweeping beam (Tab)",
-                    ),
-                    (label(2, ph::GRID_FOUR, "CLASSIC"), "Classic: pads and a step grid (Tab)"),
-                ];
+                let views: Vec<(String, &str)> = order
+                    .iter()
+                    .zip(&picked)
+                    .map(|(v, &on)| {
+                        let (icon, name, tip) = match v {
+                            View::Planets => (
+                                ph::PLANET,
+                                "PLANETS",
+                                "Planets: every track an orbit round the sun, every step a planet (Tab)",
+                            ),
+                            View::Orbit => (ph::CIRCLES_THREE, "RADAR", "Radar: the tracks as rings with a sweeping beam (Tab)"),
+                            View::Pads => (ph::GRID_FOUR, "CLASSIC", "Classic: pads and a step grid (Tab)"),
+                        };
+                        let text = if compact && !on { icon.to_string() } else { format!("{icon}  {name}") };
+                        (text, tip)
+                    })
+                    .collect();
                 if let Some(i) = widgets::segmented(ui, &views, &picked, ACID) {
                     self.view = order[i];
                 }
@@ -1208,14 +1265,8 @@ impl BunkerApp {
                 }
             }
         });
-        // Short on room (small window plus an update notice): just the icon
-        let text = if ui.available_width() > 760.0 {
-            format!("{}  SHUFFLE", ph::SHUFFLE)
-        } else {
-            ph::SHUFFLE.to_string()
-        };
-        if chip(ui, &text, false, ACID)
-            .on_hover_text("Roll a whole new groove in this vibe (Enter)")
+        if chip_sized(ui, ph::SHUFFLE, false, ACID, Some(32.0))
+            .on_hover_text("Shuffle: roll a whole new groove in this vibe (Enter)")
             .clicked()
         {
             self.shuffle(self.song.vibe, now);
@@ -1271,6 +1322,17 @@ impl BunkerApp {
                     .font(body(11.0))
                     .color(FAINT),
                 );
+
+                section(ui, "VIEWS");
+                if ui
+                    .checkbox(&mut self.radar, "Show the legacy view (Radar)")
+                    .on_hover_text("The tracks as rings with a sweeping beam – the view before Planets")
+                    .changed()
+                    && !self.radar
+                    && self.view == View::Orbit
+                {
+                    self.view = View::Planets;
+                }
 
                 section(ui, "UPDATES");
                 ui.checkbox(&mut self.check_updates, "Tell me when a new version is out")
@@ -1340,7 +1402,9 @@ impl BunkerApp {
             let locked = self.song.tracks[i].lock;
             // Low energy takes this track out (a break)
             let layer = crate::engine::LAYERS[i];
-            let out = !muted && self.song.macros.energy < layer;
+            // (the auto mode with AUTO FX mutes such a track instead)
+            let by_mute = self.song.auto && self.song.auto_fx && self.song_form.is_none();
+            let out = !muted && !by_mute && self.song.macros.energy < layer;
             let p = ui.painter().clone();
             if resp.hovered() {
                 p.rect_filled(row, 10.0, PANEL_HI);
@@ -1364,7 +1428,15 @@ impl BunkerApp {
                     TEXT
                 },
             );
-            ui.allocate_rect(name_rect, Sense::hover()).on_hover_text(voice.blurb());
+            let name_hit = Rect::from_min_max(row.left_top() + vec2(0.0, top - row.top()), name_rect.right_bottom());
+            if ui
+                .allocate_rect(name_hit, Sense::click())
+                .on_hover_text(format!("{}\nClick to hear it", voice.blurb()))
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+            {
+                self.hit(voice);
+            }
             // …say so next to its name
             if out {
                 let tag = Rect::from_min_size(pos2(name_rect.right() + 6.0, name_rect.top() + 1.5), vec2(30.0, 16.0));
@@ -1584,28 +1656,8 @@ impl BunkerApp {
 
         ui.add_space(8.0);
         heading(ui, "MOOD");
-        let mood = self.song.mood();
-        let full_w = ui.available_width();
-        for row in MOODS.chunks(3).enumerate() {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 5.0;
-                let cw = (full_w - 10.0) / 3.0;
-                for (j, &(name, blurb, scale, prog)) in row.1.iter().enumerate() {
-                    let k = row.0 * 3 + j;
-                    if chip_small(ui, name, mood == Some(k), ACID, cw).on_hover_text(blurb).clicked() && mood != Some(k) {
-                        self.song.scale = scale;
-                        self.song.prog = prog;
-                        gen::refit_notes(&mut self.song, &mut self.rng);
-                        // The synth carries the mood – a mood with it muted would hardly be heard
-                        let synth = self.song.track_mut(Voice::Acid);
-                        if !synth.lock {
-                            synth.mute = false;
-                        }
-                        self.say(format!("{name} – bass and synth play it"), now);
-                    }
-                }
-            });
-        }
+        self.mood_picker(ui, now);
+        ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             let tip = "How high or low bass and synth sit – drums stay where they are";
@@ -1637,9 +1689,76 @@ impl BunkerApp {
         });
     }
 
+    /// The mood dropdown: Auto (the vibe picks one with every shuffle, the auto mode may
+    /// change it) or one picked by hand, which shuffle and the auto mode keep
+    fn mood_picker(&mut self, ui: &mut Ui, now: f64) {
+        let mood = self.song.mood();
+        let name = mood.map_or("–", |k| MOODS[k].0);
+        let text = if self.song.mood_hold {
+            format!("{name}  {}", ph::CARET_DOWN)
+        } else {
+            format!("Auto · {name}  {}", ph::CARET_DOWN)
+        };
+        let resp = chip_sized(ui, &text, self.song.mood_hold, ACID, Some(ui.available_width())).on_hover_text(match mood {
+            Some(k) => format!("{}\nClick for the list", MOODS[k].1),
+            None => "Notes and chords of bass and synth – click for the list".to_string(),
+        });
+        let popup = ui.make_persistent_id("moods");
+        if resp.clicked() {
+            ui.memory_mut(|m| m.toggle_popup(popup));
+        }
+        let mut picked = None;
+        egui::popup_below_widget(ui, popup, &resp, egui::PopupCloseBehavior::CloseOnClick, |ui| {
+            ui.set_min_width(resp.rect.width().max(260.0));
+            let fmt = |font, color| egui::TextFormat {
+                font_id: font,
+                color,
+                ..Default::default()
+            };
+            let entry = |ui: &mut Ui, title: &str, blurb: &str, on: bool| {
+                let mut job = egui::text::LayoutJob::default();
+                job.append(title, 0.0, fmt(bold(13.5), if on { ACID } else { TEXT }));
+                job.append(&format!("\n{blurb}"), 0.0, fmt(body(11.5), DIM));
+                ui.selectable_label(on, job).clicked()
+            };
+            if entry(ui, "Auto", "The vibe picks a fitting mood with every shuffle", !self.song.mood_hold) {
+                picked = Some(None);
+            }
+            ui.separator();
+            for (k, &(name, blurb, _, _)) in MOODS.iter().enumerate() {
+                if entry(ui, name, blurb, self.song.mood_hold && mood == Some(k)) {
+                    picked = Some(Some(k));
+                }
+            }
+        });
+        match picked {
+            Some(None) => {
+                self.song.mood_hold = false;
+                self.say("Mood: the vibe picks it", now);
+            }
+            Some(Some(k)) => {
+                self.song.mood_hold = true;
+                if mood != Some(k) {
+                    self.song.set_mood(k);
+                    gen::refit_notes(&mut self.song, &mut self.rng);
+                    // The synth carries the mood – a mood with it muted would hardly be heard
+                    let synth = self.song.track_mut(Voice::Acid);
+                    if !synth.lock {
+                        synth.mute = false;
+                    }
+                }
+                self.say(format!("{} – bass and synth play it", MOODS[k].0), now);
+            }
+            None => {}
+        }
+    }
+
     fn live_panel(&mut self, ui: &mut Ui, live: &Live, now: f64) {
         let w = ui.available_width();
         let tall = ui.available_height() > 600.0;
+        // Room to breathe between the controls – less of it in a short window
+        let air = if tall { 8.0 } else { 3.0 };
+        ui.spacing_mut().item_spacing.y = if tall { 10.0 } else { 8.0 };
         // SOUND | MASTER: one row of knobs, two pages
         ui.horizontal(|ui| {
             for (label, master) in [("SOUND", false), ("MASTER", true)] {
@@ -1703,10 +1822,10 @@ impl BunkerApp {
             )
         };
         let mut hint = None;
-        let sw = (w - 14.0) / 2.0;
+        let sw = (w - 16.0) / 2.0;
         for row in 0..2 {
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 14.0;
+                ui.spacing_mut().item_spacing.x = 16.0;
                 for col in 0..2 {
                     let i = row * 2 + col;
                     let r = widgets::macro_slider(ui, &mut vals[i], def[i], names[i], colors[i], sw);
@@ -1744,7 +1863,7 @@ impl BunkerApp {
             [mm.dark, mm.acid, mm.space, mm.pump] = vals;
         }
 
-        ui.add_space(2.0);
+        ui.add_space(air);
         heading(ui, "AUTO");
         // Auto mode toggle
         let (r, resp) = ui.allocate_exact_size(vec2(w, 50.0), Sense::click());
@@ -1795,7 +1914,7 @@ impl BunkerApp {
             });
         }
 
-        ui.add_space(2.0);
+        ui.add_space(air);
         // AUTO FX: in the auto mode Bunker arranges by itself (energy, breaks, build-ups with effects, drops)
         ui.horizontal(|ui| {
             heading(ui, "LIVE");
@@ -1855,7 +1974,7 @@ impl BunkerApp {
             self.send(Cmd::Filter(self.filter));
         }
         // Effects: hold to use
-        let gap = 8.0;
+        let gap = 10.0;
         let bw = (w - gap * 2.0) / 3.0;
         let bh = if tall { 48.0 } else { 38.0 };
         for row in 0..2 {
@@ -1948,14 +2067,10 @@ impl BunkerApp {
              • Click a full one to switch to it – while playing it comes in on the next bar, with a clap roll.\n\
              • The lit one plays exactly as saved and keeps your changes; once the groove changes (auto mode) it goes dark.\n\
              • Right-click: save over it, rename or clear it.\n\
-             • AUTO SONG plays a whole track from favorite 1 (and favorite 2 after the first drop).",
+             • AUTO SONG (the arrow next to record) plays a whole track from favorite 1 (and favorite 2 after the first drop).",
         );
 
-        let song_w = 84.0;
-        let cards = Rect::from_min_max(
-            pos2(rect.left() + left_w, rect.top()),
-            pos2(rect.right() - song_w - 10.0, rect.bottom()),
-        );
+        let cards = Rect::from_min_max(pos2(rect.left() + left_w, rect.top()), pos2(rect.right() - 4.0, rect.bottom()));
         let (cols, gap) = (6, 6.0);
         let cw = (cards.width() - gap * (cols - 1) as f32) / cols as f32;
         let ch = (cards.height() - 8.0 - gap) / 2.0;
@@ -2060,82 +2175,71 @@ impl BunkerApp {
                 });
             }
         }
+    }
 
-        // AUTO SONG: a whole track out of favorites 1–4
-        // A smaller button, centred next to the favorites
-        let song_h = ((rect.height() - 8.0) * 0.62).max(44.0);
-        let cr = Rect::from_center_size(pos2(rect.right() - song_w / 2.0, rect.center().y), vec2(song_w, song_h));
-        let resp = ui.allocate_rect(cr, Sense::click());
+    /// AUTO SONG, from the arrow next to record: a whole track out of favorites 1 and 2,
+    /// recorded as it plays
+    fn song_menu(&mut self, ui: &mut Ui, resp: egui::Response, now: f64) {
         let on = self.song_form.is_some();
-        widgets::fx_button(
-            ui,
-            cr,
-            &resp,
-            if on { ph::STOP } else { ph::PLAY_PAUSE },
-            "AUTO SONG",
-            "",
-            ACID,
-            on,
-            0.0,
-        );
         let popup = ui.make_persistent_id("forms");
         let resp = resp
             .on_hover_text(if on {
-                "Click: stop the song – the groove keeps playing"
+                "AUTO SONG is playing – click to stop it"
             } else {
-                "Play a whole track from favorite 1 (favorite 2 after the first drop): intro, groove, break, drop, outro"
+                "AUTO SONG: play (and record) a whole track from your favorites"
             })
             .on_hover_cursor(egui::CursorIcon::PointingHand);
         if resp.clicked() {
-            if on {
-                self.stop_song(now);
-            } else {
-                ui.memory_mut(|m| m.toggle_popup(popup));
-            }
+            ui.memory_mut(|m| m.toggle_popup(popup));
         }
         let full = self.song_favorites().map(|s| s.is_some());
-        egui::popup::popup_above_or_below_widget(
-            ui,
-            popup,
-            &resp,
-            egui::AboveOrBelow::Above,
-            egui::PopupCloseBehavior::CloseOnClick,
-            |ui| {
-                ui.set_min_width(360.0);
-                ui.label(egui::RichText::new("Play a song from your favorite").font(bold(13.0)).color(TEXT));
-                ui.label(
-                    egui::RichText::new(
-                        "Favorite 1 starts – quietly, then track by track. The first drop comes early; favorite 2 takes over after it and favorite 1 returns for the last one (with one favorite, each drop is a new chapter of it). Bunker steers the energy, varies the grooves, breaks and drops – you can jam along.",
-                    )
-                    .font(body(11.0))
-                    .color(FAINT),
-                );
-                ui.add_space(4.0);
-                for (k, f) in FORMS.iter().enumerate() {
-                    let mins = f.bars() as f32 * 4.0 / self.song.bpm;
-                    let parts: Vec<String> = f
-                        .sections
-                        .iter()
-                        .map(|sec| {
-                            let letter = crate::form::pattern_slot(sec.pattern, full).map_or("·".to_string(), |i| (i + 1).to_string());
-                            format!("{} {letter}", sec.part.name())
-                        })
-                        .collect();
-                    let mut job = egui::text::LayoutJob::default();
-                    let fmt = |font, color| egui::TextFormat {
-                        font_id: font,
-                        color,
-                        ..Default::default()
-                    };
-                    job.append(f.name, 0.0, fmt(bold(13.5), ACID));
-                    job.append(&format!("   ~{:.0} min · {}\n", mins.max(1.0), f.blurb), 0.0, fmt(body(11.0), DIM));
-                    job.append(&parts.join(" · "), 0.0, fmt(body(10.5), FAINT));
-                    if ui.selectable_label(false, job).clicked() {
-                        self.start_song(k, now);
-                    }
+        egui::popup_below_widget(ui, popup, &resp, egui::PopupCloseBehavior::CloseOnClick, |ui| {
+            ui.set_min_width(380.0);
+            ui.label(
+                egui::RichText::new("AUTO SONG")
+                    .font(bold(13.0))
+                    .color(TEXT)
+                    .extra_letter_spacing(1.2),
+            );
+            ui.label(
+                egui::RichText::new(
+                    "A whole track, recorded as it plays. Favorite 1 starts – quietly, then track by track. The first drop comes early; favorite 2 takes over after it and favorite 1 returns for the last one (with one favorite, each drop is a new chapter of it). Bunker steers the energy, varies the grooves, breaks and drops – you can jam along.",
+                )
+                .font(body(11.0))
+                .color(FAINT),
+            );
+            ui.add_space(4.0);
+            if on {
+                let stop = egui::RichText::new(format!("{}  Stop the song – the groove keeps playing", ph::STOP)).font(bold(13.0));
+                if ui.selectable_label(false, stop).clicked() {
+                    self.stop_song(now);
                 }
-            },
-        );
+                ui.separator();
+            }
+            for (k, f) in FORMS.iter().enumerate() {
+                let mins = f.bars() as f32 * 4.0 / self.song.bpm;
+                let parts: Vec<String> = f
+                    .sections
+                    .iter()
+                    .map(|sec| {
+                        let letter = crate::form::pattern_slot(sec.pattern, full).map_or("·".to_string(), |i| (i + 1).to_string());
+                        format!("{} {letter}", sec.part.name())
+                    })
+                    .collect();
+                let mut job = egui::text::LayoutJob::default();
+                let fmt = |font, color| egui::TextFormat {
+                    font_id: font,
+                    color,
+                    ..Default::default()
+                };
+                job.append(f.name, 0.0, fmt(bold(13.5), ACID));
+                job.append(&format!("   ~{:.0} min · {}\n", mins.max(1.0), f.blurb), 0.0, fmt(body(11.0), DIM));
+                job.append(&parts.join(" · "), 0.0, fmt(body(10.5), FAINT));
+                if ui.selectable_label(self.song_form == Some(k), job).clicked() {
+                    self.start_song(k, now);
+                }
+            }
+        });
     }
 
     /// Song mode: the parts of the form, where it is, click to jump
@@ -2348,14 +2452,14 @@ impl BunkerApp {
                 let max_h = ctx.screen_rect().height() - 200.0;
                 egui::ScrollArea::vertical().max_height(max_h).show(ui, |ui| {
                     row(ui, ph::PLAY, "1 · Press play", "Space, or the button in the middle. Pick a vibe at the top – every pick rolls a new groove in that style (Custom starts empty). SHUFFLE (Enter) rolls again. ⌘/Ctrl + Z undoes anything, a shuffle too.");
-                    row(ui, ph::PLANET, "2 · Read the planets", "Every track is an orbit round the sun, once round is one bar of 16 steps, the numbers 1–4 are the beats. Every step that plays is a planet; the beam sweeps round and lights up each one it passes. Bass and synth planets float higher or lower with their note. A ring like Saturn's: accent (louder). A coloured circle around it: it only plays sometimes. A trail to the planet before: the synth slides into it. A faded orbit: that track is muted. The sun is the play button. RADAR at the top shows the same as flat rings of dots, CLASSIC as pads and a step grid (Tab switches).");
+                    row(ui, ph::PLANET, "2 · Read the planets", "Every track is an orbit round the sun, once round is one bar of 16 steps, the numbers 1–4 are the beats. Every step that plays is a planet; the beam sweeps round and lights up each one it passes. Bass and synth planets float higher or lower with their note. A ring like Saturn's: accent (louder). A coloured circle around it: it only plays sometimes. A trail to the planet before: the synth slides into it. A faded orbit: that track is muted. The sun is the play button. CLASSIC at the top shows the same as pads and a step grid (Tab switches); the older RADAR view can be switched on in the settings.");
                     row(ui, ph::HAND_POINTING, "3 · Change the groove", "Click a dot to switch it on or off, drag to paint. Right-click a dot (or a tile in CLASSIC, the pads and step grid – Tab) for its menu: on, accent, slide, how often it plays and – on bass and synth – its note. The mouse wheel on a bass or synth dot moves its note too.");
                     row(ui, ph::LIST, "4 · Tracks", "S solos a track, the speaker mutes it, the dice rolls a new rhythm for it (right-click: clear), the lock keeps shuffle and the auto mode away from it. The coloured pill is its sound – click it for the list, tune and decay.");
-                    row(ui, ph::MUSIC_NOTES, "5 · Mood & pitch", "MOOD picks the notes and chords of bass and synth – from Dark and Hypnotic to Euphoric, Sunny or Mysterious. Pitch moves them lower or higher.");
+                    row(ui, ph::MUSIC_NOTES, "5 · Mood & pitch", "MOOD picks the notes and chords of bass and synth – from Dark and Hypnotic to Euphoric, Sunny or Mysterious. On Auto every shuffle picks one that suits the vibe; a mood you pick stays. Pitch moves them lower or higher.");
                     row(ui, ph::LIGHTNING, "6 · Energy & drop", "The energy bar is the arrangement, not the volume (← →): under 30 a break with no kick and bass, then the tracks come in one by one, from 70 everything plays (a track the energy takes out says OUT next to its name), at 90 the build-up starts and two bars later it drops. DROP (B) does the same any time.");
                     row(ui, ph::WAVEFORM, "7 · Effects & sound", "Hold STUTTER (Q), ECHO (W), WASH (E), CRUSH (X), GATE (C) or TAPE STOP (V) and combine them; FILTER springs back when you let go. SOUND: DARK, ACID, SPACE and PUMP. MASTER: low, mid, high and drive.");
                     row(ui, ph::INFINITY, "8 · Auto mode", "Bunker keeps the groove moving: something changes every 2, 4 or 8 bars. With AUTO FX on it also steers the energy and plays breakdowns, build-ups and drops by itself. With AUTO FX off the energy bar is yours and no track is ever taken out.");
-                    row(ui, ph::STACK, "9 · Favorites & auto song", "Click + under the space window to keep what you hear (twelve slots), click a full one to switch on the next bar, right-click to rename, save over or clear. AUTO SONG makes a whole track from favorite 1 – a quiet intro, two or three drops, favorite 2 after the first – while you jam along. Click a part in the strip to jump there.");
+                    row(ui, ph::STACK, "9 · Favorites & auto song", "Click + under the space window to keep what you hear (twelve slots), click a full one to switch on the next bar, right-click to rename, save over or clear. AUTO SONG (the arrow next to the record button) makes a whole track from favorite 1 – a quiet intro, two or three drops, favorite 2 after the first – while you jam along. Click a part in the strip to jump there.");
                     row(ui, ph::RECORD, "10 · Record", "The red record button at the top (R) records everything you hear until you click it again – then save it as a WAV. An AUTO SONG records itself.");
                     row(ui, ph::SPARKLE, "11 · Visualizers", "Two fullscreen shows for a projector, with a small energy bar at the bottom: LIGHTS (P) – a spectrum ring, shockwaves and stars – and FACE (O) – a low-poly head that nods in time, glitches in a build-up, and on the drop screams with laser eyes, cracks and bursts apart. All keys keep working. Esc or a double-click goes back.");
                     row(ui, ph::FOLDER_SIMPLE, "12 · Files & settings", "File → Save keeps the groove and your favorites in a .bunker file; open it from the menu or drag it onto the window. The gear holds volume, sound output, MIDI keyboard and the update check.");
@@ -2378,6 +2482,7 @@ impl eframe::App for BunkerApp {
         eframe::set_value(storage, "fav_names", &self.names.to_vec());
         eframe::set_value(storage, "slot_now", &self.slot_now);
         eframe::set_value(storage, "check_updates", &self.check_updates);
+        eframe::set_value(storage, "radar", &self.radar);
         eframe::set_value(storage, "seen_help", &true);
     }
 }
@@ -2418,6 +2523,9 @@ impl BunkerApp {
             self.open_file(Some(path), now);
         }
 
+        if self.face_window {
+            self.face_viewport(ctx, &live, now);
+        }
         let frame = |fill: Color32, margin: f32| egui::Frame::new().fill(fill).inner_margin(margin);
         if self.visual {
             egui::CentralPanel::default().frame(frame(SPACE, 0.0)).show(ctx, |ui| {
@@ -2446,15 +2554,15 @@ impl BunkerApp {
             .show(ctx, |ui| self.top_bar(ui, &live, now));
         egui::SidePanel::left("tracks")
             .show_separator_line(false)
-            .exact_width(266.0)
+            .exact_width(272.0)
             .resizable(false)
-            .frame(frame(clear, 14.0))
+            .frame(frame(clear, 17.0))
             .show(ctx, |ui| self.tracks_panel(ui, &live, now));
         egui::SidePanel::right("live")
             .show_separator_line(false)
-            .exact_width(286.0)
+            .exact_width(298.0)
             .resizable(false)
-            .frame(frame(clear, 14.0))
+            .frame(frame(clear, 20.0))
             .show(ctx, |ui| self.live_panel(ui, &live, now));
         egui::CentralPanel::default().frame(frame(clear, 10.0)).show(ctx, |ui| {
             let area = ui.available_rect_before_wrap();
@@ -2758,6 +2866,20 @@ mod tests {
         app.set_sound(i, 2, 0.0); // → stab: a new line
         assert_eq!(app.song.tracks[i].sound, 2);
         assert!(app.song.tracks[i].hits() <= 6, "stabs are sparse");
+    }
+
+    #[test]
+    fn shuffle_keeps_a_mood_picked_by_hand() {
+        let mut app = BunkerApp::headless(Song::default(), View::Planets, false);
+        app.song.set_mood(7);
+        app.song.mood_hold = true;
+        for _ in 0..5 {
+            app.shuffle(Vibe::Hard, 0.0);
+            assert_eq!(app.song.mood(), Some(7));
+        }
+        app.song.mood_hold = false;
+        app.shuffle(Vibe::Hard, 0.0);
+        assert!(app.song.mood().is_some_and(|k| gen::moods_for(Vibe::Hard).contains(&k)));
     }
 
     #[test]

@@ -460,6 +460,8 @@ pub struct Song {
     pub auto_fx: bool,
     /// Index into `PROGRESSIONS`
     pub prog: u8,
+    /// The mood was picked by hand: shuffle and the auto mode keep it (off: the vibe picks one)
+    pub mood_hold: bool,
     pub eq: MasterEq,
 }
 
@@ -494,6 +496,7 @@ impl Song {
             curve: true,
             auto_fx: true,
             prog: 0,
+            mood_hold: false,
             eq: MasterEq::default(),
         }
     }
@@ -561,6 +564,11 @@ impl Song {
     }
 
     /// The mood whose scale and chords the song uses, if any
+    pub fn set_mood(&mut self, k: usize) {
+        self.scale = MOODS[k].2;
+        self.prog = MOODS[k].3;
+    }
+
     pub fn mood(&self) -> Option<usize> {
         MOODS
             .iter()

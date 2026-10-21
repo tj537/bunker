@@ -272,42 +272,89 @@ pub const DROP_ZONE: f32 = 0.9;
 const DROP_REARM: f32 = 0.88;
 
 /// How the auto mode arranges one 32-bar cycle
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 struct Plan {
-    /// Bar of the cycle where the breakdown starts (it lasts until the build-up at bar 30)
+    /// Bar of the cycle where the breakdown starts (it lasts until the build-up at bar 30);
+    /// 30: no breakdown, the groove rolls straight into the build-up
     breakdown_at: u64,
     /// Tracks that leave for the breakdown
     out: &'static [Voice],
     /// A low-pass filter opens slowly through the breakdown
     sweep: bool,
+    /// The energy at the bottom of the breakdown: what else the layers take out
+    depth: f32,
 }
 
-const PLANS: [Plan; 4] = [
+const PLANS: [Plan; 5] = [
     // Classic: kick and bass out for six bars
     Plan {
         breakdown_at: 24,
         out: &[Voice::Kick, Voice::Bass],
         sweep: false,
+        depth: 0.2,
     },
-    // Short and filtered: only the kick leaves, for two bars
+    // Short and filtered: only the kick leaves, for two bars – the bass rolls on
     Plan {
         breakdown_at: 28,
         out: &[Voice::Kick],
         sweep: true,
+        depth: 0.45,
     },
     // Stripped: just hats, percussion and the synth line
     Plan {
         breakdown_at: 24,
         out: &[Voice::Kick, Voice::Bass, Voice::Clap, Voice::Ride],
         sweep: false,
+        depth: 0.12,
     },
     // Filtered: no kick, everything else under a slowly opening filter
     Plan {
         breakdown_at: 24,
         out: &[Voice::Kick],
         sweep: true,
+        depth: 0.35,
+    },
+    // Roller: no breakdown – the groove rolls on into a build-up and drops on itself
+    Plan {
+        breakdown_at: 30,
+        out: &[],
+        sweep: false,
+        depth: 0.0,
     },
 ];
+
+/// Which plans suit a cycle of the set: calm cycles roll or filter, the peak strips down
+fn plans_for(heat: f32) -> &'static [usize] {
+    if heat >= 0.9 {
+        &[0, 2, 0]
+    } else if heat < 0.5 {
+        &[1, 3, 4]
+    } else {
+        &[0, 1, 3, 4]
+    }
+}
+
+/// The knobs AUTO FX plays with: eight track volumes, dark and space, the master EQ
+const KNOBS: usize = TRACKS + 5;
+
+/// How far each knob may wander from where you put it
+const KNOB_RANGE: [f32; KNOBS] = [0.1, 0.12, 0.12, 0.14, 0.1, 0.14, 0.14, 0.12, 0.08, 0.1, 0.05, 0.04, 0.05];
+
+fn knobs(s: &Song) -> [f32; KNOBS] {
+    let mut k = [0.0; KNOBS];
+    for (v, t) in k.iter_mut().zip(&s.tracks) {
+        *v = t.volume;
+    }
+    k[TRACKS..].copy_from_slice(&[s.macros.dark, s.macros.space, s.eq.low, s.eq.mid, s.eq.high]);
+    k
+}
+
+fn set_knobs(s: &mut Song, k: [f32; KNOBS]) {
+    for (t, v) in s.tracks.iter_mut().zip(k) {
+        t.volume = v;
+    }
+    [s.macros.dark, s.macros.space, s.eq.low, s.eq.mid, s.eq.high] = k[TRACKS..].try_into().unwrap();
+}
 
 struct Breakdown {
     start: u64,
@@ -334,6 +381,9 @@ enum Fill {
 }
 
 const FILLS: [Fill; 5] = [Fill::Roll, Fill::Gap, Fill::Toms, Fill::OpenHats, Fill::Throw];
+/// Fills that close 16 bars, and the lighter ones for the 8 bars in between
+const BIG_FILLS: [Fill; 3] = [Fill::Roll, Fill::Toms, Fill::Throw];
+const SMALL_FILLS: [Fill; 2] = [Fill::Gap, Fill::OpenHats];
 
 /// A stable pseudo-random number 0…1 for a key – same key, same number
 fn hash01(key: u64) -> f32 {
@@ -352,7 +402,13 @@ pub struct Engine {
     /// Auto mode: the bar the current cycle started on and its length in bars
     cycle_start: u64,
     cycle_len: u64,
+    /// Auto mode: how hot this cycle of the set is (0…1) – it climbs over a few cycles to a
+    /// peak, then the set breathes out and climbs again
+    heat: f32,
+    /// What the auto mode changed lately
+    recent: gen::Recent,
     fill: Option<(u64, Fill)>,
+    last_fill: Option<Fill>,
     arrangement: Option<Box<Arrangement>>,
     /// Song mode: the section playing, the bar it started on (`PENDING`: next bar) and a jump
     section: usize,
@@ -440,6 +496,16 @@ pub struct Engine {
     break_lp_r: Svf,
     /// Auto mode: drops since the last new chapter
     drops_since_chapter: u32,
+    /// Tracks the auto mode's energy muted – it unmutes them when the energy comes back
+    energy_out: [bool; TRACKS],
+    /// The layer energy on the last beat (auto mode: a track is muted when the energy crosses its layer)
+    last_layer: f32,
+    /// AUTO FX moving the mix: where you put the knobs, how far off they are now and where they head
+    knob_home: [f32; KNOBS],
+    knob_off: [f32; KNOBS],
+    knob_goal: [f32; KNOBS],
+    /// The knobs in the last song sent to the UI – a different value coming back is a hand on it
+    knob_sent: std::cell::Cell<[f32; KNOBS]>,
     /// `Cmd::Song`s taken in so far (sent back with every song)
     songs_in: u64,
     transpose: i8,
@@ -467,7 +533,10 @@ impl Engine {
             plan: PLANS[0],
             cycle_start: 0,
             cycle_len: 32,
+            heat: 0.5,
+            recent: Default::default(),
             fill: None,
+            last_fill: None,
             arrangement: None,
             section: 0,
             section_start: PENDING,
@@ -536,6 +605,12 @@ impl Engine {
             break_lp_l: Svf::new(18_000.0, 0.7, sr),
             break_lp_r: Svf::new(18_000.0, 0.7, sr),
             drops_since_chapter: 0,
+            energy_out: [false; TRACKS],
+            last_layer: 1.0,
+            knob_home: knobs(&song),
+            knob_off: [0.0; KNOBS],
+            knob_goal: [0.0; KNOBS],
+            knob_sent: std::cell::Cell::new(knobs(&song)),
             songs_in: 0,
             transpose: 0,
             limiter: 1.0,
@@ -556,7 +631,21 @@ impl Engine {
                 // With the energy curve on (auto or song mode), the engine owns the energy
                 let energy = self.song.macros.energy;
                 let fx_was = self.song.auto_fx;
+                // AUTO FX moves the mix: a knob you turned is yours (its new home), the others
+                // keep where the engine has them
+                let (now, sent, theirs) = (knobs(&self.song), self.knob_sent.get(), knobs(&s));
+                let mut keep = theirs;
+                for i in 0..KNOBS {
+                    if (theirs[i] - sent[i]).abs() > 1e-4 || self.knob_off[i] == 0.0 {
+                        self.knob_home[i] = theirs[i];
+                        self.knob_off[i] = 0.0;
+                        self.knob_goal[i] = 0.0;
+                    } else {
+                        keep[i] = now[i];
+                    }
+                }
                 self.song = *s;
+                set_knobs(&mut self.song, keep);
                 if self.steers_energy() {
                     self.song.macros.energy = energy;
                 } else {
@@ -583,6 +672,7 @@ impl Engine {
                     self.plan = PLANS[0];
                     self.cycle_start = 0;
                     self.cycle_len = 32;
+                    self.heat = 0.5;
                 }
             }
             Cmd::Stop => {
@@ -682,6 +772,7 @@ impl Engine {
     }
 
     fn send_song(&self, change: Option<Change>) {
+        self.knob_sent.set(knobs(&self.song));
         if let Some(tx) = &self.events {
             let _ = tx.send(Event::Song(Box::new(self.song), change, self.songs_in));
         }
@@ -752,9 +843,99 @@ impl Engine {
         }
     }
 
-    /// The last bar of a phrase: a fill
-    fn phrase_end(&mut self, bar: u64) {
-        self.fill = Some((bar, *self.auto_rng.pick(&FILLS)));
+    /// The last bar of a phrase: a fill – a big one every 16 bars, never the same twice in a row
+    fn phrase_end(&mut self, bar: u64, big: bool) {
+        let last = self.last_fill;
+        let fills: &[Fill] = if big { &BIG_FILLS } else { &SMALL_FILLS };
+        let n = fills.iter().filter(|&&f| Some(f) != last).count() as u32;
+        let f = fills
+            .iter()
+            .copied()
+            .filter(|&f| Some(f) != last)
+            .nth(self.auto_rng.below(n) as usize);
+        self.fill = f.map(|f| (bar, f));
+        self.last_fill = f;
+    }
+
+    /// The auto mode with AUTO FX: what the energy takes out is muted, not just left out
+    fn mutes_by_energy(&self) -> bool {
+        self.song.auto && self.song.auto_fx && self.arrangement.is_none()
+    }
+
+    /// Auto mode: a track whose layer the energy falls below is muted (the mute button shows
+    /// it); when the energy comes back, the tracks it muted come back too. Only crossings
+    /// count, so a track you unmute stays on. True when a mute changed.
+    fn energy_mutes(&mut self) -> bool {
+        let mut changed = false;
+        if !self.mutes_by_energy() {
+            // Auto mode or AUTO FX off: give back what it took
+            for (t, out) in self.song.tracks.iter_mut().zip(&mut self.energy_out) {
+                if std::mem::take(out) && t.mute {
+                    t.mute = false;
+                    changed = true;
+                }
+            }
+            self.last_layer = 1.0;
+            return changed;
+        }
+        let (before, e) = (self.last_layer, self.layer_energy);
+        self.last_layer = e;
+        let held: &[Voice] = self.breakdown.as_ref().map_or(&[], |b| b.out);
+        for (i, t) in self.song.tracks.iter_mut().enumerate() {
+            if held.contains(&Voice::ALL[i]) {
+                continue;
+            }
+            let layer = LAYERS[i];
+            if before >= layer && e < layer && !t.mute && !t.lock {
+                t.mute = true;
+                self.energy_out[i] = true;
+                changed = true;
+            } else if e >= layer && self.energy_out[i] {
+                self.energy_out[i] = false;
+                changed |= t.mute;
+                t.mute = false;
+            }
+        }
+        changed
+    }
+
+    /// AUTO FX plays with the mix: every knob glides towards its goal (back home when the
+    /// auto mode or AUTO FX is off). True when a knob moved.
+    fn drift_knobs(&mut self) -> bool {
+        if !(self.mutes_by_energy() && self.playing) {
+            self.knob_goal = [0.0; KNOBS];
+        }
+        if self.knob_off == self.knob_goal {
+            return false;
+        }
+        let mut k = knobs(&self.song);
+        for i in 0..KNOBS {
+            // Across its whole range in about two bars
+            let rate = KNOB_RANGE[i] / 32.0;
+            let off = &mut self.knob_off[i];
+            *off += (self.knob_goal[i] - *off).clamp(-rate, rate);
+            if (self.knob_goal[i] - *off).abs() < 1e-5 {
+                *off = self.knob_goal[i];
+            }
+            k[i] = (self.knob_home[i] + *off).clamp(0.0, 1.0);
+        }
+        set_knobs(&mut self.song, k);
+        true
+    }
+
+    /// New goals for a couple of knobs: a track a bit louder or softer, the room a bit
+    /// bigger, the tone a bit darker – never far from where you put them
+    fn new_knob_goals(&mut self, n: usize) {
+        for _ in 0..n {
+            let i = self.auto_rng.below(KNOBS as u32) as usize;
+            let r = KNOB_RANGE[i];
+            // Now and then back home
+            self.knob_goal[i] = if self.auto_rng.chance(0.25) {
+                0.0
+            } else {
+                (self.auto_rng.f32() * 2.0 - 1.0) * r
+            };
+        }
     }
 
     /// Bunker moves the energy: the auto mode with AUTO FX, or a song
@@ -805,14 +986,17 @@ impl Engine {
         m.energy = m.energy.max(0.85);
         let mut change = Change::Drop;
         if self.song.auto {
+            let peaked = self.heat >= 0.9;
             self.new_cycle(self.bar_now);
-            // A new chapter only every few drops – the set keeps its identity for a while
-            if self.drops_since_chapter >= 2 && self.auto_rng.chance(0.5) {
-                change = gen::new_chapter(&mut self.song, &mut self.auto_rng);
+            // A new chapter only every few drops – the set keeps its identity for a while –
+            // and most likely as the set breathes out after its peak
+            let n = self.drops_since_chapter;
+            if (n >= 2 && (peaked || self.auto_rng.chance(0.35))) || n >= 4 {
+                change = gen::new_chapter(&mut self.song, &mut self.auto_rng, peaked);
                 self.drops_since_chapter = 0;
             } else {
                 let mutes = self.song.auto_fx;
-                gen::evolve(&mut self.song, &mut self.auto_rng, mutes);
+                gen::evolve(&mut self.song, &mut self.auto_rng, mutes, true, &mut self.recent);
                 self.drops_since_chapter += 1;
             }
             if self.song.auto_fx {
@@ -898,7 +1082,7 @@ impl Engine {
             && played + 1 < n
             && self.auto_rng.chance(0.7)
         {
-            self.phrase_end(bar);
+            self.phrase_end(bar, (played + 1).is_multiple_of(16));
         }
     }
 
@@ -948,7 +1132,7 @@ impl Engine {
         }
         // After the drop with the same favorite: a new chapter of it, so it feels fresh
         if sec.part == Part::Peak && same {
-            gen::new_chapter(&mut self.song, &mut self.auto_rng);
+            gen::new_chapter(&mut self.song, &mut self.auto_rng, false);
         }
         self.song.curve = true;
         self.energy_goal = sec.part.energy(0, sec.bars as u64);
@@ -1013,18 +1197,31 @@ impl Engine {
         self.send_song(Some(Change::SongEnd));
     }
 
-    /// Auto mode's energy: settles after the drop, rises towards the breakdown,
-    /// drops low in it and climbs through the build-up
+    /// Auto mode's energy: lands high on the drop and settles, climbs a step every phrase
+    /// towards the breakdown, falls to the plan's depth and creeps up through it, then
+    /// climbs through the build-up. The heat of the cycle sets how high it all goes.
     fn curve_target(&self, b: u64) -> f32 {
-        let (at, build) = (self.breakdown_at(), self.cycle_len - 2);
+        let (h, at, build) = (self.heat, self.breakdown_at(), self.cycle_len - 2);
+        let drop = 0.9 + 0.08 * h;
+        let settle = 0.6 + 0.15 * h;
+        let top = settle + 0.08 + 0.1 * h;
         if b < 8 {
-            0.95 - 0.25 * b as f32 / 8.0
+            drop - (drop - settle) * b as f32 / 8.0
         } else if b < at {
-            0.7 + 0.15 * (b - 8) as f32 / (at - 8).max(1) as f32
+            // Terraces: a new level on every phrase, the top in the last one
+            let phrases = (at - 8).div_ceil(8).max(1);
+            let k = ((b - 8) / 8 + 1).min(phrases);
+            settle + (top - settle) * k as f32 / phrases as f32
         } else if b < build {
-            0.2
+            let p = (b - at) as f32 / (build - at) as f32;
+            self.plan.depth + 0.15 * p * p
         } else {
-            0.5 + (b - build) as f32 * 0.2
+            let from = if self.has_breakdown() {
+                (self.plan.depth + 0.3).max(0.5)
+            } else {
+                top - 0.15
+            };
+            from + (b - build) as f32 * 0.2
         }
     }
 
@@ -1033,16 +1230,36 @@ impl Engine {
         self.cycle_len - (32 - self.plan.breakdown_at)
     }
 
-    /// A new auto cycle from `bar` on: another kind of breakdown and, in the calmer vibes,
-    /// sometimes a longer groove before it
+    /// The plan has a breakdown (a roller doesn't)
+    fn has_breakdown(&self) -> bool {
+        self.breakdown_at() < self.cycle_len - 2
+    }
+
+    /// A new auto cycle from `bar` on: the set's heat moves on (up a step, or down after
+    /// the peak), and with it another kind of breakdown – never the same twice in a row –
+    /// and the cycle's length: calm cycles groove longer, the peak comes quick
     fn new_cycle(&mut self, bar: u64) {
         self.cycle_start = bar;
-        self.plan = PLANS[self.auto_rng.below(PLANS.len() as u32) as usize];
-        let lens: &[u64] = match self.song.vibe.rules() {
-            Vibe::Hypnotic | Vibe::Minimal | Vibe::Dub | Vibe::Melodic => &[32, 48, 64, 48],
-            _ => &[32, 32, 48],
+        let r = &mut self.auto_rng;
+        self.heat = if self.heat >= 0.9 {
+            0.3 + 0.2 * r.f32()
+        } else {
+            (self.heat + 0.15 + 0.2 * r.f32()).min(1.0)
         };
-        self.cycle_len = *self.auto_rng.pick(lens);
+        let last = self.plan;
+        let options = plans_for(self.heat);
+        let n = options.iter().filter(|&&i| PLANS[i] != last).count() as u32;
+        let i = options.iter().copied().filter(|&i| PLANS[i] != last).nth(r.below(n) as usize);
+        self.plan = PLANS[i.unwrap_or(0)];
+        let calm = matches!(self.song.vibe.rules(), Vibe::Hypnotic | Vibe::Minimal | Vibe::Dub | Vibe::Melodic);
+        let lens: &[u64] = match (calm, self.heat) {
+            (_, h) if h >= 0.9 => &[32],
+            (true, h) if h < 0.5 => &[48, 64],
+            (true, _) => &[32, 48, 64, 48],
+            (false, h) if h < 0.5 => &[32, 48],
+            (false, _) => &[32, 32, 48],
+        };
+        self.cycle_len = *r.pick(lens);
     }
 
     /// Bar starts: drops, a waiting pattern, song mode, and in auto mode the arrangement
@@ -1068,8 +1285,9 @@ impl Engine {
         if dropped || !self.song.auto || bar == 0 {
             return;
         }
-        // A cycle of 32–64 bars: groove (changing every few bars, a fill every 8), breakdown,
+        // A cycle of 32–64 bars: groove (a change every few bars, a fill every 8), breakdown,
         // 2 bars build-up, drop. Every drop – also one by hand – starts the next cycle.
+        // Everything counts from the cycle's start, so changes land on phrases.
         if bar < self.cycle_start || bar - self.cycle_start >= self.cycle_len {
             self.new_cycle(bar);
         }
@@ -1081,19 +1299,35 @@ impl Engine {
         let fx = self.song.auto_fx;
         if fx {
             self.energy_goal = self.curve_target(b);
-            if b == at && self.build.is_none() {
+            if bar.is_multiple_of(2) {
+                self.new_knob_goals(if b < 8 { 1 } else { 2 });
+            }
+            if b == at && self.has_breakdown() && self.build.is_none() {
                 self.start_breakdown(idx);
             } else if b == self.cycle_len - 2 && self.build.is_none() {
                 self.auto_build(idx);
             }
         }
-        if b < at && bar.is_multiple_of(self.song.auto_bars.max(1) as u64) {
-            if let Some(change) = gen::evolve(&mut self.song, &mut self.auto_rng, fx) {
+        // Without AUTO FX there's no breakdown: the groove changes all through the cycle
+        let groove = if fx { at } else { self.cycle_len };
+        let every = self.song.auto_bars.max(1) as u64;
+        if b < groove && b.is_multiple_of(every) {
+            // The big change opens a phrase; in between come small touches
+            let big = b.is_multiple_of(8) || every >= 8;
+            if let Some(change) = gen::evolve(&mut self.song, &mut self.auto_rng, fx, big, &mut self.recent) {
                 self.send_song(Some(change));
             }
         }
-        if b + 1 < at && (b + 1).is_multiple_of(8) && self.auto_rng.chance(0.8) {
-            self.phrase_end(bar);
+        let next = b + 1;
+        if fx && next == at && self.has_breakdown() {
+            // The clap thrown into the echo leads into the breakdown
+            self.fill = Some((bar, Fill::Throw));
+            self.last_fill = Some(Fill::Throw);
+        } else if next < groove && next.is_multiple_of(8) {
+            let big = next.is_multiple_of(16);
+            if self.auto_rng.chance(if big { 0.9 } else { 0.7 }) {
+                self.phrase_end(bar, big);
+            }
         }
     }
 
@@ -1116,6 +1350,12 @@ impl Engine {
         if idx.is_multiple_of(4) || self.build.is_some() {
             self.layer_energy = self.song.macros.energy;
         }
+        if idx.is_multiple_of(4) && self.energy_mutes() {
+            self.send_song(None);
+        }
+        if self.drift_knobs() && idx.is_multiple_of(4) {
+            self.send_song(None);
+        }
         self.shared.step.store(idx, Ordering::Relaxed);
         let build = self.build_progress(idx as f64);
         let gap = self.in_drop_gap(idx as f64);
@@ -1128,20 +1368,23 @@ impl Engine {
         let step_len = self.step_len() as f32;
         let energy = self.layer_energy;
         // The kick roll of a build-up comes in even when the energy or a breakdown took the kick out
-        let kick_by_hand = self.breakdown.as_ref().map_or(self.song.track(Voice::Kick).mute, |b| {
+        let kick = Voice::Kick.index();
+        let kick_by_hand = self.breakdown.as_ref().map_or(self.song.tracks[kick].mute, |b| {
             if b.out.contains(&Voice::Kick) {
-                b.before[Voice::Kick.index()]
+                b.before[kick]
             } else {
-                self.song.track(Voice::Kick).mute
+                self.song.tracks[kick].mute
             }
-        });
+        }) && !self.energy_out[kick];
         // A hi-hat can't be open and closed at once: the closed one leaves the open one's steps alone
         let oh = self.song.track(Voice::OpenHat);
-        let open_now = !oh.mute && energy >= LAYERS[Voice::OpenHat.index()] && oh.steps[oh.step_at(play_idx)].on;
+        // The auto mode mutes what the energy takes out instead (`energy_mutes`)
+        let layered = !self.mutes_by_energy();
+        let open_now = !oh.mute && (!layered || energy >= LAYERS[Voice::OpenHat.index()]) && oh.steps[oh.step_at(play_idx)].on;
         for (ti, voice) in Voice::ALL.into_iter().enumerate() {
             let track = self.song.tracks[ti];
             let roll = build.is_some() && voice == Voice::Kick && !kick_by_hand;
-            if !roll && (track.mute || energy < LAYERS[ti]) {
+            if !roll && (track.mute || (layered && energy < LAYERS[ti])) {
                 continue;
             }
             if fill == Some(Fill::Gap) && in_bar >= 12 && matches!(voice, Voice::Kick | Voice::Bass) {
@@ -1981,6 +2224,74 @@ mod tests {
     }
 
     #[test]
+    fn the_set_climbs_to_a_peak_and_breathes_out() {
+        let song = gen::generate(Vibe::Peak, &Default::default(), &mut Rng::new(3));
+        let mut e = Engine::new(11_025.0, song, Shared::new(), None, 7);
+        let (mut peaks, mut releases) = (0, 0);
+        for c in 0..60 {
+            let (heat, plan) = (e.heat, e.plan);
+            e.new_cycle(c * 32);
+            assert_ne!(e.plan, plan, "never the same breakdown twice in a row");
+            if heat >= 0.9 {
+                assert!(e.heat < 0.5, "after the peak the set breathes out: {}", e.heat);
+                releases += 1;
+            } else {
+                assert!(e.heat > heat, "it climbs: {heat} → {}", e.heat);
+            }
+            if e.heat >= 0.9 {
+                peaks += 1;
+                assert_eq!(e.cycle_len, 32, "the peak comes quick");
+                assert!(e.has_breakdown() && e.plan.depth <= 0.2, "the peak strips down: {:?}", e.plan);
+            }
+        }
+        assert!(peaks >= 10 && releases >= 10, "{peaks} peaks, {releases} releases");
+    }
+
+    #[test]
+    fn the_energy_climbs_in_phrases_and_the_heat_sets_how_high() {
+        let song = gen::generate(Vibe::Peak, &Default::default(), &mut Rng::new(3));
+        let mut e = Engine::new(11_025.0, song, Shared::new(), None, 7);
+        e.cycle_len = 48;
+        e.plan = PLANS[0];
+        e.heat = 0.5;
+        // One level per phrase, a step up from phrase to phrase
+        for b in 8..e.breakdown_at() {
+            let phrase = (b - 8) / 8 * 8 + 8;
+            assert_eq!(e.curve_target(b), e.curve_target(phrase), "bar {b}");
+        }
+        assert!(e.curve_target(16) > e.curve_target(8));
+        // In the breakdown it creeps up, and the build-up climbs from there
+        let at = e.breakdown_at();
+        assert!(e.curve_target(at) < BREAK_ZONE && e.curve_target(at + 5) > e.curve_target(at));
+        assert!(e.curve_target(e.cycle_len - 1) > e.curve_target(e.cycle_len - 2));
+        let warm = e.curve_target(at - 1);
+        e.heat = 1.0;
+        assert!(e.curve_target(at - 1) > warm + 0.05, "a hot cycle runs higher");
+        assert!(e.curve_target(at - 1) < 1.0 && e.curve_target(0) < 1.0);
+    }
+
+    #[test]
+    fn a_roller_cycle_builds_and_drops_without_a_breakdown() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut song = gen::generate(Vibe::Peak, &Default::default(), &mut Rng::new(5));
+        song.auto = true;
+        song.bpm = 200.0;
+        let mut e = Engine::new(22_050.0, song, Shared::new(), Some(tx), 9);
+        e.handle(Cmd::Play);
+        e.plan = PLANS[4];
+        let bar = (e.step_len() * STEPS as f64) as usize;
+        let mut buf = vec![0.0; 2 * bar * 33];
+        e.render(&mut buf);
+        let changes: Vec<Change> = rx.try_iter().filter_map(Event::change).collect();
+        assert!(!changes.contains(&Change::Breakdown), "{changes:?}");
+        assert!(changes.contains(&Change::Build));
+        assert!(
+            changes.iter().any(|c| matches!(c, Change::Drop | Change::NewChapter)),
+            "{changes:?}"
+        );
+    }
+
+    #[test]
     fn live_effects_stay_clean() {
         let song = gen::generate(Vibe::Peak, &Default::default(), &mut Rng::new(3));
         let mut e = Engine::new(22_050.0, song, Shared::new(), None, 1);
@@ -2237,6 +2548,64 @@ mod tests {
         e.handle(Cmd::Song(Box::new(ui_song)));
         assert_eq!(e.song.macros.energy, 0.9);
         assert!(e.breakdown.is_none());
+    }
+
+    #[test]
+    fn auto_fx_mutes_what_the_energy_takes_out_and_moves_the_mix() {
+        let mut song = gen::generate(Vibe::Hypnotic, &Default::default(), &mut Rng::new(4));
+        song.auto = true;
+        song.bpm = 180.0;
+        let home = knobs(&song);
+        let mut e = Engine::new(11_025.0, song, Shared::new(), None, 1);
+        e.handle(Cmd::Play);
+        let bar = (e.step_len() * STEPS as f64) as usize;
+        let mut buf = vec![0.0; 2 * bar * 27 + 100];
+        e.render(&mut buf); // into the breakdown: the energy is low
+                            // What the low energy takes out is muted – the mute button shows it
+        for (i, t) in e.song.tracks.iter().enumerate() {
+            if LAYERS[i] > e.layer_energy && !t.lock {
+                assert!(t.mute, "{:?} muted at {}", Voice::ALL[i], e.layer_energy);
+            }
+        }
+        let out = e.energy_out;
+        assert!(out.iter().any(|&o| o), "the energy muted something");
+        // The mix moved a little, never far from where it was put
+        let k = knobs(&e.song);
+        assert!(k.iter().zip(&home).any(|(a, b)| (a - b).abs() > 0.01), "the knobs moved");
+        for i in 0..KNOBS {
+            assert!((k[i] - home[i]).abs() <= KNOB_RANGE[i] + 1e-4, "knob {i}: {} vs {}", k[i], home[i]);
+        }
+        // Auto mode off: what it muted comes back, the knobs glide home
+        e.send_song(None);
+        let mut s = e.song;
+        s.auto = false;
+        e.handle(Cmd::Song(Box::new(s)));
+        let mut buf = vec![0.0; 2 * bar * 4];
+        e.render(&mut buf);
+        for (i, &o) in out.iter().enumerate() {
+            assert!(!o || !e.song.tracks[i].mute, "{:?} back", Voice::ALL[i]);
+        }
+        let k = knobs(&e.song);
+        for i in 0..KNOBS {
+            assert!((k[i] - home[i]).abs() < 1e-4, "knob {i} home: {} vs {}", k[i], home[i]);
+        }
+    }
+
+    #[test]
+    fn a_knob_you_turn_stays_where_you_put_it() {
+        let mut song = gen::generate(Vibe::Hypnotic, &Default::default(), &mut Rng::new(4));
+        song.auto = true;
+        let mut e = Engine::new(11_025.0, song, Shared::new(), None, 1);
+        e.handle(Cmd::Play);
+        let bar = (e.step_len() * STEPS as f64) as usize;
+        let mut buf = vec![0.0; 2 * bar * 12];
+        e.render(&mut buf);
+        e.send_song(None);
+        let mut s = e.song;
+        s.macros.space = 0.9;
+        e.handle(Cmd::Song(Box::new(s)));
+        assert_eq!(e.song.macros.space, 0.9);
+        assert_eq!(e.knob_home[TRACKS + 1], 0.9);
     }
 
     #[test]
