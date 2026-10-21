@@ -16,7 +16,8 @@ pub struct PadsOut {
 
 pub fn pads(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mut Paint, pressed: &[bool; TRACKS]) -> PadsOut {
     let mut out = PadsOut { hits: Vec::new() };
-    let grid_h = (rect.height() * 0.38).clamp(190.0, 300.0);
+    // The tracks get more room than the pads
+    let grid_h = (rect.height() * 0.58).clamp(260.0, 560.0);
     let pad_area = Rect::from_min_max(rect.min, pos2(rect.right(), rect.bottom() - grid_h - 16.0));
     let grid_area = Rect::from_min_max(pos2(rect.left(), rect.bottom() - grid_h), rect.max);
 
@@ -96,7 +97,7 @@ pub fn pads(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mut P
 
     // ── Step grid ──
     let label_w = 74.0;
-    let row_h = (grid_area.height() / TRACKS as f32).min(30.0);
+    let row_h = (grid_area.height() / TRACKS as f32).min(60.0);
     let cell_w = (grid_area.width() - label_w) / STEPS as f32;
     let resp = ui.allocate_rect(grid_area, Sense::click_and_drag());
     let pointer = resp.hover_pos().or(resp.interact_pointer_pos());

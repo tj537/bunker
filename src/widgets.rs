@@ -219,10 +219,22 @@ pub fn segmented(ui: &mut Ui, items: &[(String, &str)], picked: &[bool], color: 
     clicked
 }
 
-/// A square effect button: icon on top, name below, its key in the corner. `lit` 0…1
-/// lights it up without pressing it – when Bunker uses the effect by itself.
+/// An effect button: icon and name on top, a picture of what it does below (`art`, drawn
+/// in the ink it's given), its key in the corner. `lit` 0…1 lights it up without pressing
+/// it – when Bunker uses the effect by itself.
 #[allow(clippy::too_many_arguments)]
-pub fn fx_button(ui: &Ui, rect: Rect, resp: &Response, icon: &str, name: &str, key: &str, color: Color32, active: bool, lit: f32) {
+pub fn fx_button(
+    ui: &Ui,
+    rect: Rect,
+    resp: &Response,
+    icon: &str,
+    name: &str,
+    key: &str,
+    color: Color32,
+    active: bool,
+    lit: f32,
+    art: impl FnOnce(&egui::Painter, Rect, Color32),
+) {
     let p = ui.painter();
     let hot = resp.hovered();
     let lit = if active { 0.0 } else { lit.clamp(0.0, 1.0) };
@@ -262,19 +274,27 @@ pub fn fx_button(ui: &Ui, rect: Rect, resp: &Response, icon: &str, name: &str, k
             color
         }
     };
-    let compact = rect.height() < 46.0;
-    if compact {
-        p.text(
-            rect.center() - vec2(4.0, 0.0),
-            Align2::CENTER_CENTER,
-            format!("{icon} {name}"),
-            bold(11.0),
-            fg,
-        );
-    } else {
-        p.text(rect.center() - vec2(0.0, 8.0), Align2::CENTER_CENTER, icon, body(18.0), fg);
-        p.text(rect.center() + vec2(0.0, 12.0), Align2::CENTER_CENTER, name, bold(11.0), fg);
-    }
+    // The name on top, the picture of what it does below
+    let art_rect = Rect::from_min_max(
+        pos2(rect.left() + 10.0, rect.top() + rect.height() * 0.48),
+        pos2(rect.right() - 10.0, rect.bottom() - 6.0),
+    );
+    art(
+        p,
+        art_rect,
+        if active {
+            alpha(SPACE, 0.75)
+        } else {
+            alpha(color, if hot { 0.95 } else { 0.75 })
+        },
+    );
+    p.text(
+        pos2(rect.center().x, rect.top() + rect.height() * 0.27),
+        Align2::CENTER_CENTER,
+        format!("{icon} {name}"),
+        bold(11.5),
+        fg,
+    );
     p.text(
         rect.right_top() + vec2(-7.0, 5.0),
         Align2::RIGHT_TOP,

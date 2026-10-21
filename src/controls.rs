@@ -421,3 +421,95 @@ pub fn pitch_card(ui: &mut Ui, semis: &mut u8, default: u8, label: &str, color: 
     }
     resp.on_hover_cursor(egui::CursorIcon::ResizeVertical)
 }
+
+/// The picture on an effect button (in `Fx::ALL` order), moving with `t`: stutter repeats a
+/// slice, echo fades out in repeats, wash smears waves into each other, crush steps a wave,
+/// gate chops it, tape stop slows it down
+pub fn fx_art(p: &egui::Painter, r: Rect, kind: usize, ink: Color32, t: f32) {
+    let line = |pts: Vec<Pos2>, w: f32, c: Color32| {
+        p.add(egui::Shape::line(pts, stroke(w, c)));
+    };
+    let (cy, amp) = (r.center().y, r.height() / 2.0);
+    let wave = |f: &dyn Fn(f32) -> f32, n: usize| -> Vec<Pos2> {
+        (0..=n)
+            .map(|i| {
+                let x = i as f32 / n as f32;
+                pos2(r.left() + x * r.width(), cy - f(x).clamp(-1.0, 1.0) * amp)
+            })
+            .collect()
+    };
+    match kind {
+        // Stutter: the same little slice, over and over
+        0 => {
+            let n = 6;
+            let w = r.width() / n as f32;
+            let hit = (t * 3.0).fract();
+            for k in 0..n {
+                let x0 = r.left() + k as f32 * w;
+                let lit = if (k as f32 / n as f32 - hit).abs() < 0.17 { 1.0 } else { 0.6 };
+                let pts: Vec<Pos2> = (0..=12)
+                    .map(|i| {
+                        let f = i as f32 / 12.0;
+                        let y = (f * 18.0).sin() * (1.0 - f).powi(2);
+                        pos2(x0 + 2.0 + f * (w - 4.0), cy - y * amp)
+                    })
+                    .collect();
+                line(pts, 2.0, ink.gamma_multiply(lit));
+            }
+        }
+        // Echo: a hit and its repeats, each softer, travelling
+        1 => {
+            let shift = (t * 0.8).fract();
+            for k in 0..7 {
+                let f = (k as f32 + shift) / 7.0;
+                let x = r.left() + f * r.width();
+                let h = amp * 0.62f32.powf(k as f32 + shift) * 2.0;
+                let c = ink.gamma_multiply((1.0 - f * 0.7).max(0.2));
+                p.line_segment([pos2(x, cy - h / 2.0), pos2(x, cy + h / 2.0)], stroke(3.0, c));
+            }
+        }
+        // Wash: three waves smearing into each other
+        2 => {
+            for k in 0..3 {
+                let ph = t * (0.7 + k as f32 * 0.3) + k as f32 * 2.1;
+                let a = 0.55 - k as f32 * 0.12;
+                let pts = wave(&|x| a * (x * 9.0 + ph).sin() + 0.25 * (x * 4.0 - ph * 0.7).sin(), 48);
+                line(pts, 2.5 - k as f32 * 0.5, ink.gamma_multiply(1.0 - k as f32 * 0.25));
+            }
+        }
+        // Crush: a wave in stairs
+        3 => {
+            let steps = 14;
+            let mut pts = Vec::new();
+            for i in 0..steps {
+                let x0 = i as f32 / steps as f32;
+                let x1 = (i + 1) as f32 / steps as f32;
+                let y = ((x0 * 12.0 + t * 2.0).sin() * 3.0).round() / 3.0;
+                let yy = cy - y * amp * 0.9;
+                pts.push(pos2(r.left() + x0 * r.width(), yy));
+                pts.push(pos2(r.left() + x1 * r.width(), yy));
+            }
+            line(pts, 2.5, ink);
+        }
+        // Gate: the sound chopped into sixteenths
+        4 => {
+            let n = 12;
+            let w = r.width() / n as f32;
+            let run = (t * 2.0) as usize;
+            for k in 0..n {
+                let open = (k + run) % 3 != 2;
+                if open {
+                    let h = amp * (1.4 + 0.5 * ((k as f32 * 1.7 + t).sin()));
+                    let b = Rect::from_center_size(pos2(r.left() + (k as f32 + 0.5) * w, cy), vec2(w * 0.62, h.min(r.height())));
+                    p.rect_filled(b, 2.0, ink);
+                }
+            }
+        }
+        // Tape stop: a wave that slows down and sinks
+        _ => {
+            let ph = t * 3.0;
+            let pts = wave(&|x| (1.0 - 0.55 * x) * ((1.0 - x).powf(0.6) * 26.0 + ph).sin() - 0.25 * x * x, 64);
+            line(pts, 2.5, ink);
+        }
+    }
+}

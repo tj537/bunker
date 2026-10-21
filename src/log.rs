@@ -106,6 +106,8 @@ pub struct Log {
     drops: u32,
     played: f64,
     last_tick: Option<f64>,
+    /// Facts about the set and tips now and then (a setting)
+    pub facts: bool,
     /// By hand: where the energy was (0 break, 1 groove, 2 everything) – a crossing gets a line
     zone: Option<u8>,
     rng: Rng,
@@ -122,6 +124,7 @@ impl Log {
             drops: 0,
             played: 0.0,
             last_tick: None,
+            facts: true,
             zone: None,
             rng: Rng::new(1984),
         }
@@ -195,7 +198,7 @@ impl Log {
             return;
         }
         self.played += dt;
-        if now >= self.next_line {
+        if now >= self.next_line && self.facts {
             self.next_line = now + 30.0 + self.rng.f32() as f64 * 20.0;
             let line = self.next_fact(song);
             self.push(line, now);
