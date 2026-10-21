@@ -418,13 +418,7 @@ pub fn planets(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mu
     let icon = if live.playing { ph::STOP } else { ph::PLAY };
     let ink = mix(warm, SPACE, 0.8);
     p.text(sys.c - vec2(0.0, rs * 0.16), Align2::CENTER_CENTER, icon, body(rs * 0.6), ink);
-    let info = if let Some(b) = live.build {
-        format!("BUILD {}%", (b * 100.0) as u32)
-    } else if live.playing {
-        format!("BAR {}", live.bar + 1)
-    } else {
-        "SPACE".into()
-    };
+    let info = live.info();
     p.text(
         sys.c + vec2(0.0, rs * 0.42),
         Align2::CENTER_CENTER,

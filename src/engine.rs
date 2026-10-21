@@ -525,6 +525,8 @@ pub struct Engine {
 
 impl Engine {
     pub fn new(sr: f32, song: Song, shared: Arc<Shared>, events: Option<Sender<Event>>, seed: u64) -> Self {
+        // A new engine (after the sound device changed) starts untransposed: say so
+        shared.transpose.store(0, Ordering::Relaxed);
         Engine {
             sr,
             song,
@@ -1568,7 +1570,7 @@ impl Engine {
         // Darkness closes the master tone filter – all the way down to a muffled 1.5 kHz
         let tone = 18_000.0 * 0.1f32.powf(dark * dark * 1.08);
         self.tone_l.set(tone, 0.6, sr);
-        self.tone_r.set(tone, 0.6, sr);
+        self.tone_r.tune_like(&self.tone_l);
         // Chord stabs live in the echo (dub)
         let mut delay_send = DELAY_SEND;
         if self.song.track(Voice::Acid).sound == 2 {
@@ -1724,13 +1726,13 @@ impl Engine {
             if f < -0.02 {
                 let fc = 18_000.0 * 0.012f32.powf(-f);
                 self.filter_l.set(fc, 1.6, sr);
-                self.filter_r.set(fc, 1.6, sr);
+                self.filter_r.tune_like(&self.filter_l);
                 l = self.filter_l.run(l).lp;
                 r = self.filter_r.run(r).lp;
             } else if f > 0.02 {
                 let fc = 20.0 * 120f32.powf(f);
                 self.filter_l.set(fc, 1.6, sr);
-                self.filter_r.set(fc, 1.6, sr);
+                self.filter_r.tune_like(&self.filter_l);
                 l = self.filter_l.run(l).hp;
                 r = self.filter_r.run(r).hp;
             }
@@ -1738,7 +1740,7 @@ impl Engine {
                 // A light high-pass opens upwards under the gate
                 let fc = 20.0 * 80f32.powf(self.build_cut * 0.6);
                 self.build_hp_l.set(fc, 0.9, sr);
-                self.build_hp_r.set(fc, 0.9, sr);
+                self.build_hp_r.tune_like(&self.build_hp_l);
                 l = self.build_hp_l.run(l).hp;
                 r = self.build_hp_r.run(r).hp;
             }
@@ -1749,7 +1751,7 @@ impl Engine {
             if brk > 0.001 {
                 let fc = 18_000.0 * 0.12f32.powf(brk);
                 self.break_lp_l.set(fc, 0.8, sr);
-                self.break_lp_r.set(fc, 0.8, sr);
+                self.break_lp_r.tune_like(&self.break_lp_l);
                 l = self.break_lp_l.run(l).lp;
                 r = self.break_lp_r.run(r).lp;
             }
@@ -1881,6 +1883,44 @@ mod tests {
         let peak = buf.iter().fold(0.0f32, |m, x| m.max(x.abs()));
         let rms = (buf.iter().map(|x| x * x).sum::<f32>() / buf.len() as f32).sqrt();
         (peak, rms)
+    }
+
+    /// Counts the allocations of the thread that asks (to prove the audio callback makes none)
+    struct Counting;
+    thread_local! {
+        static ALLOCS: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    }
+    unsafe impl std::alloc::GlobalAlloc for Counting {
+        unsafe fn alloc(&self, l: std::alloc::Layout) -> *mut u8 {
+            let _ = ALLOCS.try_with(|c| c.set(c.get().map(|n| n + 1)));
+            unsafe { std::alloc::System.alloc(l) }
+        }
+        unsafe fn dealloc(&self, p: *mut u8, l: std::alloc::Layout) {
+            unsafe { std::alloc::System.dealloc(p, l) }
+        }
+    }
+    #[global_allocator]
+    static COUNTING: Counting = Counting;
+
+    #[test]
+    fn the_auto_mode_renders_without_allocating() {
+        // Auto mode with AUTO FX over many cycles: patterns, sounds, breakdowns, drops – all
+        // on the audio thread, so not one allocation (no events: those box the song)
+        for vibe in [Vibe::Hard, Vibe::Dub, Vibe::Minimal] {
+            let mut song = gen::generate(vibe, &Default::default(), &mut Rng::new(3));
+            song.auto = true;
+            song.auto_bars = 2;
+            song.bpm = 180.0;
+            let mut e = Engine::new(8_000.0, song, Shared::new(), None, 5);
+            e.handle(Cmd::Play);
+            let mut buf = vec![0.0; 512];
+            ALLOCS.with(|c| c.set(Some(0)));
+            for _ in 0..4000 {
+                e.render(&mut buf);
+            }
+            let n = ALLOCS.with(|c| c.replace(None)).unwrap();
+            assert_eq!(n, 0, "{vibe:?}: {n} allocations on the audio thread");
+        }
     }
 
     #[test]

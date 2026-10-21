@@ -35,7 +35,8 @@ pub fn start(song: Song, rx: Receiver<Cmd>, events: Sender<Event>, shared: Arc<S
     stream_config.buffer_size = cpal::BufferSize::Default;
 
     let mut engine = Engine::new(sr as f32, song, shared, Some(events), seed());
-    let mut scratch: Vec<f32> = Vec::new();
+    // Big enough for the usual buffer sizes, so the callback doesn't allocate
+    let mut scratch: Vec<f32> = Vec::with_capacity(8192 * 2);
     let err = move |e| {
         eprintln!("audio error: {e}");
         failed.store(true, Ordering::Relaxed);
@@ -53,7 +54,14 @@ pub fn start(song: Song, rx: Receiver<Cmd>, events: Sender<Event>, shared: Arc<S
                     engine.render(&mut scratch);
                     for (i, frame) in data.chunks_exact_mut(channels).enumerate() {
                         for (c, s) in frame.iter_mut().enumerate() {
-                            let v = if c < 2 { scratch[i * 2 + c] } else { 0.0 };
+                            let (l, r) = (scratch[i * 2], scratch[i * 2 + 1]);
+                            // A mono output gets both sides, extra channels stay silent
+                            let v = match (channels, c) {
+                                (1, _) => (l + r) * 0.5,
+                                (_, 0) => l,
+                                (_, 1) => r,
+                                _ => 0.0,
+                            };
                             *s = $conv(v);
                         }
                     }

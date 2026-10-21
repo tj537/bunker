@@ -55,6 +55,11 @@ impl Svf {
         self.a3 = g * self.a2;
     }
 
+    /// Take another filter's settings (the right channel of a stereo pair: one `tan`, not two)
+    pub fn tune_like(&mut self, o: &Svf) {
+        (self.a1, self.a2, self.a3, self.k) = (o.a1, o.a2, o.a3, o.k);
+    }
+
     pub fn run(&mut self, x: f32) -> SvfOut {
         let v3 = x - self.ic2;
         let v1 = self.a1 * self.ic1 + self.a2 * v3;

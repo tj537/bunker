@@ -354,9 +354,8 @@ fn rim(vibe: Vibe, e: f32, song: &Song, rng: &mut Rng) -> Track {
         }
     }
     if t.hits() == 0 {
-        let free: Vec<usize> = [3usize, 6, 10, 13, 2, 11].into_iter().filter(|&i| !clap.steps[i].on).collect();
-        if !free.is_empty() {
-            t.steps[*rng.pick(&free)] = Step::hit();
+        if let Some(i) = pick_if(rng, &[3usize, 6, 10, 13, 2, 11], |i| !clap.steps[i].on) {
+            t.steps[i] = Step::hit();
         }
     }
     for s in t.steps.iter_mut().filter(|s| s.on) {
@@ -365,12 +364,23 @@ fn rim(vibe: Vibe, e: f32, song: &Song, rng: &mut Rng) -> Track {
     t
 }
 
+/// Every step of the bar (no `Vec`: the auto mode calls this on the audio thread)
+const ALL_STEPS: [usize; STEPS] = {
+    let mut a = [0; STEPS];
+    let mut i = 0;
+    while i < STEPS {
+        a[i] = i;
+        i += 1;
+    }
+    a
+};
+
 fn hat(vibe: Vibe, e: f32, rng: &mut Rng) -> Track {
     let density = e + rng.f32() * 0.3 - 0.15;
     let sixteenths = density > 0.55 || matches!(vibe, Vibe::Industrial | Vibe::Peak | Vibe::Hard | Vibe::Rave);
     let mut t = if sixteenths {
         // 16ths, accents on the off-beats, some gaps when the energy is low
-        let mut t = from_positions(&(0..16).collect::<Vec<_>>());
+        let mut t = from_positions(&ALL_STEPS);
         let gaps = rng.chance(0.3);
         for (i, s) in t.steps.iter_mut().enumerate() {
             s.accent = i % 4 == 2;
@@ -400,7 +410,7 @@ fn hat(vibe: Vibe, e: f32, rng: &mut Rng) -> Track {
     }
     if matches!(vibe, Vibe::Dub | Vibe::Melodic) && rng.chance(0.5) {
         // Shaker groove: soft 16ths, louder off-beats
-        t = from_positions(&(0..16).collect::<Vec<_>>());
+        t = from_positions(&ALL_STEPS);
         for (i, s) in t.steps.iter_mut().enumerate() {
             s.accent = i % 4 == 2;
         }

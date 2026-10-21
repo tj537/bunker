@@ -28,6 +28,19 @@ pub struct Live {
 }
 
 impl Live {
+    /// The line under the play button: the build-up, the bar, or how to start
+    pub fn info(&self) -> String {
+        if let Some(b) = self.build {
+            format!("BUILD {}%", (b * 100.0) as u32)
+        } else if self.playing {
+            format!("BAR {}", self.bar + 1)
+        } else {
+            "SPACE".into()
+        }
+    }
+}
+
+impl Live {
     pub fn step(&self) -> u64 {
         self.pos.floor().max(0.0) as u64
     }
@@ -382,13 +395,7 @@ pub fn orbit(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mut 
         body(rb * 0.62),
         if live.playing { RED } else { ACID },
     );
-    let info = if let Some(b) = live.build {
-        format!("BUILD {}%", (b * 100.0) as u32)
-    } else if live.playing {
-        format!("BAR {}", live.bar + 1)
-    } else {
-        "SPACE".into()
-    };
+    let info = live.info();
     p.text(g.c + vec2(0.0, rb * 0.48), Align2::CENTER_CENTER, info, bold(11.5), DIM);
 
     // Hover info and captions in the corners
