@@ -93,7 +93,9 @@ pub fn install(ctx: &egui::Context) {
     v.window_corner_radius = 14.0.into();
     v.menu_corner_radius = 10.0.into();
     v.override_text_color = Some(TEXT);
-    v.selection.bg_fill = alpha(ACID, 0.35);
+    // Opaque: `alpha` blends in linear light and turns the lime far too bright for the
+    // ACID text of a picked entry on it
+    v.selection.bg_fill = mix(PANEL, ACID, 0.22);
     v.selection.stroke = stroke(1.0, ACID);
     v.hyperlink_color = ACID;
     for (w, fill) in [

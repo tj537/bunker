@@ -130,6 +130,50 @@ pub fn knob(
     resp.on_hover_cursor(egui::CursorIcon::ResizeVertical)
 }
 
+/// A minimal slider with a few stops (a line, a dot per stop, a knob on the picked one);
+/// returns the stop clicked or dragged to
+pub fn stops(ui: &mut Ui, values: &[u8], picked: u8, width: f32, color: Color32) -> Option<u8> {
+    let (rect, resp) = ui.allocate_exact_size(vec2(width, 34.0), Sense::click_and_drag());
+    let line = rect.shrink2(vec2(10.0, 0.0));
+    let n = values.len().max(2) as f32 - 1.0;
+    let x_of = |i: usize| line.left() + line.width() * i as f32 / n;
+    let y = rect.top() + 12.0;
+    let p = ui.painter();
+    p.line_segment(
+        [pos2(line.left(), y), pos2(line.right(), y)],
+        stroke(2.0, mix(PANEL_HI, Color32::WHITE, 0.14)),
+    );
+    let at = values.iter().position(|&v| v == picked);
+    if let Some(i) = at {
+        p.line_segment([pos2(line.left(), y), pos2(x_of(i), y)], stroke(2.5, color));
+    }
+    for (i, v) in values.iter().enumerate() {
+        let on = at.is_some_and(|a| i <= a);
+        p.circle_filled(
+            pos2(x_of(i), y),
+            if values.len() > 8 { 2.0 } else { 3.0 },
+            if on { color } else { FAINT },
+        );
+        // Many stops: only the ends and the picked one are labelled
+        if values.len() > 5 && i != 0 && i + 1 != values.len() && Some(i) != at {
+            continue;
+        }
+        p.text(
+            pos2(x_of(i), rect.bottom()),
+            Align2::CENTER_BOTTOM,
+            v.to_string(),
+            bold(11.0),
+            if Some(i) == at { TEXT } else { DIM },
+        );
+    }
+    if let Some(i) = at {
+        p.circle_filled(pos2(x_of(i), y), 7.0, TEXT);
+    }
+    let pos = resp.interact_pointer_pos().filter(|_| resp.clicked() || resp.dragged())?;
+    let i = (((pos.x - line.left()) / line.width()) * n).round().clamp(0.0, n) as usize;
+    (values[i] != picked).then_some(values[i])
+}
+
 /// Small pill toggle (chips)
 pub fn chip(ui: &mut Ui, text: &str, on: bool, color: Color32) -> Response {
     chip_sized(ui, text, on, color, None)
@@ -138,11 +182,6 @@ pub fn chip(ui: &mut Ui, text: &str, on: bool, color: Color32) -> Response {
 /// A chip with a fixed width (`None`: as wide as its text)
 pub fn chip_sized(ui: &mut Ui, text: &str, on: bool, color: Color32, width: Option<f32>) -> Response {
     chip_shaped(ui, text, on, color, width, 30.0, 13.0)
-}
-
-/// A smaller chip for rows of presets
-pub fn chip_small(ui: &mut Ui, text: &str, on: bool, color: Color32, width: f32) -> Response {
-    chip_shaped(ui, text, on, color, Some(width), 24.0, 11.5)
 }
 
 fn chip_shaped(ui: &mut Ui, text: &str, on: bool, color: Color32, width: Option<f32>, height: f32, font: f32) -> Response {

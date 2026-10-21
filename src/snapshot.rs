@@ -207,7 +207,8 @@ mod tests {
                 ..playing(66.2, &[0, 1, 3, 6])
             });
         });
-        render("master_tab_small", 1100.0, 700.0, |app| {
+        render("knobs_small", 1100.0, 700.0, |app| {
+            app.sound_open = true;
             app.song.auto = true;
             app.song.tracks[0].lock = true;
             app.song.tracks[6].lock = true;

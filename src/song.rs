@@ -450,7 +450,7 @@ pub struct Song {
     pub master: f32,
     /// Auto mode: the machine keeps changing the groove
     pub auto: bool,
-    /// Bars between two auto changes (2, 4 or 8)
+    /// Bars between two auto changes (1–16)
     pub auto_bars: u8,
     /// Auto mode moves the energy itself (off once you take the energy fader)
     pub curve: bool,
@@ -543,9 +543,7 @@ impl Song {
             self.prog = 0;
         }
         self.root = self.root.clamp(36, 47);
-        if ![2, 4, 8].contains(&self.auto_bars) {
-            self.auto_bars = if self.auto_bars > 8 { 8 } else { 4 };
-        }
+        self.auto_bars = self.auto_bars.clamp(1, 16);
     }
 
     pub fn note_name(&self) -> &'static str {
@@ -629,7 +627,7 @@ mod tests {
         s.tracks[3].volume = f32::NAN;
         s.bpm = 9999.0;
         s.root = 3;
-        s.auto_bars = 16;
+        s.auto_bars = 40;
         s.tracks[7].sound = 99;
         s.tracks[1].decay = f32::INFINITY;
         s.tracks[1].tune = 99;
@@ -647,7 +645,7 @@ mod tests {
         assert_eq!(s.tracks[3].volume, 0.8);
         assert_eq!(s.bpm, 180.0);
         assert_eq!(s.root, 36);
-        assert_eq!(s.auto_bars, 8);
+        assert_eq!(s.auto_bars, 16);
         assert_eq!(s.tracks[7].sound, 0);
         let mut ok = Song::default();
         let before = ok;

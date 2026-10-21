@@ -224,7 +224,7 @@ impl Log {
     }
 
     /// The log: a status line, then the lines, the newest at the bottom being typed
-    pub fn ui(&self, ui: &mut Ui, state: State, now: f64) {
+    pub fn ui(&self, ui: &mut Ui, state: State, energy: Option<f32>, now: f64) {
         let w = ui.available_width();
         let h = ui.available_height().max(70.0);
         let (rect, _) = ui.allocate_exact_size(vec2(w, h), Sense::hover());
@@ -257,34 +257,50 @@ impl Log {
         let inner = rect.shrink2(vec2(10.0, 8.0));
 
         // Status line
-        let (status, heat) = match state {
-            State::Stopped => ("STOPPED".to_string(), None),
-            State::Song => ("SONG".to_string(), None),
+        let status = match state {
+            State::Stopped => "STOPPED".to_string(),
+            State::Song => "SONG".to_string(),
             State::Auto(w) => {
                 let drop = match w.bars_to_drop() {
                     0 | 1 => "DROP NOW".to_string(),
                     n => format!("DROP IN {n}"),
                 };
-                (format!("{} · {}/{} · {drop}", w.phase(), w.bar + 1, w.len), Some(w.heat))
+                format!("{} · {}/{} · {drop}", w.phase(), w.bar + 1, w.len)
             }
-            State::Bar(b) => (format!("BAR {}", b + 1), None),
+            State::Bar(b) => format!("BAR {}", b + 1),
         };
         p.text(inner.left_top(), Align2::LEFT_TOP, &status, mono(11.0), ACID);
-        if let Some(heat) = heat {
-            // Five cells of heat
-            for i in 0..5 {
-                let r = Rect::from_min_size(pos2(inner.right() - 5.0 * 7.0 + i as f32 * 7.0, inner.top() + 2.0), vec2(5.0, 9.0));
-                let on = heat >= (i as f32 + 0.5) / 5.0;
-                p.rect_filled(r, 1.0, if on { ACID } else { alpha(ACID, 0.15) });
+        let mut top = inner.top() + 18.0;
+        // The energy the auto mode steers: a row of cells, like an old level meter
+        if let Some(e) = energy {
+            p.text(pos2(inner.left(), top), Align2::LEFT_TOP, "ENERGY", mono(10.0), alpha(ACID, 0.7));
+            p.text(
+                pos2(inner.right(), top),
+                Align2::RIGHT_TOP,
+                format!("{:.0}", e * 100.0),
+                mono(10.0),
+                ACID,
+            );
+            let (x0, x1) = (inner.left() + 50.0, inner.right() - 24.0);
+            let n = 24;
+            let cw = (x1 - x0) / n as f32;
+            for i in 0..n {
+                let on = e >= (i as f32 + 0.5) / n as f32;
+                let r = Rect::from_min_size(pos2(x0 + i as f32 * cw, top + 2.0), vec2(cw - 2.0, 8.0));
+                p.rect_filled(r, 1.0, if on { ACID } else { alpha(ACID, 0.12) });
             }
+            top += 16.0;
         }
-        let top = inner.top() + 18.0;
+        // Some room above and below the line
+        top += 4.0;
         p.line_segment(
             [pos2(inner.left(), top - 4.0), pos2(inner.right(), top - 4.0)],
             stroke(1.0, alpha(ACID, 0.25)),
         );
+        top += 4.0;
 
-        // The lines, from the newest up
+        // The lines, from the newest up – clipped below the status line, fading out before it
+        let p = p.with_clip_rect(Rect::from_min_max(pos2(rect.left(), top), rect.max));
         let font = mono(10.5);
         let mut bottom = inner.bottom();
         for (k, (text, at)) in self.lines.iter().rev().enumerate() {
@@ -299,15 +315,16 @@ impl Log {
                 text.clone()
             };
             let fade = if newest { 1.0 } else { (0.75 - 0.08 * k as f32).max(0.25) };
-            let galley = p.layout(format!("> {typed}"), font.clone(), alpha(ACID, fade), inner.width() - 8.0);
+            let galley = p.layout(format!("> {typed}"), font.clone(), ACID, inner.width() - 8.0);
             let gh = galley.size().y;
             let pos = pos2(inner.left(), bottom - gh);
+            let edge = ((pos.y - top) / 30.0).clamp(0.0, 1.0);
             // A blinking block where the typing is
             if newest && (now * 2.0).fract() < 0.6 {
                 let end = galley.rows.last().map_or(pos, |r| pos + vec2(r.rect.right() + 2.0, r.rect.top()));
                 p.rect_filled(Rect::from_min_size(end, vec2(6.0, 11.0)), 0.0, alpha(ACID, 0.8));
             }
-            p.galley(pos, galley, ACID);
+            p.galley_with_override_text_color(pos, galley, alpha(ACID, fade * edge));
             bottom -= gh + 4.0;
         }
     }
