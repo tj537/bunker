@@ -1790,12 +1790,12 @@ impl BunkerApp {
         };
         // With the sound open everything below gets a little more compact
         let (auto_h, filter_h, bh, drop_h) = match (self.sound_open, tall) {
-            (false, true) => (56.0, 96.0, 48.0, 86.0),
-            (false, false) => (46.0, 72.0, 38.0, 62.0),
-            (true, true) => (44.0, 64.0, 40.0, 58.0),
-            (true, false) => (40.0, 58.0, 34.0, 50.0),
+            (false, true) => (56.0, 96.0, 44.0, 86.0),
+            (false, false) => (46.0, 72.0, 34.0, 62.0),
+            (true, true) => (44.0, 64.0, 34.0, 58.0),
+            (true, false) => (40.0, 56.0, 30.0, 48.0),
         };
-        let below = auto_h + energy_h + filter_h + 2.0 * bh + drop_h + 7.0 * gap + 16.0;
+        let below = auto_h + energy_h + filter_h + 3.0 * bh + drop_h + 8.0 * gap + 16.0;
         if self.sound_open {
             let m = self.song.macros;
             let dm = crate::song::Macros::default();
@@ -2009,13 +2009,13 @@ impl BunkerApp {
         }
         // Effects: hold to use
         let gap = 10.0;
-        let bw = (w - gap * 2.0) / 3.0;
-
-        for row in 0..2 {
+        // Two side by side, three rows
+        let bw = (w - gap) / 2.0;
+        for row in 0..3 {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = gap;
-                for col in 0..3 {
-                    let i = row * 3 + col;
+                for col in 0..2 {
+                    let i = row * 2 + col;
                     let fx = Fx::ALL[i];
                     let (r, resp) = ui.allocate_exact_size(vec2(bw, bh), Sense::click_and_drag());
                     self.fx_mouse[i] = resp.is_pointer_button_down_on();
