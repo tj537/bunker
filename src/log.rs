@@ -106,6 +106,8 @@ pub struct Log {
     drops: u32,
     played: f64,
     last_tick: Option<f64>,
+    /// By hand: where the energy was (0 break, 1 groove, 2 everything) – a crossing gets a line
+    zone: Option<u8>,
     rng: Rng,
 }
 
@@ -120,14 +122,15 @@ impl Log {
             drops: 0,
             played: 0.0,
             last_tick: None,
+            zone: None,
             rng: Rng::new(1984),
         }
     }
 
     pub fn push(&mut self, text: impl Into<String>, now: f64) {
         let text = text.into();
-        // The same line twice in a row is once
-        if self.lines.back().is_some_and(|(t, _)| *t == text) {
+        // The same line twice in a row within a few seconds is once
+        if self.lines.back().is_some_and(|(t, at)| *t == text && now - at < 5.0) {
             return;
         }
         self.lines.push_back((text, now));
@@ -155,9 +158,35 @@ impl Log {
         };
         if bar != self.last_bar {
             self.last_bar = bar;
-            if let State::Auto(w) = state {
-                self.countdown(w, now);
+            match state {
+                State::Auto(w) => self.countdown(w, now),
+                State::Bar(b) => self.phrase(b, now),
+                _ => {}
             }
+        }
+        // By hand the energy decides what plays: say when it crosses into the break or to everything
+        if let State::Bar(_) = state {
+            let e = song.macros.energy;
+            let zone = if e < 0.3 {
+                0
+            } else if e >= 0.85 {
+                2
+            } else {
+                1
+            };
+            if self.zone.is_some_and(|z| z != zone) {
+                self.push(
+                    match zone {
+                        0 => "Break: kick and bass are out – bring the energy back to drop them in",
+                        2 => "Energy 85+: everything plays – 90 starts the drop",
+                        _ => "Groove: tracks come in as the energy rises",
+                    },
+                    now,
+                );
+            }
+            self.zone = Some(zone);
+        } else {
+            self.zone = None;
         }
         let dt = self.last_tick.map_or(0.0, |t| (now - t).clamp(0.0, 1.0));
         self.last_tick = Some(now);
@@ -201,6 +230,17 @@ impl Log {
                 self.last_tip = i;
                 TIPS[i].to_string()
             }
+        }
+    }
+
+    /// By hand: when to press DROP so it lands on the next phrase, and phrase ends
+    fn phrase(&mut self, bar: u64, now: f64) {
+        match bar % 32 {
+            // B starts two bars of build-up on the next bar: pressed in the sixth bar of a
+            // phrase, the drop lands on the one of the next
+            13 | 29 => self.push("Press B now – the drop lands on the next phrase", now),
+            31 => self.push("Phrase end – a good moment to switch a favorite or roll a track", now),
+            _ => {}
         }
     }
 
@@ -267,7 +307,7 @@ impl Log {
                 };
                 format!("{} · {}/{} · {drop}", w.phase(), w.bar + 1, w.len)
             }
-            State::Bar(b) => format!("BAR {}", b + 1),
+            State::Bar(b) => format!("BAR {} · PHRASE {}", b + 1, b / 8 + 1),
         };
         p.text(inner.left_top(), Align2::LEFT_TOP, &status, mono(11.0), ACID);
         let mut top = inner.top() + 18.0;
@@ -288,6 +328,31 @@ impl Log {
                 let on = e >= (i as f32 + 0.5) / n as f32;
                 let r = Rect::from_min_size(pos2(x0 + i as f32 * cw, top + 2.0), vec2(cw - 2.0, 8.0));
                 p.rect_filled(r, 1.0, if on { ACID } else { alpha(ACID, 0.12) });
+            }
+            top += 16.0;
+        }
+        // By hand: the bar within the 8-bar phrase, so drops and changes land on the one
+        if let State::Bar(b) = state {
+            p.text(pos2(inner.left(), top), Align2::LEFT_TOP, "PHRASE", mono(10.0), alpha(ACID, 0.7));
+            p.text(
+                pos2(inner.right(), top),
+                Align2::RIGHT_TOP,
+                format!("{}/8", b % 8 + 1),
+                mono(10.0),
+                ACID,
+            );
+            let (x0, x1) = (inner.left() + 50.0, inner.right() - 24.0);
+            let cw = (x1 - x0) / 8.0;
+            for i in 0..8 {
+                let r = Rect::from_min_size(pos2(x0 + i as f32 * cw, top + 2.0), vec2(cw - 3.0, 8.0));
+                let c = if i as u64 == b % 8 {
+                    ACID
+                } else if (i as u64) < b % 8 {
+                    alpha(ACID, 0.45)
+                } else {
+                    alpha(ACID, 0.12)
+                };
+                p.rect_filled(r, 1.0, c);
             }
             top += 16.0;
         }
@@ -356,6 +421,19 @@ mod tests {
         }
         // Each said once, in time order
         assert_eq!(lines.iter().filter(|l| l.starts_with("Drop in")).count(), 2);
+    }
+
+    #[test]
+    fn by_hand_the_log_times_the_drop_and_names_the_energy() {
+        let mut song = Song::default();
+        let mut log = Log::new();
+        for bar in 0..32 {
+            log.tick(State::Bar(bar), bar as f64, &song);
+        }
+        assert_eq!(log.lines().filter(|l| l.starts_with("Press B now")).count(), 2);
+        song.macros.energy = 0.2;
+        log.tick(State::Bar(32), 40.0, &song);
+        assert!(log.lines().last().is_some_and(|l| l.starts_with("Break")));
     }
 
     #[test]

@@ -177,6 +177,7 @@ mod tests {
         });
         render("planets", 1360.0, 860.0, |app| {
             app.view = View::Planets;
+            app.sound_open = true;
             app.song.tracks[6].steps[3].slide = true;
             app.fake_live = Some(playing(36.3, &[0, 3, 6]));
         });

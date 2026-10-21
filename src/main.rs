@@ -3,6 +3,7 @@
 
 mod app;
 mod audio;
+mod controls;
 mod engine;
 mod face;
 mod file;

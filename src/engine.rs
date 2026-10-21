@@ -26,6 +26,8 @@ pub enum Cmd {
     },
     /// −1 (low-pass) … 0 (off) … +1 (high-pass)
     Filter(f32),
+    /// The filter's resonance, 0 (soft) … 1 (singing)
+    FilterRes(f32),
     /// A live effect held down (true) or let go
     Fx(Fx, bool),
     Drop,
@@ -166,6 +168,10 @@ pub struct Shared {
     /// The auto mode's cycle, for the log: the bar it started, its length in bars, the bar
     /// in it where the breakdown starts (`NO_BREAK`: a roller) and its heat in thousandths
     pub cycle_start: AtomicU64,
+    /// What the engine itself turns, for the pads (f32 bits): the acid with the auto
+    /// mode's sweep, and the filter (the breakdown's sweep, the hand's, smoothed)
+    pub acid_now: AtomicU32,
+    pub filter_now: AtomicU32,
     pub cycle_len: AtomicU32,
     pub cycle_break: AtomicU32,
     pub heat: AtomicU32,
@@ -187,6 +193,8 @@ impl Shared {
             transpose: AtomicI32::new(0),
             bands: Default::default(),
             cycle_start: AtomicU64::new(0),
+            acid_now: AtomicU32::new(0.5f32.to_bits()),
+            filter_now: AtomicU32::new(0),
             cycle_len: AtomicU32::new(32),
             cycle_break: AtomicU32::new(NO_BREAK),
             heat: AtomicU32::new(500),
@@ -462,6 +470,9 @@ pub struct Engine {
     crash: f32,
     filter: f32,
     filter_target: f32,
+    /// Resonance of the filter: where the hand wants it and where it is (smoothed)
+    res_target: f32,
+    res: f32,
     /// Held live effects, in `Fx::ALL` order
     fx: [bool; 6],
     echo_amount: f32,
@@ -586,6 +597,8 @@ impl Engine {
             crash: 0.0,
             filter: 0.0,
             filter_target: 0.0,
+            res_target: 0.0,
+            res: 0.0,
             fx: [false; 6],
             echo_amount: 0.0,
             throw: 0.0,
@@ -714,6 +727,7 @@ impl Engine {
                 }
             }
             Cmd::Filter(x) => self.filter_target = x.clamp(-1.0, 1.0),
+            Cmd::FilterRes(r) => self.res_target = r.clamp(0.0, 1.0),
             Cmd::Fx(fx, on) => {
                 self.fx[fx.index()] = on;
                 if fx == Fx::Stutter {
@@ -1611,6 +1625,7 @@ impl Engine {
         } else {
             m.acid
         };
+        self.shared.acid_now.store(acid.to_bits(), Ordering::Relaxed);
         // (Stutter works on the steps, in `fire`)
         let [_, echo_on, wash_on, crush_on, gate_on, tape_on] = self.fx;
         // Pump: the duck lasts a bit more than a 16th
@@ -1751,16 +1766,19 @@ impl Engine {
                 auto_filter
             };
             self.filter += (target - self.filter) * 0.002;
+            self.res += (self.res_target - self.res) * 0.002;
+            // Q 1.6 at rest (as it always was), up to 7 with the resonance all the way up
+            let q = 1.6 + 5.4 * self.res * self.res;
             let f = self.filter;
             if f < -0.02 {
                 let fc = 18_000.0 * 0.012f32.powf(-f);
-                self.filter_l.set(fc, 1.6, sr);
+                self.filter_l.set(fc, q, sr);
                 self.filter_r.tune_like(&self.filter_l);
                 l = self.filter_l.run(l).lp;
                 r = self.filter_r.run(r).lp;
             } else if f > 0.02 {
                 let fc = 20.0 * 120f32.powf(f);
-                self.filter_l.set(fc, 1.6, sr);
+                self.filter_l.set(fc, q, sr);
                 self.filter_r.tune_like(&self.filter_l);
                 l = self.filter_l.run(l).hp;
                 r = self.filter_r.run(r).hp;
@@ -1881,6 +1899,7 @@ impl Engine {
         self.shared.level.store(fallen.to_bits(), Ordering::Relaxed);
         self.peak = 0.0;
         self.shared.playing.store(self.playing, Ordering::Relaxed);
+        self.shared.filter_now.store(self.filter.to_bits(), Ordering::Relaxed);
         self.keep_recording(out);
     }
 }
@@ -2675,6 +2694,22 @@ mod tests {
         e.handle(Cmd::Song(Box::new(s)));
         assert_eq!(e.song.macros.space, 0.9);
         assert_eq!(e.knob_home[TRACKS + 1], 0.9);
+    }
+
+    #[test]
+    fn a_resonant_filter_stays_clean() {
+        let song = gen::generate(Vibe::Acid, &Default::default(), &mut Rng::new(3));
+        for x in [-0.7, 0.5] {
+            let mut e = Engine::new(22_050.0, song, Shared::new(), None, 1);
+            e.handle(Cmd::Play);
+            e.handle(Cmd::Filter(x));
+            e.handle(Cmd::FilterRes(1.0));
+            let mut buf = vec![0.0; 2 * 22_050 * 3];
+            e.render(&mut buf);
+            assert!(e.res > 0.99);
+            let peak = buf.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+            assert!(buf.iter().all(|v| v.is_finite()) && peak <= 1.0, "filter {x}: peak {peak}");
+        }
     }
 
     #[test]
