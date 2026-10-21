@@ -292,10 +292,9 @@ fn build_play(voice: Voice, p: f32, idx: u64, start: u64) -> BuildPlay {
 /// Steps of silence before a drop lands (half a beat)
 const DROP_GAP: u64 = 2;
 
-/// Energy by hand pushed up to this starts a build-up; the drop lands two bars after
-/// the next bar starts. It arms again once the energy is back below `DROP_REARM`.
+/// Where a song's energy is about to drop (the slim song bar shows it) – by hand there's no
+/// drop zone any more, DROP drops
 pub const DROP_ZONE: f32 = 0.9;
-const DROP_REARM: f32 = 0.88;
 
 /// How the auto mode arranges one 32-bar cycle
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -513,8 +512,6 @@ pub struct Engine {
     /// Build-up filter amount; it lets go quickly after the drop instead of jumping
     build_cut: f32,
     riser_gain: f32,
-    /// The energy was below the drop zone since the last drop
-    zone_armed: bool,
     /// Where the energy curve (auto, song) wants to go – the energy glides there step by step
     energy_goal: f32,
     /// The energy the layers follow: taken on every beat, so tracks come and go in time
@@ -637,7 +634,6 @@ impl Engine {
             build: None,
             build_cut: 0.0,
             riser_gain: 0.0,
-            zone_armed: false,
             energy_goal: song.macros.energy,
             layer_energy: song.macros.energy,
             energy_smooth: song.macros.energy,
@@ -691,8 +687,6 @@ impl Engine {
                 set_knobs(&mut self.song, keep);
                 if self.steers_energy() {
                     self.song.macros.energy = energy;
-                } else {
-                    self.watch_drop_zone();
                 }
                 // AUTO FX switched off: the bar decides now – a running breakdown lets go
                 // (the UI has already brought every track back)
@@ -882,19 +876,6 @@ impl Engine {
     /// The breath before the drop: the last half beat of the build-up
     fn in_drop_gap(&self, idx: f64) -> bool {
         self.build.as_ref().is_some_and(|b| idx >= (b.start + b.len - DROP_GAP) as f64)
-    }
-
-    /// Energy by hand pushed into the drop zone (90 and up) builds up and drops
-    fn watch_drop_zone(&mut self) {
-        let e = self.song.macros.energy;
-        if e < DROP_REARM {
-            self.zone_armed = true;
-        } else if e >= DROP_ZONE && self.zone_armed {
-            self.zone_armed = false;
-            if self.playing && self.build.is_none() {
-                self.start_build();
-            }
-        }
     }
 
     /// The last bar of a phrase: a fill – a big one every 16 bars, never the same twice in a row
@@ -2175,39 +2156,22 @@ mod tests {
     }
 
     #[test]
-    fn the_drop_zone_starts_a_build_up() {
-        let mut song = gen::generate(Vibe::Peak, &Default::default(), &mut Rng::new(4));
-        song.macros.energy = 0.5;
+    fn energy_by_hand_never_drops_by_itself() {
+        // No drop zone any more: the energy all the way up is just everything playing
+        let song = gen::generate(Vibe::Peak, &Default::default(), &mut Rng::new(5));
         let mut e = Engine::new(22_050.0, song, Shared::new(), None, 1);
         e.handle(Cmd::Play);
         let mut buf = vec![0.0; 2 * e.step_len() as usize];
         e.render(&mut buf);
-        let set = |e: &mut Engine, v: f32| {
+        for v in [0.6, 0.95, 1.0] {
             let mut s = e.song;
             s.macros.energy = v;
             e.handle(Cmd::Song(Box::new(s)));
-        };
-        set(&mut e, 0.6);
-        set(&mut e, 0.85);
-        assert!(e.build.is_none(), "below 90 it's just energy");
-        set(&mut e, 0.9);
-        assert!(e.build.is_some(), "at 90 the build-up starts");
-        // Up there it doesn't start again – only after coming back down
-        e.build = None;
-        set(&mut e, 1.0);
-        set(&mut e, 0.95);
+            e.render(&mut buf);
+        }
         assert!(e.build.is_none());
-        set(&mut e, 0.7);
-        set(&mut e, 0.92);
-        assert!(e.build.is_some());
-        // With the auto mode's curve the engine owns the energy – no zone
-        song.auto = true;
-        let mut e = Engine::new(22_050.0, song, Shared::new(), None, 1);
-        e.handle(Cmd::Play);
-        e.render(&mut buf);
-        set(&mut e, 0.5);
-        set(&mut e, 0.95);
-        assert!(e.build.is_none());
+        e.handle(Cmd::Drop);
+        assert!(e.build.is_some(), "DROP drops");
     }
 
     #[test]

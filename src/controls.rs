@@ -363,24 +363,13 @@ pub fn drive_card(ui: &mut Ui, value: &mut f32, default: f32, color: Color32, wi
     resp.on_hover_cursor(egui::CursorIcon::ResizeVertical)
 }
 
-/// PITCH as a little keyboard: the key bass and synth sit on (0 = C … 11 = B); drag up or
-/// down (or scroll), double-click resets
+/// PITCH as a planet floating above a horizon: the higher, the higher bass and synth sit
+/// (0 = C … 11 = B); drag up or down (or scroll), double-click resets
 pub fn pitch_card(ui: &mut Ui, semis: &mut u8, default: u8, label: &str, color: Color32, width: f32, height: f32) -> Response {
     let (rect, mut resp) = ui.allocate_exact_size(vec2(width, height), Sense::click_and_drag());
     let p = ui.painter_at(rect);
     let hot = resp.hovered() || resp.dragged();
     let area = card(&p, rect, "PITCH", label, color, hot);
-    const WHITE: [u8; 7] = [0, 2, 4, 5, 7, 9, 11];
-    // Black keys: the semitone and the white key it sits after
-    const BLACK: [(u8, usize); 5] = [(1, 0), (3, 1), (6, 3), (8, 4), (10, 5)];
-    let kw = area.width() / 7.0;
-    let white_rect = |i: usize| Rect::from_min_size(pos2(area.left() + i as f32 * kw, area.top()), vec2(kw - 1.5, area.height()));
-    let black_rect = |after: usize| {
-        Rect::from_center_size(
-            pos2(area.left() + (after + 1) as f32 * kw - 0.75, area.top() + area.height() * 0.3),
-            vec2(kw * 0.6, area.height() * 0.6),
-        )
-    };
     // A slider over the keys: drag up or down (or scroll), a semitone every few pixels
     let mut picked = *semis;
     let id = resp.id.with("acc");
@@ -409,16 +398,39 @@ pub fn pitch_card(ui: &mut Ui, semis: &mut u8, default: u8, label: &str, color: 
         *semis = picked;
         resp.mark_changed();
     }
-    for (i, &s) in WHITE.iter().enumerate() {
-        let r = white_rect(i);
-        let on = s == *semis;
-        p.rect_filled(r, 3.0, if on { color } else { mix(PANEL_HI, Color32::WHITE, 0.55) });
+    // A planet on a stalk above a horizon – the higher the pitch, the higher it floats, like
+    // the bass and synth planets in the main view; twelve faint marks for the heights
+    let ground = area.bottom() - 2.0;
+    let horizon: Vec<Pos2> = (0..=24)
+        .map(|i| {
+            let f = i as f32 / 24.0;
+            pos2(area.left() + f * area.width(), ground + 4.0 * (2.0 * f - 1.0).powi(2))
+        })
+        .collect();
+    p.add(egui::Shape::line(horizon, stroke(1.2, alpha(color, 0.45))));
+    let top = area.top() + 7.0;
+    let y_of = |k: f32| ground - 4.0 - (ground - 4.0 - top) * k / 11.0;
+    for k in 0..12 {
+        let y = y_of(k as f32);
+        p.line_segment(
+            [
+                pos2(area.left() + 2.0, y),
+                pos2(area.left() + if k % 4 == 0 { 9.0 } else { 6.0 }, y),
+            ],
+            stroke(1.0, Color32::from_white_alpha(45)),
+        );
     }
-    for &(s, after) in &BLACK {
-        let r = black_rect(after);
-        let on = s == *semis;
-        p.rect_filled(r, 2.0, if on { color } else { mix(BG, Color32::BLACK, 0.3) });
-    }
+    let planet = pos2(area.center().x, y_of(*semis as f32));
+    p.line_segment([pos2(planet.x, ground), planet], stroke(1.2, alpha(color, 0.6)));
+    glow(&p, planet, 7.0, color, if hot { 0.8 } else { 0.5 });
+    p.circle_filled(planet, 6.0, color);
+    let ring: Vec<Pos2> = (0..=24)
+        .map(|i| {
+            let b = i as f32 / 24.0 * std::f32::consts::TAU;
+            planet + vec2(b.cos() * 10.5, b.sin() * 3.0)
+        })
+        .collect();
+    p.add(egui::Shape::line(ring, stroke(1.2, alpha(mix(color, Color32::WHITE, 0.3), 0.9))));
     resp.on_hover_cursor(egui::CursorIcon::ResizeVertical)
 }
 
@@ -530,5 +542,210 @@ pub fn fx_burst(p: &egui::Painter, r: Rect, color: Color32, k: f32) {
     }
     if k < 0.3 {
         p.rect_filled(r, 12.0, Color32::from_white_alpha((60.0 * (1.0 - k / 0.3)) as u8));
+    }
+}
+
+/// A visualizer's button in the menu: a little picture of what it shows and its name
+pub fn visualizer_card(p: &egui::Painter, r: Rect, face: bool, hot: bool, t: f32) {
+    // Everything stays inside the card, the glows too
+    let p = &p.with_clip_rect(r);
+    let color = if face { RED } else { ACID };
+    p.rect_filled(r, 12.0, SPACE);
+    p.rect_stroke(
+        r,
+        12.0,
+        stroke(if hot { 2.0 } else { 1.0 }, if hot { color } else { LINE }),
+        egui::StrokeKind::Inside,
+    );
+    let pic = Rect::from_min_max(r.min + vec2(10.0, 10.0), pos2(r.right() - 10.0, r.bottom() - 34.0));
+    let c = pic.center();
+    // A few stars
+    for i in 0..18u32 {
+        let h = |k: u32| ((i.wrapping_mul(2_654_435_761) ^ k.wrapping_mul(40_503)) % 1000) as f32 / 1000.0;
+        p.circle_filled(
+            pos2(pic.left() + h(1) * pic.width(), pic.top() + h(2) * pic.height()),
+            0.6 + h(3) * 0.8,
+            Color32::from_white_alpha(40),
+        );
+    }
+    let move_t = if hot { t } else { 0.0 };
+    if face {
+        // A low-poly head: outline, eye holes, a slit for a mouth, a few facets
+        let s = pic.height() * 0.46;
+        let nod = (move_t * 4.0).sin() * 2.0;
+        let pt = |x: f32, y: f32| c + vec2(x * s, y * s + nod);
+        let outline = [
+            pt(-0.55, -0.7),
+            pt(0.0, -0.95),
+            pt(0.55, -0.7),
+            pt(0.7, -0.1),
+            pt(0.5, 0.55),
+            pt(0.0, 0.85),
+            pt(-0.5, 0.55),
+            pt(-0.7, -0.1),
+        ];
+        glow(p, c, s * 0.9, RED, 0.35);
+        p.add(egui::Shape::convex_polygon(
+            outline.to_vec(),
+            mix(SPACE, RED, 0.25),
+            stroke(1.5, RED),
+        ));
+        for (a, b) in [(0, 4), (2, 6), (1, 5), (7, 3)] {
+            p.line_segment([outline[a], outline[b]], stroke(0.8, RED.gamma_multiply(0.45)));
+        }
+        for x in [-0.28, 0.28] {
+            let eye = vec![pt(x - 0.16, -0.2), pt(x + 0.16, -0.24), pt(x + 0.12, -0.05), pt(x - 0.12, -0.04)];
+            p.add(egui::Shape::convex_polygon(eye, SPACE, stroke(1.0, RED)));
+        }
+        p.line_segment([pt(-0.25, 0.35), pt(0.25, 0.35)], stroke(3.0, SPACE));
+    } else {
+        // LIGHTS: a ring of spectrum bars, a shockwave, the core
+        let rr = pic.height() * 0.28;
+        let colors = [
+            ACID,
+            Color32::from_rgb(69, 200, 255),
+            Color32::from_rgb(255, 154, 60),
+            Color32::from_rgb(140, 125, 255),
+        ];
+        for i in 0..40 {
+            let a = i as f32 / 40.0 * std::f32::consts::TAU;
+            let len = 6.0 + 14.0 * (0.5 + 0.5 * (i as f32 * 1.7 + move_t * 6.0).sin()).powi(2);
+            let dir = vec2(a.cos(), a.sin());
+            p.line_segment([c + dir * rr, c + dir * (rr + len)], stroke(2.0, colors[i % 4]));
+        }
+        let wave = rr + 26.0 + (move_t * 1.5).fract() * 20.0;
+        p.circle_stroke(c, wave, stroke(1.5, ACID.gamma_multiply(0.35)));
+        glow(p, c, rr * 0.8, ACID, 0.5);
+        p.circle_filled(c, rr * 0.45, ACID);
+    }
+    p.text(
+        pos2(r.left() + 12.0, r.bottom() - 12.0),
+        Align2::LEFT_BOTTOM,
+        if face { "FACE" } else { "LIGHTS" },
+        bold(14.0),
+        if hot { color } else { TEXT },
+    );
+    p.text(
+        pos2(r.right() - 12.0, r.bottom() - 13.0),
+        Align2::RIGHT_BOTTOM,
+        if face { "O" } else { "P" },
+        bold(10.0),
+        DIM,
+    );
+}
+
+/// The output meter at the bottom right, a technical instrument like a loudness meter: a dB
+/// scale with grid lines, the level's history over the last seconds as a filled curve, the
+/// level now as a bar with its peak, and the numbers. Grey – red only near clipping. A warning
+/// when the music is too quiet (`quiet`) or clips.
+pub fn level_meter(p: &egui::Painter, r: Rect, history: &std::collections::VecDeque<f32>, level: f32, peak: f32, quiet: bool) {
+    let p = &p.with_clip_rect(r.expand(1.0));
+    let clips = peak > 0.98;
+    let db_of = |v: f32| 20.0 * v.max(1e-5).log10();
+    let (lo, hi) = (-48.0f32, 0.0f32);
+    p.rect_filled(r, 12.0, mix(PANEL, BG, 0.35));
+    p.rect_stroke(r, 12.0, stroke(1.0, LINE), egui::StrokeKind::Inside);
+    let inner = r.shrink2(vec2(12.0, 10.0));
+    // The numbers: the level now, big, and the peak
+    let now_db = db_of(level);
+    let text = |v: f32| if v > 1e-4 { format!("{:.1}", db_of(v)) } else { "–".to_string() };
+    p.text(inner.left_top(), Align2::LEFT_TOP, "OUTPUT", bold(10.0), FAINT);
+    p.text(
+        pos2(inner.right(), inner.top() - 2.0),
+        Align2::RIGHT_TOP,
+        format!("{} dB", text(level)),
+        egui::FontId::monospace(13.0),
+        if clips { RED } else { TEXT },
+    );
+    p.text(
+        pos2(inner.right(), inner.top() + 14.0),
+        Align2::RIGHT_TOP,
+        format!("PEAK {}", text(peak)),
+        egui::FontId::monospace(9.5),
+        if clips { RED } else { DIM },
+    );
+    let plot = Rect::from_min_max(
+        pos2(inner.left() + 24.0, inner.top() + 32.0),
+        pos2(inner.right() - 16.0, inner.bottom()),
+    );
+    if plot.height() < 24.0 {
+        // Too small for the graph: just the bar
+        let bar = Rect::from_min_max(pos2(inner.left(), inner.bottom() - 6.0), inner.right_bottom());
+        p.rect_filled(bar, 3.0, Color32::from_white_alpha(10));
+        let f = ((now_db - lo) / (hi - lo)).clamp(0.0, 1.0);
+        p.rect_filled(
+            Rect::from_min_size(bar.min, vec2(bar.width() * f, bar.height())),
+            3.0,
+            if clips { RED } else { mix(DIM, TEXT, 0.5) },
+        );
+        return;
+    }
+    let y_of = |db: f32| plot.bottom() - plot.height() * ((db - lo) / (hi - lo)).clamp(0.0, 1.0);
+    // The scale: grid lines and their dB
+    for db in [0.0, -6.0, -12.0, -18.0, -24.0, -36.0, -48.0] {
+        let y = y_of(db);
+        p.line_segment(
+            [pos2(plot.left(), y), pos2(plot.right(), y)],
+            stroke(1.0, if db == 0.0 { alpha(RED, 0.35) } else { LINE }),
+        );
+        p.text(
+            pos2(plot.left() - 6.0, y),
+            Align2::RIGHT_CENTER,
+            format!("{db:.0}"),
+            egui::FontId::monospace(9.0),
+            FAINT,
+        );
+    }
+    // The history, right = now: a filled curve with a light edge
+    let n = history.len();
+    if n > 1 {
+        let step = plot.width() / 199.0;
+        let x0 = plot.right() - step * (n - 1) as f32;
+        let pts: Vec<Pos2> = history
+            .iter()
+            .enumerate()
+            .map(|(i, &v)| pos2(x0 + i as f32 * step, y_of(db_of(v))))
+            .collect();
+        let fill = mix(PANEL_HI, TEXT, 0.18).gamma_multiply(0.55);
+        for w in pts.windows(2) {
+            // Column by column down to the floor (keeps a non-convex area simple)
+            let mut mesh = egui::Mesh::default();
+            let i = mesh.vertices.len() as u32;
+            for at in [w[0], w[1], pos2(w[1].x, plot.bottom()), pos2(w[0].x, plot.bottom())] {
+                mesh.colored_vertex(at, fill);
+            }
+            mesh.add_triangle(i, i + 1, i + 2);
+            mesh.add_triangle(i, i + 2, i + 3);
+            p.add(egui::Shape::mesh(mesh));
+        }
+        p.add(egui::Shape::line(pts, stroke(1.5, mix(TEXT, DIM, 0.2))));
+    }
+    // The level now: a slim bar at the right with its peak
+    let bar = Rect::from_min_max(pos2(plot.right() + 6.0, plot.top()), pos2(plot.right() + 12.0, plot.bottom()));
+    p.rect_filled(bar, 2.0, Color32::from_white_alpha(10));
+    let top = y_of(now_db);
+    p.rect_filled(
+        Rect::from_min_max(pos2(bar.left(), top), bar.max),
+        2.0,
+        if clips { RED } else { mix(DIM, TEXT, 0.6) },
+    );
+    let py = y_of(db_of(peak));
+    p.line_segment(
+        [pos2(bar.left() - 1.0, py), pos2(bar.right() + 1.0, py)],
+        stroke(1.5, if clips { RED } else { TEXT }),
+    );
+    let orange = Color32::from_rgb(255, 154, 60);
+    let warn = if clips {
+        Some(("Too loud – it clips. Turn the volume or DRIVE down", RED))
+    } else if quiet {
+        Some(("Very quiet – turn the volume up (settings) or bring tracks in", orange))
+    } else {
+        None
+    };
+    if let Some((text, col)) = warn {
+        let galley = p.layout(text.to_string(), bold(11.0), col, plot.width() - 16.0);
+        let box_r = Rect::from_center_size(plot.center(), galley.size() + vec2(16.0, 10.0));
+        p.rect_filled(box_r, 8.0, Color32::from_black_alpha(210));
+        p.galley(box_r.min + vec2(8.0, 5.0), galley, col);
     }
 }

@@ -50,7 +50,7 @@ pub struct System {
 
 impl System {
     pub fn new(rect: Rect) -> Self {
-        let r_max = (rect.width() / 2.0 - 34.0).min((rect.height() / 2.0 - 46.0) / TILT).max(40.0);
+        let r_max = (rect.width() / 2.0 - 16.0).min((rect.height() / 2.0 - 30.0) / TILT).max(40.0);
         System {
             c: rect.center() + vec2(0.0, 8.0),
             r_max,
@@ -252,17 +252,21 @@ pub fn planets(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mu
     let pr = sys.planet_radius();
     let (r_in, r_out) = (sys.orbit(0) - sys.half_gap(), sys.orbit(TRACKS - 1) + sys.half_gap());
 
-    // The plane of the system, faintly
-    let rim = r_out + 12.0;
-    let plane: Vec<Pos2> = (0..96).map(|i| sys.at(rim, i as f32 / 96.0 * TAU, 0.0)).collect();
-    p.add(egui::Shape::convex_polygon(plane, alpha(SPACE, 0.5), stroke(1.0, alpha(LINE, 0.6))));
-
-    // Beat numbers outside, where the beats are
-    for (i, label) in ["1", "2", "3", "4"].iter().enumerate() {
-        let a = System::angle((i * 4) as f32);
-        let at = sys.at(rim + 16.0, a, 0.0) + vec2(0.0, a.sin() * 8.0);
-        let current = now.is_some_and(|n| n / 4 == i);
-        p.text(at, Align2::CENTER_CENTER, *label, display(15.0), if current { TEXT } else { FAINT });
+    // Where the bar starts and which way it runs: a short, faint arrow outside the first
+    // steps (no ring, no numbers – the planets have the room)
+    {
+        let r = r_out + 8.0;
+        let ink = alpha(TEXT, 0.16);
+        let pts: Vec<Pos2> = (0..=10).map(|i| sys.at(r, System::angle(0.7 * i as f32 / 10.0), 0.0)).collect();
+        let (tip, before) = (pts[10], pts[9]);
+        p.add(egui::Shape::line(pts, stroke(1.0, ink)));
+        let dir = (tip - before).normalized();
+        let side = vec2(-dir.y, dir.x);
+        p.add(egui::Shape::convex_polygon(
+            vec![tip + dir * 3.5, tip - dir * 2.0 + side * 2.5, tip - dir * 2.0 - side * 2.5],
+            ink,
+            egui::Stroke::NONE,
+        ));
     }
 
     // The radar beam, lying on the plane

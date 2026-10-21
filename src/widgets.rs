@@ -83,21 +83,26 @@ pub fn stops(ui: &mut Ui, values: &[u8], picked: u8, width: f32, color: Color32)
 
 /// A screen set into the concrete: a dark well, a thick bezel with a screw in each corner;
 /// returns the screen's rect inside it
-pub fn bunker_frame(p: &egui::Painter, outer: Rect, radius: f32) -> Rect {
+/// (`bezel_w`: how thick the frame is)
+pub fn bunker_frame(p: &egui::Painter, outer: Rect, radius: f32, bezel_w: f32) -> Rect {
     p.rect_filled(outer.expand(2.0), radius + 2.0, Color32::from_black_alpha(110));
     let bezel = outer.shrink(2.0);
     p.rect_filled(bezel, radius, mix(PANEL, BG, 0.45));
     p.rect_stroke(bezel, radius, stroke(1.0, Color32::from_white_alpha(9)), egui::StrokeKind::Inside);
-    let inset = 6.0 + radius * 0.12;
+    let inset = 2.0 + bezel_w * 0.5;
     for (x, y) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)] {
         let c = pos2(
             bezel.left() + inset + x * (bezel.width() - 2.0 * inset),
             bezel.top() + inset + y * (bezel.height() - 2.0 * inset),
         );
-        p.circle_filled(c, 2.2, mix(PANEL_HI, TEXT, 0.15));
-        p.line_segment([c - vec2(1.4, 1.4), c + vec2(1.4, 1.4)], stroke(0.8, mix(BG, Color32::BLACK, 0.3)));
+        let sr = (bezel_w * 0.3).clamp(1.6, 3.0);
+        p.circle_filled(c, sr, mix(PANEL_HI, TEXT, 0.15));
+        p.line_segment(
+            [c - vec2(sr, sr) * 0.65, c + vec2(sr, sr) * 0.65],
+            stroke(0.8, mix(BG, Color32::BLACK, 0.3)),
+        );
     }
-    outer.shrink(9.0)
+    outer.shrink(2.0 + bezel_w)
 }
 
 /// Small pill toggle (chips)
@@ -298,8 +303,10 @@ pub fn fx_button(
         pos2(rect.left() + 10.0, rect.top() + rect.height() * 0.48),
         pos2(rect.right() - 10.0, rect.bottom() - 6.0),
     );
+    // (kept inside the button, however wild it gets)
+    let clipped = p.with_clip_rect(rect.shrink(3.0));
     art(
-        p,
+        &clipped,
         art_rect,
         if active {
             alpha(SPACE, 0.75)
@@ -328,8 +335,8 @@ pub struct EnergyOut {
     pub locked_clicked: bool,
 }
 
-/// The energy fader: drag to strip the groove down (break) or build it up; the red end is
-/// the drop zone: pushed in there by hand, the energy starts a build-up.
+/// The energy fader: drag to strip the groove down (break) or build it up; the
+/// full end lets everything play (no drop zone – DROP drops).
 /// `steered`: who moves it instead of you ("AUTO", "SONG") – then it's a slim bar that only
 /// shows where the set is.
 pub fn energy_fader(ui: &mut Ui, value: &mut f32, width: f32, height: f32, steered: Option<&str>) -> EnergyOut {
@@ -363,13 +370,11 @@ pub fn energy_fader(ui: &mut Ui, value: &mut f32, width: f32, height: f32, steer
     }
     let p = ui.painter();
     let cool = Color32::from_rgb(69, 200, 255);
-    let hot_col = mix(cool, RED, *value);
+    let hot_col = mix(cool, ACID, *value);
     p.rect_filled(track, 5.0, PANEL_HI);
-    // The break zone and the drop zone
+    // The break zone
     let break_x = track.left() + track.width() * crate::engine::BREAK_ZONE;
     p.rect_filled(Rect::from_min_max(track.min, pos2(break_x, track.bottom())), 5.0, alpha(cool, 0.22));
-    let zone_x = track.left() + track.width() * crate::engine::DROP_ZONE;
-    p.rect_filled(Rect::from_min_max(pos2(zone_x, track.top()), track.max), 5.0, alpha(RED, 0.35));
     let fill = Rect::from_min_max(track.min, pos2(track.left() + track.width() * *value, track.bottom()));
     p.rect_filled(fill, 5.0, alpha(hot_col, 0.85));
     let knob = pos2(fill.right(), track.center().y);
@@ -380,9 +385,9 @@ pub fn energy_fader(ui: &mut Ui, value: &mut f32, width: f32, height: f32, steer
         p.text(
             pos2(track.right(), y + 9.0),
             Align2::RIGHT_CENTER,
-            "drop",
+            "full",
             bold(9.5),
-            alpha(RED, 0.8),
+            alpha(ACID, 0.8),
         );
         p.text(
             pos2(track.left(), y + 9.0),
@@ -576,9 +581,4 @@ pub fn bar_slider(ui: &mut Ui, value: &mut f32, width: f32, color: Color32) -> R
         p.circle_filled(pos2(fill.right(), bar.center().y), 5.0, TEXT);
     }
     resp.on_hover_cursor(egui::CursorIcon::ResizeHorizontal)
-}
-
-/// Section heading in small caps
-pub fn heading(ui: &mut Ui, text: &str) {
-    ui.label(egui::RichText::new(text).font(bold(11.0)).color(FAINT).extra_letter_spacing(1.6));
 }

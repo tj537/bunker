@@ -378,9 +378,9 @@ pub fn fit_len(len: u8) -> u8 {
 }
 
 /// Moods: a scale and a chord progression (index into `PROGRESSIONS`) that go together
-pub const MOODS: [(&str, &str, Scale, u8); 9] = [
+pub const MOODS: [(&str, &str, Scale, u8); 10] = [
     ("Dark", "Tense and menacing – one dark step up and back", Scale::Phrygian, 6),
-    ("Hypnotic", "One chord, round and round", Scale::Minor, 0),
+    ("Hypnotic", "One chord, round and round", Scale::Pentatonic, 0),
     ("Deep", "Warm and soulful", Scale::Dorian, 2),
     ("Sad", "Melancholic, two chords that long for each other", Scale::Minor, 1),
     ("Euphoric", "Big uplifting chords, hands in the air", Scale::Minor, 3),
@@ -388,7 +388,16 @@ pub const MOODS: [(&str, &str, Scale, u8); 9] = [
     ("Epic", "Dramatic, climbing for three bars, then home", Scale::Harmonic, 5),
     ("Sunny", "Bright and happy – techno in a major key", Scale::Major, 2),
     ("Mysterious", "Exotic and dark, one chord that never settles", Scale::Harmonic, 0),
+    (
+        "Neutral",
+        "Plain minor, no chord changes – the start, before any colour",
+        Scale::Minor,
+        0,
+    ),
 ];
+
+/// The mood Bunker starts in (and a clear goes back to): plain, no chord changes
+pub const NEUTRAL: usize = 9;
 
 /// The master section: three-band EQ and drive, each 0…1 (0.5 = flat)
 #[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]

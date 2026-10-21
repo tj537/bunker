@@ -404,10 +404,10 @@ impl Log {
 
 /// The greetings BUNK, the computer's mascot, types when it boots
 pub const HELLOS: [&str; 4] = [
-    "BUNK here. I'm taking over now.",
-    "Hands off the wheel – I've got this.",
-    "BUNK online. I'll take it from here.",
-    "Sit back. BUNK is driving now.",
+    "BUNK here. Taking over.",
+    "I've got this.",
+    "BUNK online. Let's go.",
+    "Sit back. I'll drive.",
 ];
 
 /// BUNK, the little robot on the computer's screen: a head with an antenna that blinks,
