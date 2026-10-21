@@ -292,7 +292,8 @@ impl Clap {
         let (band, q, len) = match model {
             1 => (3200.0, 0.8, length * 0.9),
             2 => (950.0, 1.0, length * 2.2),
-            3 => (2300.0, 1.8, 0.035),
+            // Snap: lower and wider than it used to be, so it clicks without piercing
+            3 => (1650.0, 1.0, 0.045),
             _ => (1150.0, 1.3, length),
         };
         self.bp.set(band * pitch, q, sr);
@@ -320,7 +321,9 @@ impl Clap {
             }
             3 => {
                 self.tail *= self.tail_decay;
-                self.bp.run(n).bp * self.tail * self.amp * 3.2
+                // A soft half-millisecond attack takes the sting out of the click
+                let attack = (ms / 0.5).min(1.0);
+                self.bp.run(n).bp * self.tail * self.amp * attack * 2.6
             }
             m => {
                 // Quick bursts (hands not clapping exactly together), then the tail

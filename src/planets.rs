@@ -441,7 +441,7 @@ pub fn planets(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mu
         degree_ladder(&p, &sys, rect, song, drag);
     }
 
-    // Hover info and captions in the corners
+    // Hover info in the corner
     let info_pos = pos2(rect.left() + 4.0, rect.bottom() - 4.0);
     if let Some((t, s)) = hovered {
         let v = Voice::ALL[t];
@@ -455,24 +455,6 @@ pub fn planets(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mu
             text += &format!(" · {}%", step.chance);
         }
         p.text(info_pos, Align2::LEFT_BOTTOM, text, bold(12.5), track_color(v));
-    } else {
-        p.text(
-            info_pos,
-            Align2::LEFT_BOTTOM,
-            "Every orbit is a track, every planet a step that plays\nClick: on/off · drag: paint · right-click: the step's menu\nBass/synth planets: drag up or down (or scroll) for the note",
-            body(11.5),
-            FAINT,
-        );
-    }
-    if let Some((text, age)) = &live.caption {
-        let a = (1.0 - (age - 2.5).max(0.0) / 1.5).clamp(0.0, 1.0);
-        p.text(
-            pos2(rect.left() + 4.0, rect.top() + 4.0),
-            Align2::LEFT_TOP,
-            format!("{}  {}", ph::SPARKLE, text),
-            bold(14.0),
-            alpha(ACID, a),
-        );
     }
     out
 }

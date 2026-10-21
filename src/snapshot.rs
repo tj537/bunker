@@ -35,7 +35,6 @@ mod tests {
         for &(t, build) in frames {
             app.fake_live = Some(Live {
                 build,
-                caption: None,
                 ..playing(t * 8.0, &[0, 3])
             });
             shapes = snap.frame(t, |ctx| app.ui(ctx));
@@ -119,7 +118,6 @@ mod tests {
             build: None,
             bar: (pos / 16.0) as u64,
             part: None,
-            caption: Some(("New hat pattern".into(), 0.5)),
             bands: [0.22, 0.12, 0.05, 0.03, 0.035, 0.02, 0.015, 0.008],
             level: 0.7,
         }
@@ -206,12 +204,10 @@ mod tests {
             app.visual = true;
             app.song.macros.energy = 0.8;
             app.fake_live = Some(Live {
-                caption: Some(("Drop!".into(), 0.4)),
                 ..playing(66.2, &[0, 1, 3, 6])
             });
         });
         render("master_tab_small", 1100.0, 700.0, |app| {
-            app.master_tab = true;
             app.song.auto = true;
             app.song.tracks[0].lock = true;
             app.song.tracks[6].lock = true;
@@ -237,7 +233,6 @@ mod tests {
             app.slot_now = Some(1);
             app.fx_key[2] = true;
             app.fake_live = Some(Live {
-                caption: Some(("Hat sound: 808".into(), 0.5)),
                 ..playing(37.3, &[0, 3, 6, 7])
             });
         });

@@ -163,7 +163,16 @@ pub struct Shared {
     pub transpose: AtomicI32,
     /// Loudness per `BANDS` band (f32 bits), for the visualizer
     pub bands: [AtomicU32; 8],
+    /// The auto mode's cycle, for the log: the bar it started, its length in bars, the bar
+    /// in it where the breakdown starts (`NO_BREAK`: a roller) and its heat in thousandths
+    pub cycle_start: AtomicU64,
+    pub cycle_len: AtomicU32,
+    pub cycle_break: AtomicU32,
+    pub heat: AtomicU32,
 }
+
+/// `Shared::cycle_break` of a cycle without a breakdown
+pub const NO_BREAK: u32 = u32::MAX;
 
 impl Shared {
     pub fn new() -> Arc<Self> {
@@ -177,6 +186,10 @@ impl Shared {
             part_start: AtomicU64::new(0),
             transpose: AtomicI32::new(0),
             bands: Default::default(),
+            cycle_start: AtomicU64::new(0),
+            cycle_len: AtomicU32::new(32),
+            cycle_break: AtomicU32::new(NO_BREAK),
+            heat: AtomicU32::new(500),
         })
     }
 
@@ -675,6 +688,7 @@ impl Engine {
                     self.cycle_start = 0;
                     self.cycle_len = 32;
                     self.heat = 0.5;
+                    self.publish_cycle();
                 }
             }
             Cmd::Stop => {
@@ -1262,6 +1276,21 @@ impl Engine {
             (false, _) => &[32, 32, 48],
         };
         self.cycle_len = *r.pick(lens);
+        self.publish_cycle();
+    }
+
+    /// Tell the UI where the auto cycle is going (for the log)
+    fn publish_cycle(&self) {
+        let sh = &self.shared;
+        sh.cycle_start.store(self.cycle_start, Ordering::Relaxed);
+        sh.cycle_len.store(self.cycle_len as u32, Ordering::Relaxed);
+        let brk = if self.has_breakdown() {
+            self.breakdown_at() as u32
+        } else {
+            NO_BREAK
+        };
+        sh.cycle_break.store(brk, Ordering::Relaxed);
+        sh.heat.store((self.heat * 1000.0) as u32, Ordering::Relaxed);
     }
 
     /// Bar starts: drops, a waiting pattern, song mode, and in auto mode the arrangement

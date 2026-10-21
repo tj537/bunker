@@ -8,6 +8,7 @@ mod face;
 mod file;
 mod form;
 mod gen;
+mod log;
 mod midi;
 #[cfg(test)]
 mod offscreen;

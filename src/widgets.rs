@@ -37,46 +37,97 @@ pub fn arc(p: &egui::Painter, c: Pos2, r: f32, a0: f32, a1: f32, stroke: Stroke)
     p.add(Shape::line(pts, stroke));
 }
 
-/// A sound or master control: name and value above a coloured bar. Drag along it,
-/// double-click to reset.
-pub fn macro_slider(ui: &mut Ui, value: &mut f32, default: f32, label: &str, color: Color32, width: f32) -> Response {
-    let (rect, mut resp) = ui.allocate_exact_size(vec2(width, 34.0), Sense::click_and_drag());
-    let bar = Rect::from_min_max(pos2(rect.left(), rect.bottom() - 8.0), pos2(rect.right(), rect.bottom() - 2.0));
-    if resp.double_clicked() {
-        *value = default;
-        resp.mark_changed();
-    } else if let Some(pos) = resp.interact_pointer_pos() {
-        if resp.dragged() || resp.is_pointer_button_down_on() {
-            let v = ((pos.x - bar.left()) / bar.width()).clamp(0.0, 1.0);
-            if (v - *value).abs() > 1e-4 {
-                *value = v;
-                resp.mark_changed();
+/// A round knob: drag up or right (or scroll) to turn it, double-click resets. The arc runs
+/// from the bottom left round to the bottom right; a `bipolar` knob lights from its default
+/// outwards. `steps` makes it click into that many positions.
+#[allow(clippy::too_many_arguments)]
+pub fn knob(
+    ui: &mut Ui,
+    value: &mut f32,
+    default: f32,
+    label: &str,
+    text: &str,
+    color: Color32,
+    size: f32,
+    width: f32,
+    bipolar: bool,
+    steps: Option<u32>,
+) -> Response {
+    let (rect, mut resp) = ui.allocate_exact_size(vec2(width, size + 18.0), Sense::click_and_drag());
+    let c = pos2(rect.center().x, rect.top() + size / 2.0);
+    let r = size / 2.0;
+    let snap = |v: f32| match steps {
+        Some(n) if n > 1 => (v * (n - 1) as f32).round() / (n - 1) as f32,
+        _ => v,
+    };
+    // The unrounded value while turning, so a stepped knob still moves with small drags
+    let raw_id = resp.id.with("raw");
+    let mut raw: f32 = ui.data(|d| d.get_temp(raw_id)).unwrap_or(*value);
+    let mut delta = 0.0;
+    if resp.drag_started() {
+        raw = *value;
+    }
+    if resp.dragged() {
+        let d = resp.drag_delta();
+        delta += (d.x - d.y) / 160.0;
+    }
+    if resp.hovered() {
+        let s = ui.input(|i| i.raw_scroll_delta.y);
+        if s != 0.0 {
+            if !resp.dragged() {
+                raw = *value;
             }
+            delta += s / 400.0;
         }
     }
+    if resp.double_clicked() {
+        *value = default;
+        raw = default;
+        resp.mark_changed();
+    } else if delta != 0.0 {
+        raw = (raw + delta).clamp(0.0, 1.0);
+        let v = snap(raw);
+        if (v - *value).abs() > 1e-4 {
+            *value = v;
+            resp.mark_changed();
+        }
+    }
+    ui.data_mut(|d| d.insert_temp(raw_id, raw));
+
     let p = ui.painter();
     let hot = resp.hovered() || resp.dragged();
+    let (start, sweep) = (0.75 * std::f32::consts::PI, 1.5 * std::f32::consts::PI);
+    let at = |v: f32, rad: f32| c + vec2((start + sweep * v).cos(), (start + sweep * v).sin()) * rad;
+    let arc = |from: f32, to: f32, rad: f32| -> Vec<Pos2> {
+        let n = ((to - from).abs() * 40.0).ceil().max(1.0) as usize;
+        (0..=n).map(|i| at(from + (to - from) * i as f32 / n as f32, rad)).collect()
+    };
+    if hot {
+        glow(p, c, r * 0.8, color, 0.25);
+    }
+    let ring = r - 2.0;
+    p.add(egui::Shape::line(
+        arc(0.0, 1.0, ring),
+        stroke(3.0, mix(PANEL_HI, Color32::WHITE, 0.14)),
+    ));
+    let from = if bipolar { default } else { 0.0 };
+    if (*value - from).abs() > 1e-3 {
+        p.add(egui::Shape::line(arc(from, *value, ring), stroke(3.5, color)));
+    }
+    // The body, with a dot where it points
+    let body_r = r - 8.0;
+    p.circle_filled(c, body_r, if hot { mix(PANEL_HI, color, 0.12) } else { PANEL_HI });
+    p.circle_stroke(c, body_r, stroke(1.0, alpha(color, if hot { 0.6 } else { 0.25 })));
+    p.circle_filled(at(*value, body_r), 2.6, color);
+    p.text(c, Align2::CENTER_CENTER, text, bold(if size >= 46.0 { 12.0 } else { 10.5 }), TEXT);
     p.text(
-        rect.left_top() + vec2(0.0, 2.0),
-        Align2::LEFT_TOP,
+        pos2(c.x, rect.bottom() - 1.0),
+        Align2::CENTER_BOTTOM,
         label,
-        bold(10.5),
+        bold(10.0),
         if hot { TEXT } else { DIM },
     );
-    p.text(
-        rect.right_top() + vec2(0.0, 1.0),
-        Align2::RIGHT_TOP,
-        format!("{:.0}", *value * 100.0),
-        bold(12.0),
-        TEXT,
-    );
-    p.rect_filled(bar, 3.0, PANEL);
-    let fill = Rect::from_min_max(bar.min, pos2(bar.left() + bar.width() * *value, bar.bottom()));
-    p.rect_filled(fill, 3.0, color);
-    if hot {
-        p.circle_filled(pos2(fill.right(), bar.center().y), 6.0, TEXT);
-    }
-    resp.on_hover_cursor(egui::CursorIcon::ResizeHorizontal)
+    resp.on_hover_cursor(egui::CursorIcon::ResizeVertical)
 }
 
 /// Small pill toggle (chips)

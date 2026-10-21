@@ -21,7 +21,6 @@ pub struct Live {
     pub bar: u64,
     /// Song mode: the section playing and how many bars into it (with fraction)
     pub part: Option<(usize, f64)>,
-    pub caption: Option<(String, f32)>,
     /// Spectrum (engine::BANDS) and output peak, for the visualizer
     pub bands: [f32; 8],
     pub level: f32,
@@ -398,9 +397,8 @@ pub fn orbit(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mut 
     let info = live.info();
     p.text(g.c + vec2(0.0, rb * 0.48), Align2::CENTER_CENTER, info, bold(11.5), DIM);
 
-    // Hover info and captions in the corners
+    // Hover info in the corner
     let info_pos = pos2(rect.left() + 4.0, rect.bottom() - 4.0);
-    let caption_pos = pos2(rect.left() + 4.0, rect.top() + 4.0);
     if let Some((t, s)) = hovered {
         let v = Voice::ALL[t];
         let step = song.tracks[t].steps[s];
@@ -412,24 +410,6 @@ pub fn orbit(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mut 
             text += &format!(" · {}%", step.chance);
         }
         p.text(info_pos, Align2::LEFT_BOTTOM, text, bold(12.5), track_color(v));
-    } else {
-        p.text(
-            info_pos,
-            Align2::LEFT_BOTTOM,
-            "Click: on/off · drag: paint\nRight-click: the step's menu · Shift: how often\nScroll on bass/synth: note",
-            body(11.5),
-            FAINT,
-        );
-    }
-    if let Some((text, age)) = &live.caption {
-        let a = (1.0 - (age - 2.5).max(0.0) / 1.5).clamp(0.0, 1.0);
-        p.text(
-            caption_pos,
-            Align2::LEFT_TOP,
-            format!("{}  {}", ph::SPARKLE, text),
-            bold(14.0),
-            alpha(ACID, a),
-        );
     }
     out
 }
