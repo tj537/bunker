@@ -81,6 +81,25 @@ pub fn stops(ui: &mut Ui, values: &[u8], picked: u8, width: f32, color: Color32)
     (values[i] != picked).then_some(values[i])
 }
 
+/// A screen set into the concrete: a dark well, a thick bezel with a screw in each corner;
+/// returns the screen's rect inside it
+pub fn bunker_frame(p: &egui::Painter, outer: Rect, radius: f32) -> Rect {
+    p.rect_filled(outer.expand(2.0), radius + 2.0, Color32::from_black_alpha(110));
+    let bezel = outer.shrink(2.0);
+    p.rect_filled(bezel, radius, mix(PANEL, BG, 0.45));
+    p.rect_stroke(bezel, radius, stroke(1.0, Color32::from_white_alpha(9)), egui::StrokeKind::Inside);
+    let inset = 6.0 + radius * 0.12;
+    for (x, y) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)] {
+        let c = pos2(
+            bezel.left() + inset + x * (bezel.width() - 2.0 * inset),
+            bezel.top() + inset + y * (bezel.height() - 2.0 * inset),
+        );
+        p.circle_filled(c, 2.2, mix(PANEL_HI, TEXT, 0.15));
+        p.line_segment([c - vec2(1.4, 1.4), c + vec2(1.4, 1.4)], stroke(0.8, mix(BG, Color32::BLACK, 0.3)));
+    }
+    outer.shrink(9.0)
+}
+
 /// Small pill toggle (chips)
 pub fn chip(ui: &mut Ui, text: &str, on: bool, color: Color32) -> Response {
     chip_sized(ui, text, on, color, None)

@@ -5,7 +5,8 @@ use crate::engine::{Shared, NO_BREAK};
 use crate::rng::Rng;
 use crate::song::Song;
 use crate::theme::*;
-use eframe::egui::{self, pos2, vec2, Align2, Color32, FontId, Rect, Sense, Ui};
+use crate::widgets::glow;
+use eframe::egui::{self, pos2, vec2, Align2, Color32, FontId, Pos2, Rect, Sense, Ui};
 use std::collections::VecDeque;
 use std::sync::atomic::Ordering;
 
@@ -266,10 +267,12 @@ impl Log {
         }
     }
 
-    /// The log: a status line, then the lines, the newest at the bottom being typed
-    pub fn ui(&self, ui: &mut Ui, state: State, energy: Option<f32>, now: f64) {
+    /// The log: a status line, then the lines, the newest at the bottom being typed. `top` and
+    /// `bottom` keep room for what the computer draws there (its menu bar, the prompt).
+    #[allow(clippy::too_many_arguments)]
+    pub fn ui(&self, ui: &mut Ui, state: State, energy: Option<f32>, height: f32, top: f32, bottom: f32, now: f64) -> Rect {
         let w = ui.available_width();
-        let h = ui.available_height().max(70.0);
+        let h = height.max(60.0);
         let (rect, _) = ui.allocate_exact_size(vec2(w, h), Sense::hover());
         let p = ui.painter_at(rect);
         // A little darker than the concrete around it, with a faint picture noise
@@ -297,7 +300,7 @@ impl Log {
             );
         }
         let mono = |size: f32| FontId::monospace(size);
-        let inner = rect.shrink2(vec2(10.0, 8.0));
+        let inner = Rect::from_min_max(rect.min + vec2(10.0, 8.0 + top), rect.max - vec2(10.0, 8.0 + bottom));
 
         // Status line
         let status = match state {
@@ -388,14 +391,73 @@ impl Log {
             let pos = pos2(inner.left(), bottom - gh);
             let edge = ((pos.y - top) / 30.0).clamp(0.0, 1.0);
             // A blinking block where the typing is
-            if newest && (now * 2.0).fract() < 0.6 {
+            if newest && (now * 0.8).fract() < 0.55 {
                 let end = galley.rows.last().map_or(pos, |r| pos + vec2(r.rect.right() + 2.0, r.rect.top()));
                 p.rect_filled(Rect::from_min_size(end, vec2(6.0, 11.0)), 0.0, alpha(ACID, 0.8));
             }
             p.galley_with_override_text_color(pos, galley, alpha(ACID, fade * edge));
             bottom -= gh + 4.0;
         }
+        rect
     }
+}
+
+/// The greetings BUNK, the computer's mascot, types when it boots
+pub const HELLOS: [&str; 4] = [
+    "BUNK here. I'm taking over now.",
+    "Hands off the wheel – I've got this.",
+    "BUNK online. I'll take it from here.",
+    "Sit back. BUNK is driving now.",
+];
+
+/// BUNK, the little robot on the computer's screen: a head with an antenna that blinks,
+/// eyes that blink, a smile, and an arm that waves. `t` is seconds since it appeared.
+pub fn robot(p: &egui::Painter, c: Pos2, s: f32, t: f32, ink: Color32) {
+    let line = stroke(2.0, ink);
+    // Body and head
+    let body = Rect::from_center_size(c + vec2(0.0, 0.62 * s), vec2(0.56 * s, 0.34 * s));
+    p.rect_stroke(body, 0.08 * s, line, egui::StrokeKind::Middle);
+    p.circle_filled(body.center(), 0.05 * s, ink.gamma_multiply(0.5 + 0.5 * (t * 4.0).sin().abs()));
+    p.line_segment([c + vec2(0.0, 0.39 * s), body.center_top()], line);
+    let head = Rect::from_center_size(c, vec2(s, 0.78 * s));
+    p.rect_stroke(head, 0.16 * s, line, egui::StrokeKind::Middle);
+    // Ears
+    for side in [-1.0, 1.0] {
+        let ear = Rect::from_center_size(c + vec2(side * 0.56 * s, 0.0), vec2(0.1 * s, 0.26 * s));
+        p.rect_filled(ear, 0.03 * s, ink.gamma_multiply(0.7));
+    }
+    // Antenna with a light that blinks
+    let tip = c - vec2(0.0, 0.62 * s);
+    p.line_segment([head.center_top(), tip], line);
+    let on = (t * 2.5).fract() < 0.6;
+    if on {
+        glow(p, tip, 0.08 * s, ink, 0.8);
+    }
+    p.circle_filled(tip, 0.06 * s, if on { ink } else { ink.gamma_multiply(0.4) });
+    // Eyes: blink now and then
+    let blink = if (t * 0.7).fract() > 0.92 { 0.15 } else { 1.0 };
+    for side in [-1.0, 1.0] {
+        let eye = Rect::from_center_size(c + vec2(side * 0.21 * s, -0.08 * s), vec2(0.15 * s, 0.18 * s * blink));
+        p.rect_filled(eye, 0.04 * s, ink);
+    }
+    // A smile
+    let smile: Vec<Pos2> = (0..=12)
+        .map(|i| {
+            let a = std::f32::consts::PI * (0.15 + 0.7 * i as f32 / 12.0);
+            c + vec2(0.0, 0.08 * s) + vec2(a.cos(), a.sin()) * 0.2 * s
+        })
+        .collect();
+    p.add(egui::Shape::line(smile, line));
+    // The right arm waves, the left one hangs
+    let shoulder_r = body.right_top() + vec2(0.0, 0.06 * s);
+    let wave = -1.0 - 0.45 * (t * 7.0).sin();
+    let hand_r = shoulder_r + vec2(wave.cos().abs(), wave.sin()) * 0.38 * s;
+    p.line_segment([shoulder_r, hand_r], line);
+    p.circle_stroke(hand_r, 0.06 * s, line);
+    let shoulder_l = body.left_top() + vec2(0.0, 0.06 * s);
+    let hand_l = shoulder_l + vec2(-0.2 * s, 0.26 * s);
+    p.line_segment([shoulder_l, hand_l], line);
+    p.circle_stroke(hand_l, 0.06 * s, line);
 }
 
 #[cfg(test)]

@@ -68,6 +68,28 @@ pub fn moods_for(vibe: Vibe) -> &'static [usize] {
     }
 }
 
+/// The groove the auto mode grows into from what's there: every track that has something
+/// (or is locked) stays as it is, every empty one gets a part that fits the vibe, the key and
+/// the mood – the engine brings them in one per bar (`Cmd::Grow`)
+pub fn grow_target(song: &Song, rng: &mut Rng) -> Song {
+    let mut target = *song;
+    let vibe = song.vibe.rules();
+    for v in Voice::ALL {
+        let t = song.track(v);
+        if t.lock || t.hits() > 0 {
+            continue;
+        }
+        let sound = sound_for(v, vibe, rng);
+        target.track_mut(v).sound = sound;
+        let fresh = track_for(v, vibe, song.macros.energy.max(0.6), &target, rng);
+        let tt = target.track_mut(v);
+        tt.steps = fresh.steps;
+        tt.len = fresh.len;
+        tt.mute = false;
+    }
+    target
+}
+
 /// A whole new groove
 pub fn generate(vibe: Vibe, m: &Macros, rng: &mut Rng) -> Song {
     generate_keeping(vibe, m, rng, &[None; TRACKS])

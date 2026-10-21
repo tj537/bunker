@@ -425,11 +425,12 @@ pub fn pitch_card(ui: &mut Ui, semis: &mut u8, default: u8, label: &str, color: 
 /// The picture on an effect button (in `Fx::ALL` order), moving with `t`: stutter repeats a
 /// slice, echo fades out in repeats, wash smears waves into each other, crush steps a wave,
 /// gate chops it, tape stop slows it down
-pub fn fx_art(p: &egui::Painter, r: Rect, kind: usize, ink: Color32, t: f32) {
+/// `boost` (0…1) while the effect is held: everything bigger and bolder.
+pub fn fx_art(p: &egui::Painter, r: Rect, kind: usize, ink: Color32, t: f32, boost: f32) {
     let line = |pts: Vec<Pos2>, w: f32, c: Color32| {
-        p.add(egui::Shape::line(pts, stroke(w, c)));
+        p.add(egui::Shape::line(pts, stroke(w + boost, c)));
     };
-    let (cy, amp) = (r.center().y, r.height() / 2.0);
+    let (cy, amp) = (r.center().y, r.height() / 2.0 * (1.0 + 0.3 * boost));
     let wave = |f: &dyn Fn(f32) -> f32, n: usize| -> Vec<Pos2> {
         (0..=n)
             .map(|i| {
@@ -511,5 +512,23 @@ pub fn fx_art(p: &egui::Painter, r: Rect, kind: usize, ink: Color32, t: f32) {
             let pts = wave(&|x| (1.0 - 0.55 * x) * ((1.0 - x).powf(0.6) * 26.0 + ph).sin() - 0.25 * x * x, 64);
             line(pts, 2.5, ink);
         }
+    }
+}
+
+/// The burst when an effect is pressed: its outline flies out of the button and fades,
+/// with a flash inside (`k` 0…1 through the burst)
+pub fn fx_burst(p: &egui::Painter, r: Rect, color: Color32, k: f32) {
+    let e = 1.0 - (1.0 - k).powi(3);
+    for (i, spread) in [(0, 22.0), (1, 12.0)] {
+        let a = (1.0 - k) * if i == 0 { 0.9 } else { 0.5 };
+        p.rect_stroke(
+            r.expand(2.0 + e * spread),
+            12.0 + e * spread * 0.5,
+            stroke(2.5 - i as f32, color.gamma_multiply(a)),
+            egui::StrokeKind::Outside,
+        );
+    }
+    if k < 0.3 {
+        p.rect_filled(r, 12.0, Color32::from_white_alpha((60.0 * (1.0 - k / 0.3)) as u8));
     }
 }

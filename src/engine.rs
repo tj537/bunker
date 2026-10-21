@@ -42,6 +42,11 @@ pub enum Cmd {
     Queue(Box<Song>, usize),
     /// Record everything that plays from now on (true) or end the recording (false)
     Capture(bool),
+    /// A click on every beat, higher on the one – for building a beat by hand
+    Metronome(bool),
+    /// The auto mode builds on what's there: the empty tracks of this groove come in one per
+    /// bar (kick first), then it goes on as usual
+    Grow(Box<Song>),
 }
 
 pub enum Event {
@@ -520,6 +525,12 @@ pub struct Engine {
     break_lp_r: Svf,
     /// Auto mode: drops since the last new chapter
     drops_since_chapter: u32,
+    /// The metronome: on, and samples since its last click (and whether that was the one)
+    metronome: bool,
+    click: f32,
+    click_one: bool,
+    /// What the auto mode is growing into (`Cmd::Grow`): one empty track comes in per bar
+    grow: Option<Box<Song>>,
     /// Tracks the auto mode's energy muted – it unmutes them when the energy comes back
     energy_out: [bool; TRACKS],
     /// The layer energy on the last beat (auto mode: a track is muted when the energy crosses its layer)
@@ -633,6 +644,10 @@ impl Engine {
             break_lp_l: Svf::new(18_000.0, 0.7, sr),
             break_lp_r: Svf::new(18_000.0, 0.7, sr),
             drops_since_chapter: 0,
+            grow: None,
+            metronome: false,
+            click: f32::MAX,
+            click_one: false,
             energy_out: [false; TRACKS],
             last_layer: 1.0,
             knob_home: knobs(&song),
@@ -763,6 +778,15 @@ impl Engine {
                 self.shared.part.store(0, Ordering::Relaxed);
             }
             Cmd::Jump(i) => self.jump = Some(i),
+            Cmd::Metronome(on) => self.metronome = on,
+            Cmd::Grow(target) => {
+                self.grow = Some(target);
+                // A fresh cycle once it's grown, and enough energy for everything to play
+                self.cycle_start = u64::MAX;
+                self.energy_goal = self.song.macros.energy.max(0.8);
+                self.song.macros.energy = self.energy_goal;
+                self.layer_energy = self.energy_goal;
+            }
             Cmd::Capture(true) => {
                 if self.events.is_some() {
                     self.finish_recording();
@@ -887,27 +911,17 @@ impl Engine {
         self.last_fill = f;
     }
 
-    /// The auto mode with AUTO FX: what the energy takes out is muted, not just left out
-    fn mutes_by_energy(&self) -> bool {
+    /// The auto mode with AUTO FX: it plays with the mix (`drift_knobs`)
+    fn drifts_mix(&self) -> bool {
         self.song.auto && self.song.auto_fx && self.arrangement.is_none()
     }
 
-    /// Auto mode: a track whose layer the energy falls below is muted (the mute button shows
-    /// it); when the energy comes back, the tracks it muted come back too. Only crossings
-    /// count, so a track you unmute stays on. True when a mute changed.
+    /// A track whose layer the energy falls below is muted (the mute button shows it) – by
+    /// hand, in the auto mode and in songs alike; when the energy comes back, the tracks it
+    /// muted come back too. Only crossings count, so a track you unmute stays on. True when
+    /// a mute changed.
     fn energy_mutes(&mut self) -> bool {
         let mut changed = false;
-        if !self.mutes_by_energy() {
-            // Auto mode or AUTO FX off: give back what it took
-            for (t, out) in self.song.tracks.iter_mut().zip(&mut self.energy_out) {
-                if std::mem::take(out) && t.mute {
-                    t.mute = false;
-                    changed = true;
-                }
-            }
-            self.last_layer = 1.0;
-            return changed;
-        }
         let (before, e) = (self.last_layer, self.layer_energy);
         self.last_layer = e;
         let held: &[Voice] = self.breakdown.as_ref().map_or(&[], |b| b.out);
@@ -932,7 +946,7 @@ impl Engine {
     /// AUTO FX plays with the mix: every knob glides towards its goal (back home when the
     /// auto mode or AUTO FX is off). True when a knob moved.
     fn drift_knobs(&mut self) -> bool {
-        if !(self.mutes_by_energy() && self.playing) {
+        if !(self.drifts_mix() && self.playing) {
             self.knob_goal = [0.0; KNOBS];
         }
         if self.knob_off == self.knob_goal {
@@ -1327,7 +1341,35 @@ impl Engine {
             self.arrange_bar(idx, bar, dropped);
             return;
         }
-        if dropped || !self.song.auto || bar == 0 {
+        if dropped || !self.song.auto {
+            return;
+        }
+        // Growing: one empty track comes in per bar, nothing else changes meanwhile
+        if let Some(target) = self.grow.take() {
+            const ORDER: [Voice; TRACKS] = [
+                Voice::Kick,
+                Voice::Hat,
+                Voice::Clap,
+                Voice::Bass,
+                Voice::Rim,
+                Voice::OpenHat,
+                Voice::Acid,
+                Voice::Ride,
+            ];
+            let next = ORDER.into_iter().find(|&v| {
+                let t = self.song.track(v);
+                !t.lock && t.hits() == 0 && target.track(v).hits() > 0
+            });
+            if let Some(v) = next {
+                let src = *target.track(v);
+                let t = self.song.track_mut(v);
+                (t.steps, t.len, t.sound, t.mute) = (src.steps, src.len, src.sound, false);
+                self.grow = Some(target);
+                self.send_song(Some(Change::Unmuted(v)));
+                return;
+            }
+        }
+        if bar == 0 {
             return;
         }
         // A cycle of 32–64 bars: groove (a change every few bars, a fill every 8), breakdown,
@@ -1380,6 +1422,10 @@ impl Engine {
         if idx.is_multiple_of(STEPS as u64) {
             self.new_bar(idx);
         }
+        if self.metronome && idx.is_multiple_of(4) {
+            self.click = 0.0;
+            self.click_one = idx.is_multiple_of(STEPS as u64);
+        }
         // Bunker steering the energy: it glides towards the curve instead of jumping
         if self.steers_energy() {
             let e = self.song.macros.energy;
@@ -1423,13 +1469,12 @@ impl Engine {
         }) && !self.energy_out[kick];
         // A hi-hat can't be open and closed at once: the closed one leaves the open one's steps alone
         let oh = self.song.track(Voice::OpenHat);
-        // The auto mode mutes what the energy takes out instead (`energy_mutes`)
-        let layered = !self.mutes_by_energy();
-        let open_now = !oh.mute && (!layered || energy >= LAYERS[Voice::OpenHat.index()]) && oh.steps[oh.step_at(play_idx)].on;
+        // (What the energy takes out is muted – `energy_mutes` – so the mutes are all there is)
+        let open_now = !oh.mute && oh.steps[oh.step_at(play_idx)].on;
         for (ti, voice) in Voice::ALL.into_iter().enumerate() {
             let track = self.song.tracks[ti];
             let roll = build.is_some() && voice == Voice::Kick && !kick_by_hand;
-            if !roll && (track.mute || (layered && energy < LAYERS[ti])) {
+            if !roll && track.mute {
                 continue;
             }
             if fill == Some(Fill::Gap) && in_bar >= 12 && matches!(voice, Voice::Kick | Voice::Bass) {
@@ -1469,7 +1514,8 @@ impl Engine {
             if on && perc && !step.accent && energy < 0.45 && h < (0.45 - energy) * 1.8 {
                 on = false;
             }
-            if !step.on && voice == Voice::Hat && energy > 0.6 && h < (energy - 0.6) * 1.5 {
+            // (only on a hat that plays something – an empty track stays silent)
+            if !step.on && voice == Voice::Hat && energy > 0.6 && track.hits() > 0 && h < (energy - 0.6) * 1.5 {
                 on = true;
                 vel *= 0.5;
             }
@@ -1697,6 +1743,15 @@ impl Engine {
             let boom = self.boom.next(sr) * 0.8;
             l += boom;
             r += boom;
+            // The metronome's click: a short blip, higher on the one
+            if self.click < sr * 0.04 {
+                let t = self.click / sr;
+                let f = if self.click_one { 1760.0 } else { 1320.0 };
+                let v = (std::f32::consts::TAU * f * t).sin() * (-t / 0.008).exp() * 0.22;
+                l += v;
+                r += v;
+                self.click += 1.0;
+            }
             if self.crash > 1e-4 {
                 let n = self.rng.noise() * self.crash;
                 rv += n * 0.9;
@@ -2573,7 +2628,7 @@ mod tests {
         let mut buf = vec![0.0; 2 * step * 5];
         e.render(&mut buf);
         e.handle(Cmd::Queue(Box::new(b), 1));
-        assert_eq!(e.song.tracks, a.tracks, "not yet");
+        assert_eq!(e.song.tracks.map(|t| t.steps), a.tracks.map(|t| t.steps), "not yet");
         assert_eq!(e.fill, Some((0, Fill::Roll)), "a clap roll leads into it");
         let mut buf = vec![0.0; 2 * step * 12];
         e.render(&mut buf);
@@ -2663,10 +2718,12 @@ mod tests {
         for i in 0..KNOBS {
             assert!((k[i] - home[i]).abs() <= KNOB_RANGE[i] + 1e-4, "knob {i}: {} vs {}", k[i], home[i]);
         }
-        // Auto mode off: what it muted comes back, the knobs glide home
+        // Auto mode off and the energy up again by hand: what it muted comes back, the knobs
+        // glide home
         e.send_song(None);
         let mut s = e.song;
         s.auto = false;
+        s.macros.energy = 0.9;
         e.handle(Cmd::Song(Box::new(s)));
         let mut buf = vec![0.0; 2 * bar * 4];
         e.render(&mut buf);
@@ -2694,6 +2751,45 @@ mod tests {
         e.handle(Cmd::Song(Box::new(s)));
         assert_eq!(e.song.macros.space, 0.9);
         assert_eq!(e.knob_home[TRACKS + 1], 0.9);
+    }
+
+    #[test]
+    fn the_auto_mode_grows_an_empty_sky_one_track_per_bar() {
+        let mut song = Song::empty();
+        song.auto = true;
+        let target = gen::grow_target(&gen::generate(Vibe::Peak, &Default::default(), &mut Rng::new(2)), &mut Rng::new(3));
+        let mut e = Engine::new(11_025.0, song, Shared::new(), None, 1);
+        e.handle(Cmd::Grow(Box::new(target)));
+        e.handle(Cmd::Play);
+        let bar = (e.step_len() * STEPS as f64) as usize;
+        // Just short of the second bar
+        let mut buf = vec![0.0; 2 * (bar - 64)];
+        let filled = |e: &Engine| e.song.tracks.iter().filter(|t| t.hits() > 0).count();
+        e.render(&mut buf);
+        assert_eq!(filled(&e), 1, "the kick first");
+        assert!(e.song.track(Voice::Kick).hits() > 0);
+        let mut buf = vec![0.0; 2 * bar];
+        e.render(&mut buf);
+        assert_eq!(filled(&e), 2);
+        for _ in 0..8 {
+            e.render(&mut buf);
+        }
+        assert_eq!(filled(&e), target.tracks.iter().filter(|t| t.hits() > 0).count());
+        assert!(e.grow.is_none(), "grown – the auto mode goes on as usual");
+    }
+
+    #[test]
+    fn an_empty_pattern_is_silent_unless_the_metronome_ticks() {
+        let mut song = Song::empty();
+        song.macros.energy = 1.0;
+        let mut e = Engine::new(22_050.0, song, Shared::new(), None, 1);
+        e.handle(Cmd::Play);
+        let mut buf = vec![0.0; 2 * 22_050];
+        e.render(&mut buf);
+        assert!(buf.iter().all(|x| x.abs() < 1e-3), "no ghost hats on an empty hat");
+        e.handle(Cmd::Metronome(true));
+        e.render(&mut buf);
+        assert!(buf.iter().any(|x| x.abs() > 0.05), "the metronome clicks");
     }
 
     #[test]

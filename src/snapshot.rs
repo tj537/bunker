@@ -208,6 +208,12 @@ mod tests {
                 ..playing(66.2, &[0, 1, 3, 6])
             });
         });
+        // BUNK says hello as the computer comes on (render time is ~10 s)
+        render("bunk", 1100.0, 700.0, |app| {
+            app.song.auto = true;
+            app.power_at = 8.2;
+            app.fake_live = Some(playing(2.0, &[0]));
+        });
         render("knobs_small", 1100.0, 700.0, |app| {
             app.sound_open = true;
             app.song.auto = true;
