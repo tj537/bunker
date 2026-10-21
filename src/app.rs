@@ -120,7 +120,7 @@ pub struct BunkerApp {
     sent: Song,
     tx: Sender<Cmd>,
     events: Receiver<Event>,
-    shared: Arc<Shared>,
+    pub shared: Arc<Shared>,
     audio: Result<Audio, String>,
     midi: Option<MidiIn>,
     midi_rx: Receiver<Midi>,
@@ -137,7 +137,7 @@ pub struct BunkerApp {
     step_seen: u64,
     step_time: f64,
     /// What Bunker says, where the auto mode is, lines from the bunker (under the mood)
-    log: crate::log::Log,
+    pub log: crate::log::Log,
     filter: f32,
     /// The filter pad's resonance (springs back with it)
     filter_res: f32,

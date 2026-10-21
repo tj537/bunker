@@ -217,7 +217,7 @@ mod tests {
             app.fake_live = Some(playing(12.5, &[0]));
         });
         // The README picture: docs/images/orbit.jpg (1600 px wide JPEG of this)
-        render("readme_orbit", 1360.0, 860.0, |app| {
+        render("readme", 1360.0, 860.0, |app| {
             use crate::song::{Vibe, Voice};
             let mut rng = crate::rng::Rng::new(77);
             for (i, vibe) in [Vibe::Dub, Vibe::Acid, Vibe::Rave].into_iter().enumerate() {
@@ -234,6 +234,32 @@ mod tests {
             app.song.tracks[3].tune = 2;
             app.slot_now = Some(1);
             app.fx_key[2] = true;
+            app.view = View::Planets;
+            app.sound_open = true;
+            app.song.mood_hold = true;
+            app.song.macros.energy = 0.78;
+            // The auto mode in the middle of a cycle, with what the log said on the way
+            use std::sync::atomic::Ordering;
+            app.shared.step.store(37 * 16 + 3, Ordering::Relaxed);
+            app.shared.cycle_start.store(20, Ordering::Relaxed);
+            app.shared.cycle_len.store(32, Ordering::Relaxed);
+            app.shared.cycle_break.store(24, Ordering::Relaxed);
+            app.shared.heat.store(700, Ordering::Relaxed);
+            app.log = crate::log::Log::new();
+            let s = &app.song;
+            let mood = s.mood().map_or("", |k| crate::song::MOODS[k].0);
+            let groove = format!("{} · {} · {mood} · {:.0} BPM", s.vibe.name(), s.root_name(), s.bpm);
+            for line in [
+                "New cycle · 32 bars · the set runs hot",
+                "Drop in 16 bars",
+                "New bassline",
+                &groove,
+                "Breakdown in 8 bars",
+                "Hat shifted",
+                "Tip: hold WASH (E) through the last bar before a drop",
+            ] {
+                app.log.push(line, -100.0);
+            }
             app.fake_live = Some(Live {
                 ..playing(37.3, &[0, 3, 6, 7])
             });
