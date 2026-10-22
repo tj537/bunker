@@ -172,10 +172,6 @@ pub fn home(ui: &mut Ui, recent: &[Recent], last: Option<&Song>, update: Option<
     let p = ui.painter().clone();
     let t = ui.input(|i| i.time) as f32;
     ui.ctx().request_repaint();
-    // Space, all of it, with stars drifting by
-    p.rect_filled(full, 0.0, SPACE);
-    crate::widgets::star_field(ui, &p, full, "home", 0.25, 1.0);
-
     let margin = (full.width() * 0.07).clamp(32.0, 110.0);
     let content = full.shrink2(vec2(margin, 0.0));
     let hero_h = (full.height() * 0.5).clamp(320.0, 470.0);
@@ -187,7 +183,16 @@ pub fn home(ui: &mut Ui, recent: &[Recent], last: Option<&Song>, update: Option<
     // The logo, big, on the right
     let side = Rect::from_min_max(pos2(hero.left() + 380.0f32.min(hero.width() * 0.45), hero.top()), hero.max);
     let size = side.width().min(side.height()) * 0.78;
-    crate::widgets::logo(&p, Rect::from_center_size(side.center(), vec2(size, size)), false);
+    // Space, all of it, with stars flying out from behind the logo
+    p.rect_filled(full, 0.0, SPACE);
+    crate::widgets::warp_field(&p, full, side.center(), t);
+    // The radar turns once every four seconds, like a bar at 120 BPM
+    crate::widgets::logo(
+        &p,
+        Rect::from_center_size(side.center(), vec2(size, size)),
+        false,
+        (t / 4.0).fract() + 1e-3,
+    );
 
     // The left: the name, a line, the buttons
     let col = 360.0f32.min(hero.width() * 0.48);
@@ -200,8 +205,7 @@ pub fn home(ui: &mut Ui, recent: &[Recent], last: Option<&Song>, update: Option<
         alpha(TEXT, 0.5),
     );
     y += 22.0;
-    crate::widgets::logo(&p, Rect::from_min_size(pos2(hero.left(), y + 6.0), vec2(62.0, 62.0)), true);
-    p.text(pos2(hero.left() + 76.0, y), Align2::LEFT_TOP, "SOLARUM", display(68.0), TEXT);
+    p.text(pos2(hero.left() - 3.0, y), Align2::LEFT_TOP, "SOLARUM", display(68.0), TEXT);
     y += 88.0;
     let intro = p.layout(
         "Paint a beat on an empty sky, or let Solari, the computer, build a whole set.".to_string(),

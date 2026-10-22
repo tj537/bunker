@@ -602,11 +602,13 @@ pub fn fit_text(p: &egui::Painter, text: &str, font: egui::FontId, max_w: f32) -
 
 /// The Solarum logo, the step ring: sixteen steps round a lime sun, the four beats bright,
 /// a beam just passing. `tile`: on its dark rounded square (the app icon), else bare.
-pub fn logo(p: &egui::Painter, r: Rect, tile: bool) {
+/// `sweep`: how far round the beam has turned (0…1 a bar; 0 = the still logo) – the steps it
+/// has just passed light up, like the radar in the app.
+pub fn logo(p: &egui::Painter, r: Rect, tile: bool, sweep: f32) {
     let s = r.width().min(r.height()) / 100.0;
-    let at = |x: f32, y: f32| r.center() + vec2((x - 50.0) * s, (y - 50.0) * s);
+    let c = r.center();
     if tile {
-        let sq = Rect::from_center_size(r.center(), vec2(100.0 * s, 100.0 * s));
+        let sq = Rect::from_center_size(c, vec2(100.0 * s, 100.0 * s));
         p.rect_filled(sq, 22.0 * s, Color32::from_rgb(20, 20, 23));
         p.rect_stroke(
             sq,
@@ -615,22 +617,54 @@ pub fn logo(p: &egui::Painter, r: Rect, tile: bool) {
             egui::StrokeKind::Inside,
         );
     }
-    let c = at(50.0, 50.0);
-    // The beam: from the first step to the third
+    let tau = std::f32::consts::TAU;
+    let top = -std::f32::consts::FRAC_PI_2;
+    // The beam: a wedge an eighth of the way round, its leading edge at `sweep`
+    let lead = top + std::f32::consts::FRAC_PI_4 + sweep * tau;
     let mut wedge = vec![c];
     for i in 0..=12 {
-        let a = -std::f32::consts::FRAC_PI_2 + std::f32::consts::FRAC_PI_4 * i as f32 / 12.0;
+        let a = lead - std::f32::consts::FRAC_PI_4 * (1.0 - i as f32 / 12.0);
         wedge.push(c + vec2(a.cos(), a.sin()) * 34.0 * s);
     }
     p.add(egui::Shape::convex_polygon(wedge, ACID.gamma_multiply(0.18), egui::Stroke::NONE));
+    let white = Color32::from_rgb(236, 235, 230);
+    let grey = Color32::from_rgb(107, 107, 116);
     for k in 0..16 {
-        let a = -std::f32::consts::FRAC_PI_2 + k as f32 / 16.0 * std::f32::consts::TAU;
+        let a = top + k as f32 / 16.0 * tau;
         let pt = c + vec2(a.cos(), a.sin()) * 34.0 * s;
+        // How recently the beam passed this step (1 = just now, fading over a quarter turn)
+        let behind = (lead - a).rem_euclid(tau) / tau;
+        let lit = if sweep != 0.0 { (1.0 - behind * 4.0).max(0.0) } else { 0.0 };
         if k % 4 == 0 {
-            p.circle_filled(pt, 5.0 * s, Color32::from_rgb(236, 235, 230));
+            if lit > 0.0 {
+                glow(p, pt, 6.0 * s, ACID, 0.6 * lit);
+            }
+            p.circle_filled(pt, 5.0 * s * (1.0 + 0.25 * lit), mix(white, ACID, lit));
         } else {
-            p.circle_filled(pt, 2.0 * s, Color32::from_rgb(107, 107, 116));
+            p.circle_filled(pt, 2.0 * s * (1.0 + 0.4 * lit), mix(grey, ACID, lit));
         }
     }
     p.circle_filled(c, 12.0 * s, ACID);
+}
+
+/// Stars flying out of the middle towards you – the start screen's warp
+pub fn warp_field(p: &egui::Painter, rect: Rect, center: egui::Pos2, t: f32) {
+    let reach = (rect.width().max(rect.height())) * 0.75;
+    for i in 0..200u32 {
+        let a = hash(i) * std::f32::consts::TAU;
+        // Each star's distance cycles: slow in the middle, fast and bright at the edge
+        let z = (hash(i + 5_000) + t * (0.05 + 0.06 * hash(i + 9_000))).fract();
+        let d = z * z * reach;
+        let dir = vec2(a.cos(), a.sin());
+        let at = center + dir * (d + 6.0);
+        if !rect.expand(4.0).contains(at) {
+            continue;
+        }
+        let v = (z * 1.3).min(1.0);
+        let level = (30.0 + 150.0 * v) as u8;
+        // Exact premultiplied white: a crisp light, never a grey smudge
+        let col = Color32::from_rgba_premultiplied(level, level, level, level);
+        let tail = 0.5 + z * z * z * 9.0;
+        p.line_segment([at - dir * tail, at], stroke(0.7 + z * 0.9, col));
+    }
 }

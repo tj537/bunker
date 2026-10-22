@@ -1401,7 +1401,7 @@ impl SolarumApp {
             ui.add_space(6.0);
             // The logo before the name
             let (lr, _) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::hover());
-            widgets::logo(ui.painter(), lr, true);
+            widgets::logo(ui.painter(), lr, true, 0.0);
             ui.add_space(2.0);
             if ui
                 .add(

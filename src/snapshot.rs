@@ -305,7 +305,7 @@ mod tests {
                 .frame(eframe::egui::Frame::new())
                 .show(ctx, |ui| {
                     let r = eframe::egui::Rect::from_center_size(eframe::egui::pos2(512.0, 512.0), eframe::egui::vec2(824.0, 824.0));
-                    crate::widgets::logo(ui.painter(), r, true);
+                    crate::widgets::logo(ui.painter(), r, true, 0.0);
                 });
         });
         snap.save(&shapes, Path::new("target/snapshots/icon.png"));
