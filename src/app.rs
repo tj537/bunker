@@ -2542,7 +2542,7 @@ impl BunkerApp {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
                 controls::pitch_card(ui, &mut semis, 5, &pitch_text, track_color(Voice::Bass), cw, card_h).on_hover_text(
-                    "Pitch: the key bass and synth sit on – drums stay where they are\nDrag up or down · double-click resets",
+                    "Pitch: the key bass and synth sit on – drums stay where they are\nClick a step or drag along the scale · double-click resets",
                 );
                 controls::drive_card(ui, &mut drive, crate::song::MasterEq::default().drive, RED, cw, card_h)
                     .on_hover_text("Drive: saturation on the whole mix – warmer and louder\nDrag up or down · double-click resets");

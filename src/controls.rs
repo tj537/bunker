@@ -363,75 +363,58 @@ pub fn drive_card(ui: &mut Ui, value: &mut f32, default: f32, color: Color32, wi
     resp.on_hover_cursor(egui::CursorIcon::ResizeVertical)
 }
 
-/// PITCH as a planet floating above a horizon: the higher, the higher bass and synth sit
-/// (0 = C … 11 = B); drag up or down (or scroll), double-click resets
+/// PITCH as a scale: twelve steps rising from left to right (C … B), the one bass and synth
+/// sit on lit; click a step or drag along it (or scroll), double-click resets
 pub fn pitch_card(ui: &mut Ui, semis: &mut u8, default: u8, label: &str, color: Color32, width: f32, height: f32) -> Response {
     let (rect, mut resp) = ui.allocate_exact_size(vec2(width, height), Sense::click_and_drag());
     let p = ui.painter_at(rect);
     let hot = resp.hovered() || resp.dragged();
     let area = card(&p, rect, "PITCH", label, color, hot);
-    // A slider over the keys: drag up or down (or scroll), a semitone every few pixels
+    let sw = area.width() / 12.0;
+    let step_at = |x: f32| (((x - area.left()) / sw).floor() as i32).clamp(0, 11) as u8;
     let mut picked = *semis;
-    let id = resp.id.with("acc");
-    let mut acc: f32 = ui.data(|d| d.get_temp(id)).unwrap_or(0.0);
     if resp.double_clicked() {
         picked = default;
-        acc = 0.0;
-    } else {
-        if resp.drag_started() {
-            acc = 0.0;
-        }
-        if resp.dragged() {
-            acc -= resp.drag_delta().y;
-        }
-        if resp.hovered() {
-            acc += ui.input(|i| i.raw_scroll_delta.y) * 0.4;
-        }
-        let step = 10.0;
-        while acc.abs() >= step {
+    } else if let Some(at) = resp
+        .interact_pointer_pos()
+        .filter(|_| resp.is_pointer_button_down_on() || resp.dragged())
+    {
+        picked = step_at(at.x);
+    } else if resp.hovered() {
+        let id = resp.id.with("scroll");
+        let mut acc: f32 = ui.data(|d| d.get_temp(id)).unwrap_or(0.0) + ui.input(|i| i.raw_scroll_delta.y);
+        while acc.abs() >= 30.0 {
             picked = (picked as i32 + acc.signum() as i32).clamp(0, 11) as u8;
-            acc -= step * acc.signum();
+            acc -= 30.0 * acc.signum();
         }
+        ui.data_mut(|d| d.insert_temp(id, acc));
     }
-    ui.data_mut(|d| d.insert_temp(id, acc));
     if picked != *semis {
         *semis = picked;
         resp.mark_changed();
     }
-    // A planet on a stalk above a horizon – the higher the pitch, the higher it floats, like
-    // the bass and synth planets in the main view; twelve faint marks for the heights
-    let ground = area.bottom() - 2.0;
-    let horizon: Vec<Pos2> = (0..=24)
-        .map(|i| {
-            let f = i as f32 / 24.0;
-            pos2(area.left() + f * area.width(), ground + 4.0 * (2.0 * f - 1.0).powi(2))
-        })
-        .collect();
-    p.add(egui::Shape::line(horizon, stroke(1.2, alpha(color, 0.45))));
-    let top = area.top() + 7.0;
-    let y_of = |k: f32| ground - 4.0 - (ground - 4.0 - top) * k / 11.0;
-    for k in 0..12 {
-        let y = y_of(k as f32);
-        p.line_segment(
-            [
-                pos2(area.left() + 2.0, y),
-                pos2(area.left() + if k % 4 == 0 { 9.0 } else { 6.0 }, y),
-            ],
-            stroke(1.0, Color32::from_white_alpha(45)),
+    // The steps: each a little higher than the one before, the sharps a shade darker
+    for k in 0..12u8 {
+        let h = area.height() * (0.25 + 0.75 * k as f32 / 11.0);
+        let r = Rect::from_min_max(
+            pos2(area.left() + k as f32 * sw + 1.0, area.bottom() - h),
+            pos2(area.left() + (k + 1) as f32 * sw - 1.0, area.bottom()),
         );
+        let sharp = matches!(k, 1 | 3 | 6 | 8 | 10);
+        let on = k == *semis;
+        let fill = if on {
+            color
+        } else if sharp {
+            Color32::from_white_alpha(14)
+        } else {
+            Color32::from_white_alpha(26)
+        };
+        p.rect_filled(r, 2.0, fill);
+        if on {
+            glow(&p, r.center_top(), 5.0, color, if hot { 0.7 } else { 0.45 });
+        }
     }
-    let planet = pos2(area.center().x, y_of(*semis as f32));
-    p.line_segment([pos2(planet.x, ground), planet], stroke(1.2, alpha(color, 0.6)));
-    glow(&p, planet, 7.0, color, if hot { 0.8 } else { 0.5 });
-    p.circle_filled(planet, 6.0, color);
-    let ring: Vec<Pos2> = (0..=24)
-        .map(|i| {
-            let b = i as f32 / 24.0 * std::f32::consts::TAU;
-            planet + vec2(b.cos() * 10.5, b.sin() * 3.0)
-        })
-        .collect();
-    p.add(egui::Shape::line(ring, stroke(1.2, alpha(mix(color, Color32::WHITE, 0.3), 0.9))));
-    resp.on_hover_cursor(egui::CursorIcon::ResizeVertical)
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 /// The picture on an effect button (in `Fx::ALL` order), moving with `t`: stutter repeats a

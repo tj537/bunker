@@ -57,7 +57,7 @@ Bunker is a techno drum machine written in Rust. Your groove is a little solar s
   It's a little operating system, **BUNK OS**: the title bar has **SET** (how often BUNK changes something, AUTO FX) and **OFF**, the menu below it **VIBE** (a pick rolls a groove in it) and **SHUFFLE**, and at the bottom BUNK's prompt: type `shuffle`, `vibe acid` (or just `acid`), `vibes`, `drop`, `fx off`, `every 8`, `mood dark`, `bpm 135`, `status`, `joke`, `help` or `off`.
 - **The sound** sits at the top right (a click on SOUND shows or folds it):
   - a **character pad** – drag up for DARK, right for ACID;
-  - **SPACE, PUMP, PITCH and DRIVE** as little pictures of what they do – echoes rippling out, the mix ducking under the kick, a planet floating higher for a higher pitch, a wave pushed into saturation – all dragged up or down;
+  - **SPACE, PUMP, PITCH and DRIVE** as little pictures of what they do – echoes rippling out, the mix ducking under the kick, a little scale of twelve steps for the pitch, a wave pushed into saturation – all dragged up or down;
   - the **master EQ** as a curve with three points to drag.
 
   Double-click resets. When the auto mode sweeps the acid or a breakdown sweeps the filter, the pucks move with it.
