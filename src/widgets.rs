@@ -245,7 +245,7 @@ pub fn segmented(ui: &mut Ui, items: &[(String, &str)], picked: &[bool], color: 
 
 /// An effect button: icon and name on top, a picture of what it does below (`art`, drawn
 /// in the ink it's given), its key in the corner. `lit` 0…1 lights it up without pressing
-/// it – when Bunker uses the effect by itself.
+/// it – when Solarum uses the effect by itself.
 #[allow(clippy::too_many_arguments)]
 pub fn fx_button(
     ui: &Ui,
@@ -410,12 +410,12 @@ pub fn energy_fader(ui: &mut Ui, value: &mut f32, width: f32, height: f32, steer
          • Groove: kick, bass, open hat and ride come in one by one.\n\
          • Drop (red, 90 and up): the build-up starts on the next bar, the drop two bars later.\n\
          So pull it down, bring it up slowly, and you play a whole track with one fader.\n\
-         In the auto mode with AUTO FX and in AUTO SONG, Bunker moves it.",
+         In the auto mode with AUTO FX and in AUTO SONG, Solarum moves it.",
     );
     out
 }
 
-/// The energy while Bunker steers it: a slim bar with the break and drop zones, no knob
+/// The energy while Solarum steers it: a slim bar with the break and drop zones, no knob
 fn energy_shown(ui: &mut Ui, value: f32, width: f32, height: f32, who: &str) -> EnergyOut {
     let (rect, resp) = ui.allocate_exact_size(vec2(width, height), Sense::click());
     let p = ui.painter();
@@ -446,7 +446,7 @@ fn energy_shown(ui: &mut Ui, value: f32, width: f32, height: f32, who: &str) -> 
     p.rect_filled(fill, 2.0, alpha(mix(cool, RED, value), 0.8));
     let clicked = resp
         .on_hover_text(
-            "Bunker steers the energy now – breaks and drops by itself.\nSwitch AUTO FX off (or stop AUTO SONG) to take it over.",
+            "Solarum steers the energy now – breaks and drops by itself.\nSwitch AUTO FX off (or stop AUTO SONG) to take it over.",
         )
         .clicked();
     EnergyOut {
@@ -502,7 +502,7 @@ fn hash(i: u32) -> f32 {
     (x & 0xFF_FFFF) as f32 / 0xFF_FFFF as f32
 }
 
-/// Bunker concrete: grey, cloudy where it dried unevenly, a fine grain and small air pores
+/// Solarum concrete: grey, cloudy where it dried unevenly, a fine grain and small air pores
 pub fn concrete(p: &egui::Painter, rect: Rect) {
     p.rect_filled(rect, 0.0, BG);
     let at = |i: u32| pos2(rect.left() + hash(i) * rect.width(), rect.top() + hash(i + 50_000) * rect.height());

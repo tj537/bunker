@@ -4,7 +4,7 @@
 use crate::audio::{self, Audio};
 use crate::controls;
 use crate::engine::{Arrangement, Cmd, Event, Fx, Shared};
-use crate::file::{self, BunkerFile};
+use crate::file::{self, SolarumFile};
 use crate::form::FORMS;
 use crate::gen;
 use crate::midi::{Midi, MidiIn};
@@ -62,7 +62,7 @@ fn fit_text(p: &egui::Painter, text: &str, font: egui::FontId, max_w: f32) -> St
     String::new()
 }
 
-/// How much Bunker uses an effect by itself right now: every build-up runs the gate,
+/// How much Solarum uses an effect by itself right now: every build-up runs the gate,
 /// harder towards the drop – the button lights up and flickers with the chop
 fn auto_fx(fx: Fx, live: &Live) -> f32 {
     match (fx, live.build) {
@@ -115,14 +115,14 @@ enum Export {
     Saving(Receiver<Result<PathBuf, String>>),
 }
 
-/// What happens when Bunker opens
+/// What happens when Solarum opens
 #[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum OnStart {
     Wait,
     Play,
 }
 
-pub struct BunkerApp {
+pub struct SolarumApp {
     pub song: Song,
     sent: Song,
     tx: Sender<Cmd>,
@@ -143,7 +143,7 @@ pub struct BunkerApp {
     hit_age: [f32; TRACKS],
     step_seen: u64,
     step_time: f64,
-    /// What Bunker says, where the auto mode is, lines from the bunker (under the mood)
+    /// What Solarum says, where the auto mode is, lines from the bunker (under the mood)
     pub log: crate::log::Log,
     filter: f32,
     /// The filter pad's resonance (springs back with it)
@@ -212,7 +212,7 @@ pub struct BunkerApp {
     pub radar: bool,
     /// The sound section is shown (the SOUND heading folds it away)
     pub sound_open: bool,
-    /// Settings: the log's facts and tips, what happens when Bunker opens
+    /// Settings: the log's facts and tips, what happens when Solarum opens
     /// (`OnStart`), and whether a shuffle keeps the tempo
     /// The metronome clicks on every beat
     metronome: bool,
@@ -233,11 +233,11 @@ pub struct BunkerApp {
     pub fake_live: Option<Live>,
 }
 
-impl BunkerApp {
+impl SolarumApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         install(&cc.egui_ctx);
         // eframe brings the window back as it was – quit inside a visualizer, and that was
-        // fullscreen. Bunker always starts in its window; only a visualizer goes fullscreen.
+        // fullscreen. Solarum always starts in its window; only a visualizer goes fullscreen.
         cc.egui_ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
         let mut song: Song = cc.storage.and_then(|s| eframe::get_value(s, "song")).unwrap_or_default();
         song.sanitize();
@@ -326,7 +326,7 @@ impl BunkerApp {
             drop((rx, ev_tx));
             Err("Sound is off".into())
         };
-        BunkerApp {
+        SolarumApp {
             song,
             sent: song,
             tx,
@@ -786,7 +786,7 @@ impl BunkerApp {
         self.say("Custom – an empty pattern: click the rings to paint your groove", now);
     }
 
-    /// Bunker steers the energy itself: the auto mode with AUTO FX on
+    /// Solarum steers the energy itself: the auto mode with AUTO FX on
     fn energy_locked(&self) -> bool {
         self.song_form.is_some() || (self.song.auto && self.song.auto_fx)
     }
@@ -796,12 +796,12 @@ impl BunkerApp {
         if self.song_form.is_some() {
             "The song steers the energy – stop AUTO SONG to take it"
         } else {
-            "Bunker steers the energy – switch AUTO FX off to take it"
+            "Solarum steers the energy – switch AUTO FX off to take it"
         }
     }
 
     /// Energy by hand – in a song it takes over until the next part; in the auto mode with
-    /// AUTO FX the energy is Bunker's
+    /// AUTO FX the energy is Solarum's
     fn set_energy(&mut self, e: f32, now: f64) {
         if self.energy_locked() {
             self.say(self.energy_hint(), now);
@@ -811,7 +811,7 @@ impl BunkerApp {
         self.song.curve = false;
     }
 
-    /// Save or open a .bunker file
+    /// Save or open a .solarum file
     fn save_file(&mut self, now: f64) {
         let name = format!(
             "{}-{:.0}bpm.{}",
@@ -821,12 +821,12 @@ impl BunkerApp {
         );
         let Some(path) = rfd::FileDialog::new()
             .set_file_name(&name)
-            .add_filter("Bunker", &[file::EXTENSION])
+            .add_filter("Solarum", &[file::EXTENSION])
             .save_file()
         else {
             return;
         };
-        let f = BunkerFile {
+        let f = SolarumFile {
             song: self.song,
             scenes: self.slots.to_vec(),
             names: self.names.to_vec(),
@@ -839,15 +839,19 @@ impl BunkerApp {
     }
 
     fn open_file(&mut self, path: Option<PathBuf>, now: f64) {
-        let path = path.or_else(|| rfd::FileDialog::new().add_filter("Bunker", &[file::EXTENSION]).pick_file());
+        let path = path.or_else(|| {
+            rfd::FileDialog::new()
+                .add_filter("Solarum", &[file::EXTENSION, file::OLD_EXTENSION])
+                .pick_file()
+        });
         let Some(path) = path else { return };
-        match BunkerFile::load(&path) {
+        match SolarumFile::load(&path) {
             Ok(f) => self.load_file(f, &path.file_name().unwrap_or_default().to_string_lossy(), now),
             Err(e) => self.say(format!("Could not open it: {e}"), now),
         }
     }
 
-    fn load_file(&mut self, f: BunkerFile, name: &str, now: f64) {
+    fn load_file(&mut self, f: SolarumFile, name: &str, now: f64) {
         self.song = keep_live_settings(f.song, &self.song);
         self.song.auto = f.song.auto;
         for i in 0..SLOTS {
@@ -940,7 +944,7 @@ impl BunkerApp {
         }
         if let Some(rx) = &self.update_rx {
             if let Ok(r) = rx.try_recv() {
-                self.say(format!("Bunker {} is out – click the green button at the top", r.version), now);
+                self.say(format!("Solarum {} is out – click the green button at the top", r.version), now);
                 self.new_version = Some(r);
                 self.update_rx = None;
             }
@@ -990,7 +994,7 @@ impl BunkerApp {
     }
 
     fn keys(&mut self, ctx: &egui::Context, now: f64) {
-        // Naming a favorite or typing to BUNK: the keys belong to the text field
+        // Naming a favorite or typing to Solari: the keys belong to the text field
         if self.renaming.is_some() || self.typing {
             return;
         }
@@ -1113,7 +1117,7 @@ impl BunkerApp {
 
     /// LIGHTS or FACE: opens that visualizer, switches to it, or closes it if it's on
     fn show(&mut self, ctx: &egui::Context, face: bool) {
-        // FACE opens a window of its own, so Bunker stays usable beside it
+        // FACE opens a window of its own, so Solarum stays usable beside it
         if face && self.with_devices {
             self.face_window = !self.face_window;
             return;
@@ -1131,7 +1135,7 @@ impl BunkerApp {
     fn face_viewport(&mut self, ctx: &egui::Context, live: &Live, now: f64) {
         let id = egui::ViewportId::from_hash_of("face");
         let builder = egui::ViewportBuilder::default()
-            .with_title("Bunker – Face")
+            .with_title("Solarum – Face")
             .with_inner_size([960.0, 600.0])
             .with_min_inner_size([320.0, 200.0]);
         let mut open = true;
@@ -1176,7 +1180,7 @@ impl BunkerApp {
         ui.horizontal_centered(|ui| {
             ui.add_space(6.0);
             ui.label(
-                egui::RichText::new("BUNKER")
+                egui::RichText::new("SOLARUM")
                     .font(display(30.0))
                     .color(TEXT)
                     .extra_letter_spacing(2.0),
@@ -1215,8 +1219,8 @@ impl BunkerApp {
                 ui.menu_button(egui::RichText::new(format!("{}  File", ph::FOLDER_SIMPLE)).font(bold(13.0)), |ui| {
                     ui.set_min_width(230.0);
                     for (i, label) in [
-                        format!("{}  Save as .bunker file…", ph::FLOPPY_DISK),
-                        format!("{}  Open .bunker file…", ph::FOLDER_OPEN),
+                        format!("{}  Save as .solarum file…", ph::FLOPPY_DISK),
+                        format!("{}  Open .solarum file…", ph::FOLDER_OPEN),
                     ]
                     .into_iter()
                     .enumerate()
@@ -1227,7 +1231,7 @@ impl BunkerApp {
                         }
                     }
                     ui.label(
-                        egui::RichText::new(".bunker files keep the groove and all four patterns – to share or back up")
+                        egui::RichText::new(".solarum files keep the groove and all twelve favorites – to share or back up (old .bunker files open too)")
                             .font(body(11.0))
                             .color(FAINT),
                     );
@@ -1387,12 +1391,12 @@ impl BunkerApp {
         }
     }
 
-    /// BUNK says something in the log
+    /// Solari says something in the log
     fn bunk(&mut self, text: impl AsRef<str>, now: f64) {
-        self.log.push(format!("BUNK: {}", text.as_ref()), now);
+        self.log.push(format!("Solari: {}", text.as_ref()), now);
     }
 
-    /// A command typed into the terminal – BUNK runs the auto mode, so it answers
+    /// A command typed into the terminal – Solari runs the auto mode, so it answers
     fn command(&mut self, line: &str, now: f64) {
         let line = line.trim().to_lowercase();
         if line.is_empty() {
@@ -1508,7 +1512,7 @@ impl BunkerApp {
                 ];
                 self.bunk(JOKES[pick(2, JOKES.len())], now);
             }
-            "hi" | "hello" | "hey" | "bunk" | "who" => self.bunk("Hi! I'm BUNK. I run the set down here – type help.", now),
+            "hi" | "hello" | "hey" | "solari" | "bunk" | "who" => self.bunk("Hi! I'm Solari. I run the set down here – type help.", now),
             "off" | "exit" | "bye" | "quit" | "shutdown" => {
                 self.bunk("Bye. Lights out.", now);
                 self.power(now);
@@ -1531,14 +1535,14 @@ impl BunkerApp {
         }
         self.song.auto_fx = on;
         if !on && self.song.auto {
-            // The bar decides now: everything Bunker took out comes back
+            // The bar decides now: everything Solarum took out comes back
             for t in self.song.tracks.iter_mut().filter(|t| !t.lock) {
                 t.mute = false;
             }
         }
         self.say(
             if on {
-                "Auto FX on – Bunker plays breaks and drops by itself"
+                "Auto FX on – Solarum plays breaks and drops by itself"
             } else {
                 "Auto FX off – the energy bar is yours: low = break, 85 and up = everything, DROP drops"
             },
@@ -1557,7 +1561,7 @@ impl BunkerApp {
                 let hello = crate::log::HELLOS[(now as usize) % crate::log::HELLOS.len()];
                 self.bunk(hello, now);
                 self.start_growing(now);
-                // BUNK takes over: the music starts right away
+                // Solari takes over: the music starts right away
                 if !self.playing() {
                     self.toggle_play();
                 }
@@ -1565,7 +1569,7 @@ impl BunkerApp {
         }
     }
 
-    /// The auto mode comes on: BUNK keeps what's there and grows the rest – every empty track
+    /// The auto mode comes on: Solari keeps what's there and grows the rest – every empty track
     /// comes in on its own bar (an empty sky builds up from the kick)
     fn start_growing(&mut self, now: f64) {
         let empty = self.song.tracks.iter().all(|t| t.hits() == 0);
@@ -1646,7 +1650,7 @@ impl BunkerApp {
                     let names = self.midi.as_ref().filter(|m| m.is_connected()).map(|m| m.names.join(", "));
                     group(ui, ph::PIANO_KEYS, "MIDI keyboard", &mut |ui| {
                         ui.label(
-                            egui::RichText::new(names.as_deref().unwrap_or("None connected – plug one in, Bunker finds it"))
+                            egui::RichText::new(names.as_deref().unwrap_or("None connected – plug one in, Solarum finds it"))
                                 .font(bold(12.5))
                                 .color(if names.is_some() { ACID } else { DIM }),
                         );
@@ -1660,7 +1664,7 @@ impl BunkerApp {
 
                     group(ui, ph::PLAY, "Playing", &mut |ui| {
                         ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new("When Bunker opens").font(body(12.5)).color(DIM));
+                            ui.label(egui::RichText::new("When Solarum opens").font(body(12.5)).color(DIM));
                             for (k, name, tip) in [
                                 (OnStart::Wait, "Wait", "Nothing plays until you press play"),
                                 (OnStart::Play, "Play", "The groove starts right away"),
@@ -1669,12 +1673,12 @@ impl BunkerApp {
                             }
                         });
                         ui.checkbox(&mut self.keep_tempo, "Keep the tempo when shuffling");
-                        note(ui, "Bunker always starts with an empty sky and the auto mode off.");
+                        note(ui, "Solarum always starts with an empty sky and the auto mode off.");
                     });
 
-                    group(ui, ph::ROBOT, "BUNK OS", &mut |ui| {
+                    group(ui, ph::ROBOT, "SOLAR OS", &mut |ui| {
                         ui.checkbox(&mut self.log.facts, "Facts about the set and tips in the log");
-                        note(ui, "How often BUNK changes something and AUTO FX are under SET in its title bar.");
+                        note(ui, "How often Solari changes something and AUTO FX are under SET in its title bar.");
                     });
 
                     let mut radar = self.radar;
@@ -1697,7 +1701,7 @@ impl BunkerApp {
                     ui.separator();
                     ui.horizontal(|ui| {
                         ui.label(
-                            egui::RichText::new(concat!("Bunker ", env!("CARGO_PKG_VERSION")))
+                            egui::RichText::new(concat!("Solarum ", env!("CARGO_PKG_VERSION")))
                                 .font(body(11.5))
                                 .color(FAINT),
                         );
@@ -2164,7 +2168,7 @@ impl BunkerApp {
         self.computer(ui, energy, now);
     }
 
-    /// The auto mode's settings, from SET in BUNK OS: how often it changes
+    /// The auto mode's settings, from SET in SOLAR OS: how often it changes
     /// something, and AUTO FX
     fn auto_settings(&mut self, ui: &mut Ui, now: f64) {
         ui.set_min_width(220.0);
@@ -2184,7 +2188,7 @@ impl BunkerApp {
         if ui
             .checkbox(&mut self.song.auto_fx, egui::RichText::new("AUTO FX").font(bold(12.5)))
             .on_hover_text(
-                "On: Bunker arranges by itself – the energy glides, breakdowns, build-ups with effects \
+                "On: Solarum arranges by itself – the energy glides, breakdowns, build-ups with effects \
                  (low-pass, gate, echo) and drops. The energy shows in the log.\n\
                  Off: the energy bar is yours – low = break, 85 and up = everything, DROP drops. The auto mode \
                  still changes patterns, sounds and notes, but never takes a track out.",
@@ -2192,7 +2196,7 @@ impl BunkerApp {
             .changed()
         {
             if fx && self.song.auto {
-                // The bar decides now: everything Bunker took out comes back
+                // The bar decides now: everything Solarum took out comes back
                 for t in self.song.tracks.iter_mut().filter(|t| !t.lock) {
                     t.mute = false;
                 }
@@ -2201,7 +2205,7 @@ impl BunkerApp {
                 if fx {
                     "Auto FX off – the energy bar is yours: low = break, 85 and up = everything, DROP drops"
                 } else {
-                    "Auto FX on – Bunker plays breaks and drops by itself"
+                    "Auto FX on – Solarum plays breaks and drops by itself"
                 },
                 now,
             );
@@ -2213,10 +2217,10 @@ impl BunkerApp {
         );
     }
 
-    /// The auto mode is the computer: BUNK OS, the terminal under the mood. Off, its screen
-    /// is dark with a power button; switched on it boots, BUNK says hello, and it's a little
+    /// The auto mode is the computer: SOLAR OS, the terminal under the mood. Off, its screen
+    /// is dark with a power button; switched on it boots, Solari says hello, and it's a little
     /// operating system: a title bar (SET for the settings, OFF), a menu (the vibe, SHUFFLE),
-    /// the log, and a prompt BUNK answers.
+    /// the log, and a prompt Solari answers.
     fn computer(&mut self, ui: &mut Ui, energy: Option<f32>, now: f64) {
         let on = self.song.auto || self.song_form.is_some();
         let w = ui.available_width();
@@ -2235,7 +2239,7 @@ impl BunkerApp {
             let rect = self.log.ui(ui, self.log_state(), energy, h, chrome, prompt, now);
             switch |= self.os_chrome(ui, rect, now);
             self.os_prompt(ui, rect, now);
-            // Logged in: BUNK, the mascot, waves and says hello, then the log takes over
+            // Logged in: Solari, the mascot, waves and says hello, then the log takes over
             let since = (now - self.power_at) as f32;
             if (0.0..2.0).contains(&since) {
                 let p = ui.painter_at(rect);
@@ -2306,20 +2310,20 @@ impl BunkerApp {
                 p.text(
                     c + vec2(0.0, 40.0),
                     Align2::CENTER_CENTER,
-                    "BUNK OS",
+                    "SOLAR OS",
                     bold(10.5),
                     if hot { TEXT } else { DIM },
                 );
                 p.text(
                     c + vec2(0.0, 55.0),
                     Align2::CENTER_CENTER,
-                    "Switch on and Bunker plays a set",
+                    "Switch on and Solarum plays a set",
                     body(10.5),
                     FAINT,
                 );
             }
             switch |= resp
-                .on_hover_text("Switch on the auto mode: Bunker plays a whole set by itself")
+                .on_hover_text("Switch on the auto mode: Solarum plays a whole set by itself")
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
                 .clicked();
         }
@@ -2328,7 +2332,7 @@ impl BunkerApp {
         }
     }
 
-    /// BUNK OS's window chrome: the title bar (SET, OFF) and the menu (VIBE, SHUFFLE).
+    /// SOLAR OS's window chrome: the title bar (SET, OFF) and the menu (VIBE, SHUFFLE).
     /// True when OFF was clicked.
     fn os_chrome(&mut self, ui: &mut Ui, rect: Rect, now: f64) -> bool {
         let p = ui.painter().clone();
@@ -2364,7 +2368,7 @@ impl BunkerApp {
         let led = pos2(bar.left() + 10.0, bar.center().y);
         glow(&p, led, 3.5, ACID, 0.5);
         p.circle_filled(led, 3.0, ACID);
-        let title = if self.song_form.is_some() { "BUNK OS · SONG" } else { "BUNK OS" };
+        let title = if self.song_form.is_some() { "SOLAR OS · SONG" } else { "SOLAR OS" };
         p.text(led + vec2(9.0, 0.0), Align2::LEFT_CENTER, title, mono(10.5), ACID);
         let off_r = Rect::from_min_max(
             pos2(bar.right() - 36.0, bar.top() + 2.0),
@@ -2372,7 +2376,7 @@ impl BunkerApp {
         );
         let set_r = Rect::from_min_max(pos2(off_r.left() - 36.0, off_r.top()), pos2(off_r.left() - 4.0, off_r.bottom()));
         let off = key(ui, off_r, "os_off", "OFF", false).on_hover_text("Switch the auto mode off (or type off)");
-        let set = key(ui, set_r, "os_set", "SET", false).on_hover_text("Settings: how often BUNK changes something, AUTO FX");
+        let set = key(ui, set_r, "os_set", "SET", false).on_hover_text("Settings: how often Solari changes something, AUTO FX");
         let popup = ui.make_persistent_id("auto_bars");
         if set.clicked() {
             ui.memory_mut(|m| m.toggle_popup(popup));
@@ -2388,7 +2392,7 @@ impl BunkerApp {
         let vibe_r = Rect::from_min_size(row.min, vec2(row.width() * 0.62 - 3.0, row.height()));
         let shuf_r = Rect::from_min_max(pos2(vibe_r.right() + 6.0, row.top()), row.max);
         let label = format!("VIBE: {}", self.song.vibe.name().to_uppercase());
-        let vibe = key(ui, vibe_r, "os_vibe", &label, true).on_hover_text("Pick the vibe – BUNK rolls a groove in it");
+        let vibe = key(ui, vibe_r, "os_vibe", &label, true).on_hover_text("Pick the vibe – Solari rolls a groove in it");
         let shuf = key(ui, shuf_r, "os_shuffle", "SHUFFLE", true).on_hover_text("A whole new groove in this vibe (Enter)");
         let popup = ui.make_persistent_id("term_vibes");
         if vibe.clicked() {
@@ -2403,7 +2407,7 @@ impl BunkerApp {
         off.clicked()
     }
 
-    /// BUNK OS's prompt, at the bottom of the screen: type to BUNK
+    /// SOLAR OS's prompt, at the bottom of the screen: type to Solari
     fn os_prompt(&mut self, ui: &mut Ui, rect: Rect, now: f64) {
         let mono = egui::FontId::monospace(11.0);
         let line = Rect::from_min_max(
@@ -2415,7 +2419,7 @@ impl BunkerApp {
             [line.left_top() - vec2(0.0, 2.0), line.right_top() - vec2(0.0, 2.0)],
             stroke(1.0, ACID.gamma_multiply(0.25)),
         );
-        p.text(line.left_center(), Align2::LEFT_CENTER, "BUNK>", mono.clone(), ACID);
+        p.text(line.left_center(), Align2::LEFT_CENTER, "SOLAR>", mono.clone(), ACID);
         let field = Rect::from_min_max(pos2(line.left() + 44.0, line.top()), line.max);
         let mut sent = None;
         ui.allocate_new_ui(egui::UiBuilder::new().max_rect(field), |ui| {
@@ -2928,7 +2932,7 @@ impl BunkerApp {
             );
             ui.label(
                 egui::RichText::new(
-                    "A whole track, recorded as it plays. Favorite 1 starts – quietly, then track by track. The first drop comes early; favorite 2 takes over after it and favorite 1 returns for the last one (with one favorite, each drop is a new chapter of it). Bunker steers the energy, varies the grooves, breaks and drops – you can jam along.",
+                    "A whole track, recorded as it plays. Favorite 1 starts – quietly, then track by track. The first drop comes early; favorite 2 takes over after it and favorite 1 returns for the last one (with one favorite, each drop is a new chapter of it). Solarum steers the energy, varies the grooves, breaks and drops – you can jam along.",
                 )
                 .font(body(11.0))
                 .color(FAINT),
@@ -3157,7 +3161,7 @@ impl BunkerApp {
 
     fn help_window(&mut self, ctx: &egui::Context) {
         let mut open = self.help;
-        egui::Window::new("How Bunker works")
+        egui::Window::new("How Solarum works")
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
@@ -3176,18 +3180,18 @@ impl BunkerApp {
                 };
                 let max_h = ctx.screen_rect().height() - 200.0;
                 egui::ScrollArea::vertical().max_height(max_h).show(ui, |ui| {
-                    row(ui, ph::PLAY, "1 · Press play", "Bunker starts with an empty sky: paint planets on the orbits and press Space or the sun. Or switch on the computer under the tracks – BUNK takes over: it keeps your beat, adds what's missing one track per bar and plays a set; its little OS has the vibe, SHUFFLE (Enter), SET, OFF and a prompt (type help). ⌘/Ctrl + Z undoes anything – the first undo brings back your last groove.");
+                    row(ui, ph::PLAY, "1 · Press play", "Solarum starts with an empty sky: paint planets on the orbits and press Space or the sun. Or switch on the computer under the tracks – Solari takes over: it keeps your beat, adds what's missing one track per bar and plays a set; its little OS has the vibe, SHUFFLE (Enter), SET, OFF and a prompt (type help). ⌘/Ctrl + Z undoes anything – the first undo brings back your last groove.");
                     row(ui, ph::PLANET, "2 · Read the planets", "Every track is an orbit round the sun, once round is one bar of 16 steps – it starts at the back, where the faint arrow at the top begins, and runs the way it points. Every step that plays is a planet; the beam sweeps round and lights up each one it passes. Bass and synth planets float higher or lower with their note. A ring like Saturn's: accent (louder). A coloured circle around it: it only plays sometimes. A trail to the planet before: the synth slides into it. A faded orbit: that track is muted. The sun is the play button. CLASSIC at the top shows the same as pads and a step grid (Tab switches); the older RADAR view can be switched on in the settings.");
                     row(ui, ph::HAND_POINTING, "3 · Change the groove", "Click a dot to switch it on or off, drag to paint. Right-click a dot (or a tile in CLASSIC, the pads and step grid – Tab) for its menu: on, accent, slide, how often it plays and – on bass and synth – its note. The mouse wheel on a bass or synth dot moves its note too.");
                     row(ui, ph::LIST, "4 · Tracks", "S solos a track, the speaker mutes it, the dice rolls a new rhythm for it (right-click: clear), the lock keeps shuffle and the auto mode away from it. The coloured pill is its sound – click it for the list, tune and decay.");
                     row(ui, ph::MUSIC_NOTES, "5 · Mood & pitch", "MOOD (in the tempo box's menu at the top) picks the notes and chords of bass and synth – from Dark and Hypnotic to Euphoric, Sunny or Mysterious. On Auto every shuffle picks one that suits the vibe; a mood you pick stays. PITCH (top right) moves them lower or higher.");
                     row(ui, ph::LIGHTNING, "6 · Energy & drop", "The energy bar is the arrangement, not the volume (← →): under 30 a break with no kick and bass, then the tracks come in one by one, from 70 everything plays (a track the energy takes out is muted – the mute button shows it); by hand it starts full. DROP (B) builds up for two bars and drops.");
                     row(ui, ph::WAVEFORM, "7 · Effects & sound", "Hold STUTTER (Q), ECHO (W), WASH (E), CRUSH (X), GATE (C) or TAPE STOP (V) and combine them; The filter pad: left low-pass, right high-pass, up resonance – it springs back when you let go. Top right: the character pad (up DARK, right ACID), SPACE, PUMP, PITCH and DRIVE (drag up or down), and the EQ curve – drag its points. Double-click resets.");
-                    row(ui, ph::INFINITY, "8 · Auto mode", "The computer under the mood is the auto mode: its power button switches it on, BUNK says hello and keeps the groove moving – something changes every 1 to 16 bars (SET in its title bar, where AUTO FX is too; OFF switches it off). Type to BUNK: shuffle, vibe acid, drop, fx off, every 8, mood dark, bpm 135, status, joke, off. With AUTO FX on it also steers the energy and plays breakdowns, build-ups and drops by itself. With AUTO FX off the energy bar is yours and no track is ever taken out.");
+                    row(ui, ph::INFINITY, "8 · Auto mode", "The computer under the mood is the auto mode: its power button switches it on, Solari says hello and keeps the groove moving – something changes every 1 to 16 bars (SET in its title bar, where AUTO FX is too; OFF switches it off). Type to Solari: shuffle, vibe acid, drop, fx off, every 8, mood dark, bpm 135, status, joke, off. With AUTO FX on it also steers the energy and plays breakdowns, build-ups and drops by itself. With AUTO FX off the energy bar is yours and no track is ever taken out.");
                     row(ui, ph::STACK, "9 · Favorites & auto song", "Click + under the space window to keep what you hear (twelve slots), click a full one to switch on the next bar, right-click to rename, save over or clear. AUTO SONG (the arrow next to the record button) makes a whole track from favorite 1 – a quiet intro, two or three drops, favorite 2 after the first – while you jam along. Click a part in the strip to jump there.");
                     row(ui, ph::RECORD, "10 · Record", "The red record button at the top (R) records everything you hear until you click it again – then save it as a WAV. An AUTO SONG records itself.");
                     row(ui, ph::SPARKLE, "11 · Visualizers", "Two fullscreen shows for a projector, with a small energy bar at the bottom: LIGHTS (P) – a spectrum ring, shockwaves and stars – and FACE (O) – a low-poly head that nods in time, glitches in a build-up, and on the drop screams with laser eyes, cracks and bursts apart. All keys keep working. Esc or a double-click goes back.");
-                    row(ui, ph::FOLDER_SIMPLE, "12 · Files & settings", "File → Save keeps the groove and your favorites in a .bunker file; open it from the menu or drag it onto the window. The gear holds volume, sound output, MIDI keyboard and the update check.");
+                    row(ui, ph::FOLDER_SIMPLE, "12 · Files & settings", "File → Save keeps the groove and your favorites in a .solarum file; open it from the menu or drag it onto the window. The gear holds volume, sound output, MIDI keyboard and the update check.");
                     row(ui, ph::KEYBOARD, "Keys", "Space play · Enter shuffle · A–K pads · 1–8 mute · ← → energy · ↑ ↓ tempo · B drop · Q W E  X C V effects (hold) · R record · Tab planets/radar/classic · P lights · O face · ⌘/Ctrl Z undo · Esc close");
                 });
             });
@@ -3195,7 +3199,7 @@ impl BunkerApp {
     }
 }
 
-impl eframe::App for BunkerApp {
+impl eframe::App for SolarumApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.ui(ctx);
     }
@@ -3215,7 +3219,7 @@ impl eframe::App for BunkerApp {
     }
 }
 
-impl BunkerApp {
+impl SolarumApp {
     /// One frame of the whole window
     pub fn ui(&mut self, ctx: &egui::Context) {
         let now = ctx.input(|i| i.time);
@@ -3244,7 +3248,10 @@ impl BunkerApp {
 
         // A .bunker file dropped onto the window
         let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
-        if let Some(path) = dropped.into_iter().find(|p| p.extension().is_some_and(|e| e == file::EXTENSION)) {
+        if let Some(path) = dropped
+            .into_iter()
+            .find(|p| p.extension().is_some_and(|e| e == file::EXTENSION || e == file::OLD_EXTENSION))
+        {
             self.open_file(Some(path), now);
         }
 
@@ -3269,7 +3276,7 @@ impl BunkerApp {
             self.finish_frame(now);
             return;
         }
-        // Bunker concrete behind everything; the panels sit on it
+        // Solarum concrete behind everything; the panels sit on it
         concrete(&ctx.layer_painter(egui::LayerId::background()), ctx.screen_rect());
         let clear = Color32::TRANSPARENT;
         egui::TopBottomPanel::top("top")
@@ -3415,7 +3422,7 @@ mod tests {
     use super::*;
     use crate::offscreen::Offscreen;
 
-    fn frame(app: &mut BunkerApp, snap: &mut Offscreen, t: f64) {
+    fn frame(app: &mut SolarumApp, snap: &mut Offscreen, t: f64) {
         snap.frame(t, |ctx| app.ui(ctx));
     }
 
@@ -3423,7 +3430,7 @@ mod tests {
     fn undo_and_redo_a_shuffle() {
         let mut snap = Offscreen::new(1360.0, 860.0);
         install(&snap.ctx);
-        let mut app = BunkerApp::headless(Song::default(), View::Orbit, false);
+        let mut app = SolarumApp::headless(Song::default(), View::Orbit, false);
         frame(&mut app, &mut snap, 1.0);
         let original = app.song;
         app.shuffle(Vibe::Industrial, 2.0);
@@ -3450,7 +3457,7 @@ mod tests {
     fn quick_edits_are_one_undo_step() {
         let mut snap = Offscreen::new(1360.0, 860.0);
         install(&snap.ctx);
-        let mut app = BunkerApp::headless(Song::default(), View::Orbit, false);
+        let mut app = SolarumApp::headless(Song::default(), View::Orbit, false);
         frame(&mut app, &mut snap, 1.0);
         for (i, t) in [2.0, 2.1, 2.2, 2.3].into_iter().enumerate() {
             app.song.macros.energy = 0.1 * i as f32;
@@ -3461,7 +3468,7 @@ mod tests {
 
     #[test]
     fn slots_save_and_load() {
-        let mut app = BunkerApp::headless(Song::default(), View::Orbit, false);
+        let mut app = SolarumApp::headless(Song::default(), View::Orbit, false);
         let first = app.song;
         app.slot_clicked(0, false, 0.0); // empty → save
         assert_eq!(app.slots[0], Some(first));
@@ -3477,7 +3484,7 @@ mod tests {
     fn the_lit_scene_keeps_changes() {
         let mut snap = Offscreen::new(1360.0, 860.0);
         install(&snap.ctx);
-        let mut app = BunkerApp::headless(Song::default(), View::Orbit, false);
+        let mut app = SolarumApp::headless(Song::default(), View::Orbit, false);
         frame(&mut app, &mut snap, 1.0);
         app.slot_clicked(1, false, 1.0);
         frame(&mut app, &mut snap, 1.1);
@@ -3492,8 +3499,8 @@ mod tests {
     }
 
     /// The app wired to a real engine (no sound card): the engine renders on demand
-    fn with_engine() -> (BunkerApp, crate::engine::Engine, Receiver<Cmd>) {
-        let mut app = BunkerApp::headless(Song::default(), View::Orbit, false);
+    fn with_engine() -> (SolarumApp, crate::engine::Engine, Receiver<Cmd>) {
+        let mut app = SolarumApp::headless(Song::default(), View::Orbit, false);
         let (tx, rx) = channel();
         let (ev_tx, events) = channel();
         app.tx = tx;
@@ -3520,7 +3527,7 @@ mod tests {
         let (mut app, mut e, rx) = with_engine();
         let ctx = egui::Context::default();
         let mut buf = vec![0.0; 2 * 44_100];
-        let mut tick = |app: &mut BunkerApp, e: &mut crate::engine::Engine, secs: usize| {
+        let mut tick = |app: &mut SolarumApp, e: &mut crate::engine::Engine, secs: usize| {
             for _ in 0..secs {
                 e.drain(&rx);
                 e.render(&mut buf);
@@ -3566,7 +3573,7 @@ mod tests {
 
     #[test]
     fn song_mode_and_auto_mode_take_turns() {
-        let mut app = BunkerApp::headless(Song::default(), View::Orbit, false);
+        let mut app = SolarumApp::headless(Song::default(), View::Orbit, false);
         // A song needs no saved patterns – it plays what you hear
         app.song.auto = true;
         app.start_song(1, 0.0);
@@ -3581,7 +3588,7 @@ mod tests {
 
     #[test]
     fn new_synth_sound_gets_a_fitting_line() {
-        let mut app = BunkerApp::headless(Song::default(), View::Orbit, false);
+        let mut app = SolarumApp::headless(Song::default(), View::Orbit, false);
         let i = Voice::Acid.index();
         app.song.tracks[i].sound = 0;
         let before = app.song.tracks[i].steps;
@@ -3594,7 +3601,7 @@ mod tests {
 
     #[test]
     fn bunk_runs_the_auto_mode_from_the_terminal() {
-        let mut app = BunkerApp::headless(Song::default(), View::Planets, false);
+        let mut app = SolarumApp::headless(Song::default(), View::Planets, false);
         // An empty sky: switching the computer on picks a vibe, folds the sound away and lets
         // the engine grow a groove (one track per bar – see the engine's tests)
         app.custom(0.0);
@@ -3624,7 +3631,7 @@ mod tests {
 
     #[test]
     fn shuffle_keeps_a_mood_picked_by_hand() {
-        let mut app = BunkerApp::headless(Song::default(), View::Planets, false);
+        let mut app = SolarumApp::headless(Song::default(), View::Planets, false);
         app.song.set_mood(7);
         app.song.mood_hold = true;
         for _ in 0..5 {
@@ -3638,7 +3645,7 @@ mod tests {
 
     #[test]
     fn shuffle_keeps_locked_tracks() {
-        let mut app = BunkerApp::headless(Song::default(), View::Orbit, false);
+        let mut app = SolarumApp::headless(Song::default(), View::Orbit, false);
         app.song.tracks[6].lock = true;
         app.song.tracks[6].tune = 3;
         let bass = app.song.tracks[6];
@@ -3652,7 +3659,7 @@ mod tests {
 
     #[test]
     fn energy_by_hand_unless_auto_fx_steers_it() {
-        let mut app = BunkerApp::headless(Song::default(), View::Orbit, false);
+        let mut app = SolarumApp::headless(Song::default(), View::Orbit, false);
         app.song.auto = true;
         app.song.auto_fx = true;
         let before = app.song.macros.energy;
@@ -3667,15 +3674,15 @@ mod tests {
 
     #[test]
     fn bunker_file_loads_everything() {
-        let mut app = BunkerApp::headless(Song::default(), View::Orbit, false);
-        let mut f = BunkerFile {
+        let mut app = SolarumApp::headless(Song::default(), View::Orbit, false);
+        let mut f = SolarumFile {
             song: gen::generate(Vibe::Electro, &Default::default(), &mut Rng::new(3)),
             ..Default::default()
         };
         f.scenes[1] = Some(gen::generate(Vibe::Dub, &Default::default(), &mut Rng::new(4)));
         f.names[1] = "Sunday".into();
         app.song.master = 0.4;
-        app.load_file(BunkerFile::from_text(&f.to_text()).unwrap(), "test.bunker", 0.0);
+        app.load_file(SolarumFile::from_text(&f.to_text()).unwrap(), "test.bunker", 0.0);
         assert_eq!(app.song.tracks, f.song.tracks);
         assert_eq!(app.song.master, 0.4, "volume belongs to the moment");
         assert_eq!(app.slots.to_vec(), f.scenes);
@@ -3684,7 +3691,7 @@ mod tests {
 
     #[test]
     fn solo_and_back() {
-        let mut app = BunkerApp::headless(Song::default(), View::Orbit, false);
+        let mut app = SolarumApp::headless(Song::default(), View::Orbit, false);
         let before = app.song.tracks.map(|t| t.mute);
         app.toggle_solo(2, 0.0);
         for (i, t) in app.song.tracks.iter().enumerate() {

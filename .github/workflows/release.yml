@@ -30,7 +30,7 @@ jobs:
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2
-      - name: Build Bunker.app (universal) and zip it
+      - name: Build Solarum.app (universal) and zip it
         run: ./scripts/build-mac.sh --zip
       - uses: actions/upload-artifact@v5
         with:
@@ -47,14 +47,14 @@ jobs:
           ref: ${{ env.TAG }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Build bunker.exe
+      - name: Build solarum.exe
         run: cargo build --release
-      - name: Zip Bunker.exe
+      - name: Zip Solarum.exe
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item target/release/bunker.exe dist/Bunker.exe
-          Compress-Archive -Path dist/Bunker.exe -DestinationPath dist/Bunker-windows-x64.zip
+          Copy-Item target/release/solarum.exe dist/Solarum.exe
+          Compress-Archive -Path dist/Solarum.exe -DestinationPath dist/Bunker-windows-x64.zip
       - uses: actions/upload-artifact@v5
         with:
           name: windows
@@ -84,7 +84,7 @@ jobs:
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" *.zip SHA256SUMS.txt --clobber
           elif [ -f "$notes" ]; then
-            gh release create "$TAG" *.zip SHA256SUMS.txt --title "Bunker ${TAG#v}" --notes-file "$notes"
+            gh release create "$TAG" *.zip SHA256SUMS.txt --title "Solarum ${TAG#v}" --notes-file "$notes"
           else
-            gh release create "$TAG" *.zip SHA256SUMS.txt --title "Bunker ${TAG#v}" --generate-notes
+            gh release create "$TAG" *.zip SHA256SUMS.txt --title "Solarum ${TAG#v}" --generate-notes
           fi

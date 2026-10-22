@@ -1,4 +1,4 @@
-//! The log under the mood: what Bunker says (every caption), where the auto mode is and when
+//! The log under the mood: what Solarum says (every caption), where the auto mode is and when
 //! the drop comes, and now and then a line from the bunker – typed in like on an old terminal
 
 use crate::engine::{Shared, NO_BREAK};
@@ -402,15 +402,15 @@ impl Log {
     }
 }
 
-/// The greetings BUNK, the computer's mascot, types when it boots
+/// The greetings Solari, the computer's mascot, types when it boots
 pub const HELLOS: [&str; 4] = [
-    "BUNK here. Taking over.",
+    "Solari here. Taking over.",
     "I've got this.",
-    "BUNK online. Let's go.",
+    "Solari online. Let's go.",
     "Sit back. I'll drive.",
 ];
 
-/// BUNK, the little robot on the computer's screen: a head with an antenna that blinks,
+/// Solari, the little robot on the computer's screen: a head with an antenna that blinks,
 /// eyes that blink, a smile, and an arm that waves. `t` is seconds since it appeared.
 pub fn robot(p: &egui::Painter, c: Pos2, s: f32, t: f32, ink: Color32) {
     let line = stroke(2.0, ink);

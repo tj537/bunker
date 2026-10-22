@@ -1,4 +1,4 @@
-//! `.bunker` files: the groove and the favorites (with their names) in one readable
+//! `.solarum` files (and `.bunker` ones from before the rename): the groove and the favorites (with their names) in one readable
 //! text file (RON), to keep or to share. Older files have four favorites ("scenes")
 //! and scene lengths and drops – they still open.
 
@@ -6,11 +6,13 @@ use crate::app::SLOTS;
 use crate::song::Song;
 use serde::{Deserialize, Serialize};
 
-pub const EXTENSION: &str = "bunker";
+pub const EXTENSION: &str = "solarum";
+/// Files saved before the rename still open
+pub const OLD_EXTENSION: &str = "bunker";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
-pub struct BunkerFile {
+pub struct SolarumFile {
     /// Raised when the format changes in a way older versions can't read
     pub format: u32,
     pub song: Song,
@@ -19,9 +21,9 @@ pub struct BunkerFile {
     pub names: Vec<String>,
 }
 
-impl Default for BunkerFile {
+impl Default for SolarumFile {
     fn default() -> Self {
-        BunkerFile {
+        SolarumFile {
             format: 1,
             song: Song::default(),
             scenes: vec![None; SLOTS],
@@ -30,7 +32,7 @@ impl Default for BunkerFile {
     }
 }
 
-impl BunkerFile {
+impl SolarumFile {
     pub fn to_text(&self) -> String {
         let pretty = ron::ser::PrettyConfig::new().depth_limit(3);
         ron::ser::to_string_pretty(self, pretty).unwrap_or_default()
@@ -38,7 +40,7 @@ impl BunkerFile {
 
     /// Read a file, repairing anything out of range
     pub fn from_text(text: &str) -> Result<Self, String> {
-        let mut f: BunkerFile = ron::from_str(text).map_err(|e| format!("not a Bunker file ({e})"))?;
+        let mut f: SolarumFile = ron::from_str(text).map_err(|e| format!("not a Solarum file ({e})"))?;
         f.song.sanitize();
         f.scenes.resize(SLOTS, None);
         f.names.resize(SLOTS, String::new());
@@ -67,25 +69,25 @@ mod tests {
 
     #[test]
     fn round_trips() {
-        let mut f = BunkerFile {
+        let mut f = SolarumFile {
             song: gen::generate(Vibe::Dub, &Default::default(), &mut Rng::new(1)),
             ..Default::default()
         };
         f.scenes[2] = Some(gen::generate(Vibe::Hard, &Default::default(), &mut Rng::new(2)));
         f.song.tracks[3].tune = -5;
         f.song.tracks[3].lock = true;
-        let back = BunkerFile::from_text(&f.to_text()).unwrap();
+        let back = SolarumFile::from_text(&f.to_text()).unwrap();
         assert_eq!(back, f);
     }
 
     #[test]
     fn repairs_and_rejects() {
-        assert!(BunkerFile::from_text("hello").is_err());
+        assert!(SolarumFile::from_text("hello").is_err());
         // Missing fields fall back to defaults, broken values are repaired, old fields are ignored
-        let f = BunkerFile::from_text("(song: (bpm: 999.0), scene_bars: (0, 8, 8, 200))").unwrap();
+        let f = SolarumFile::from_text("(song: (bpm: 999.0), scene_bars: (0, 8, 8, 200))").unwrap();
         assert_eq!(f.song.bpm, 180.0);
         // A file from before 0.4.2 has four favorites: they come in as 1–4 of twelve
-        let old = BunkerFile::from_text("(scenes: [None, Some(()), None, None])").unwrap();
+        let old = SolarumFile::from_text("(scenes: [None, Some(()), None, None])").unwrap();
         assert_eq!(old.scenes.len(), SLOTS);
         assert!(old.scenes[1].is_some() && old.scenes[4..].iter().all(|s| s.is_none()));
         assert_eq!(old.names.len(), SLOTS);

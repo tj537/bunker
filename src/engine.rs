@@ -150,7 +150,7 @@ pub const LAYERS: [f32; TRACKS] = [0.3, 0.2, 0.1, 0.0, 0.55, 0.7, 0.4, 0.0];
 /// opens up into the reverb the lower it goes
 pub const BREAK_ZONE: f32 = 0.3;
 
-/// How far the energy may move per step when Bunker steers it (curve, song mode)
+/// How far the energy may move per step when Solarum steers it (curve, song mode)
 const GLIDE: f32 = 0.02;
 
 /// Lock-free state the UI reads every frame
@@ -836,7 +836,7 @@ impl Engine {
         t.steps[si].chance = 100;
         t.mute = false;
         // What you record should be heard: lift the energy just enough to let its track in
-        // (unless Bunker steers the energy – then it comes in when the energy gets there)
+        // (unless Solarum steers the energy – then it comes in when the energy gets there)
         let layer = LAYERS[voice.index()];
         if self.song.macros.energy < layer && !self.steers_energy() {
             self.song.macros.energy = layer + 0.01;
@@ -963,7 +963,7 @@ impl Engine {
         }
     }
 
-    /// Bunker moves the energy: the auto mode with AUTO FX, or a song
+    /// Solarum moves the energy: the auto mode with AUTO FX, or a song
     fn steers_energy(&self) -> bool {
         (self.song.auto && self.song.auto_fx) || self.arrangement.is_some()
     }
@@ -1365,7 +1365,7 @@ impl Engine {
         }
         let b = bar - self.cycle_start;
         let at = self.breakdown_at();
-        // With AUTO FX on, Bunker arranges: energy, breakdown, build-up, drop. Without it the
+        // With AUTO FX on, Solarum arranges: energy, breakdown, build-up, drop. Without it the
         // energy bar is yours (low = break, 90 = drop) and the auto mode only changes patterns,
         // sounds and notes – it never takes a track out.
         let fx = self.song.auto_fx;
@@ -1411,7 +1411,7 @@ impl Engine {
             self.click = 0.0;
             self.click_one = idx.is_multiple_of(STEPS as u64);
         }
-        // Bunker steering the energy: it glides towards the curve instead of jumping
+        // Solarum steering the energy: it glides towards the curve instead of jumping
         if self.steers_energy() {
             let e = self.song.macros.energy;
             let next = e + (self.energy_goal - e).clamp(-GLIDE, GLIDE);

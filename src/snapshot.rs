@@ -4,16 +4,16 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::app::{BunkerApp, View};
+    use crate::app::{SolarumApp, View};
     use crate::offscreen::Offscreen;
     use crate::orbit::Live;
     use crate::song::{Song, TRACKS};
     use std::path::Path;
 
-    fn render(name: &str, w: f32, h: f32, setup: impl Fn(&mut BunkerApp)) {
+    fn render(name: &str, w: f32, h: f32, setup: impl Fn(&mut SolarumApp)) {
         let mut snap = Offscreen::retina(w, h, 2.0);
         crate::theme::install(&snap.ctx);
-        let mut app = BunkerApp::headless(Song::default(), View::Orbit, false);
+        let mut app = SolarumApp::headless(Song::default(), View::Orbit, false);
         setup(&mut app);
         let mut shapes = Vec::new();
         // A few frames so layouts and fonts settle
@@ -27,7 +27,7 @@ mod tests {
     fn render_face(name: &str, frames: &[(f64, Option<f32>)]) {
         let mut snap = Offscreen::retina(1360.0, 860.0, 2.0);
         crate::theme::install(&snap.ctx);
-        let mut app = BunkerApp::headless(Song::default(), View::Orbit, false);
+        let mut app = SolarumApp::headless(Song::default(), View::Orbit, false);
         app.visual = true;
         app.face = true;
         app.song.macros.energy = 0.8;
@@ -208,7 +208,7 @@ mod tests {
                 ..playing(66.2, &[0, 1, 3, 6])
             });
         });
-        // BUNK says hello as the computer comes on (render time is ~10 s)
+        // Solari says hello as the computer comes on (render time is ~10 s)
         render("bunk", 1100.0, 700.0, |app| {
             app.song.auto = true;
             app.power_at = 8.2;

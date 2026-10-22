@@ -1,4 +1,4 @@
-//! All sounds of Bunker, synthesized sample by sample – no recordings.
+//! All sounds of Solarum, synthesized sample by sample – no recordings.
 //!
 //! Drums follow the classic analog recipes (808/909): a sine with a falling
 //! pitch for the kick, filtered noise bursts for the clap, six detuned square

@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 
-/// What a MIDI message means for Bunker
+/// What a MIDI message means for Solarum
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Midi {
     Pad(Voice, f32),
@@ -96,11 +96,11 @@ impl MidiIn {
     pub fn connect(engine: &Sender<Cmd>, ui: &Sender<Midi>, record: Arc<AtomicBool>, wake: impl Fn() + Clone + Send + 'static) -> Self {
         let mut connections = Vec::new();
         let mut names = Vec::new();
-        let Ok(probe) = MidiInput::new("Bunker") else {
+        let Ok(probe) = MidiInput::new("Solarum") else {
             return MidiIn { connections, names };
         };
         for port in probe.ports() {
-            let Ok(mut input) = MidiInput::new("Bunker") else { continue };
+            let Ok(mut input) = MidiInput::new("Solarum") else { continue };
             input.ignore(Ignore::All);
             let name = probe.port_name(&port).unwrap_or_else(|_| "MIDI".into());
             if name.to_lowercase().contains("through") {
@@ -110,7 +110,7 @@ impl MidiIn {
             let mut held = Vec::new();
             if let Ok(conn) = input.connect(
                 &port,
-                "bunker-in",
+                "solarum-in",
                 move |_, msg, _| {
                     let Some(m) = decode(msg, &mut held) else { return };
                     let cmd = match m {
@@ -140,7 +140,7 @@ impl MidiIn {
     }
 
     pub fn port_count() -> usize {
-        MidiInput::new("Bunker probe").map(|m| m.port_count()).unwrap_or(0)
+        MidiInput::new("Solarum probe").map(|m| m.port_count()).unwrap_or(0)
     }
 
     pub fn is_connected(&self) -> bool {

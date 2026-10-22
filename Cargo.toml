@@ -1,10 +1,10 @@
 [package]
-name = "bunker"
+name = "solarum"
 version = "0.8.0"
 edition = "2021"
 description = "Techno beats in orbit – a playful drum machine with bass, acid and an auto mode"
 license = "MIT"
-repository = "https://github.com/tj537/bunker"
+repository = "https://github.com/tj537/solarum"
 
 [dependencies]
 eframe = { version = "0.31", features = ["persistence"] }

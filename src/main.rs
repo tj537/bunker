@@ -33,7 +33,7 @@ fn main() -> eframe::Result {
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size([1360.0, 860.0])
         .with_min_inner_size([1100.0, 700.0])
-        .with_title("Bunker");
+        .with_title("Solarum");
     // Icon for the window, taskbar and Dock (when started without the .app bundle)
     if let Ok(icon) = eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon.png")) {
         viewport = viewport.with_icon(icon);
@@ -42,5 +42,6 @@ fn main() -> eframe::Result {
         viewport,
         ..Default::default()
     };
-    eframe::run_native("Bunker", options, Box::new(|cc| Ok(Box::new(app::BunkerApp::new(cc)))))
+    // (The storage keeps its old name, "Bunker", so saved grooves and settings survive the rename)
+    eframe::run_native("Bunker", options, Box::new(|cc| Ok(Box::new(app::SolarumApp::new(cc)))))
 }

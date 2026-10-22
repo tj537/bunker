@@ -396,7 +396,7 @@ pub const MOODS: [(&str, &str, Scale, u8); 10] = [
     ),
 ];
 
-/// The mood Bunker starts in (and a clear goes back to): plain, no chord changes
+/// The mood Solarum starts in (and a clear goes back to): plain, no chord changes
 pub const NEUTRAL: usize = 9;
 
 /// The master section: three-band EQ and drive, each 0…1 (0.5 = flat)

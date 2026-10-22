@@ -585,21 +585,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
 
 [[package]]
-name = "bunker"
-version = "0.8.0"
-dependencies = [
- "cpal",
- "eframe",
- "egui-phosphor",
- "midir",
- "png 0.17.16",
- "rfd",
- "ron",
- "serde",
- "winresource",
-]
-
-[[package]]
 name = "bytemuck"
 version = "1.25.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3252,6 +3237,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dd538fb6910ac1099850255cf94a94df6551fbdd602454387d0adb2d1ca6dead"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "solarum"
+version = "0.8.0"
+dependencies = [
+ "cpal",
+ "eframe",
+ "egui-phosphor",
+ "midir",
+ "png 0.17.16",
+ "rfd",
+ "ron",
+ "serde",
+ "winresource",
 ]
 
 [[package]]

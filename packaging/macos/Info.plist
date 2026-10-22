@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Bunker</string>
+    <string>Solarum</string>
     <key>CFBundleDisplayName</key>
-    <string>Bunker</string>
+    <string>Solarum</string>
     <key>CFBundleIdentifier</key>
-    <string>io.github.tj537.bunker</string>
+    <string>io.github.tj537.solarum</string>
     <key>CFBundleExecutable</key>
-    <string>bunker</string>
+    <string>solarum</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundlePackageType</key>

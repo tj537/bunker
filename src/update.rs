@@ -1,4 +1,4 @@
-//! Looks on GitHub once at start whether a newer Bunker is out.
+//! Looks on GitHub once at start whether a newer Solarum is out.
 //!
 //! No HTTP library: macOS and Windows 10/11 both ship `curl`, so a background
 //! thread asks the GitHub API with it and reads the tag of the latest release.
@@ -6,9 +6,9 @@
 
 use std::sync::mpsc::{channel, Receiver};
 
-pub const REPO_URL: &str = "https://github.com/tj537/bunker";
-pub const RELEASES_URL: &str = "https://github.com/tj537/bunker/releases/latest";
-const API_URL: &str = "https://api.github.com/repos/tj537/bunker/releases/latest";
+pub const REPO_URL: &str = "https://github.com/tj537/solarum";
+pub const RELEASES_URL: &str = "https://github.com/tj537/solarum/releases/latest";
+const API_URL: &str = "https://api.github.com/repos/tj537/solarum/releases/latest";
 
 /// A version newer than this one, e.g. "0.3.0"
 #[derive(Clone, Debug, PartialEq)]
@@ -74,7 +74,7 @@ mod tests {
 
     #[test]
     fn reads_the_tag() {
-        let json = r#"{"url":"x","tag_name": "v0.3.1","name":"Bunker 0.3.1"}"#;
+        let json = r#"{"url":"x","tag_name": "v0.3.1","name":"Solarum 0.3.1"}"#;
         assert_eq!(latest_tag(json).as_deref(), Some("v0.3.1"));
         assert_eq!(latest_tag("{}"), None);
         assert_eq!(latest_tag(r#"{"tag_name": "#), None);
