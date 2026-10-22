@@ -538,6 +538,9 @@ pub struct Engine {
     knob_goal: [f32; KNOBS],
     /// The knobs in the last song sent to the UI – a different value coming back is a hand on it
     knob_sent: std::cell::Cell<[f32; KNOBS]>,
+    /// A mute the energy set that the UI hasn't sent back yet: its songs may still carry the
+    /// old one (they cross the engine's on the way), so until it agrees, the engine's stays
+    mute_pending: [Option<bool>; TRACKS],
     /// `Cmd::Song`s taken in so far (sent back with every song)
     songs_in: u64,
     transpose: i8,
@@ -650,6 +653,7 @@ impl Engine {
             knob_off: [0.0; KNOBS],
             knob_goal: [0.0; KNOBS],
             knob_sent: std::cell::Cell::new(knobs(&song)),
+            mute_pending: [None; TRACKS],
             songs_in: 0,
             transpose: 0,
             limiter: 1.0,
@@ -685,6 +689,18 @@ impl Engine {
                 }
                 self.song = *s;
                 set_knobs(&mut self.song, keep);
+                // The energy's mutes win over a song from the UI that hasn't seen them yet
+                let mut corrected = false;
+                for (t, pending) in self.song.tracks.iter_mut().zip(&mut self.mute_pending) {
+                    if let Some(v) = *pending {
+                        if t.mute == v {
+                            *pending = None;
+                        } else {
+                            t.mute = v;
+                            corrected = true;
+                        }
+                    }
+                }
                 if self.steers_energy() {
                     self.song.macros.energy = energy;
                 }
@@ -701,9 +717,10 @@ impl Engine {
                 // Stopped, the energy still mutes what it takes out – so it shows before you play
                 if !self.playing {
                     self.layer_energy = self.song.macros.energy;
-                    if self.energy_mutes() {
-                        self.send_song(None);
-                    }
+                    corrected |= self.energy_mutes();
+                }
+                if corrected {
+                    self.send_song(None);
                 }
             }
             Cmd::Play => {
@@ -921,11 +938,15 @@ impl Engine {
             if before >= layer && e < layer && !t.mute && !t.lock {
                 t.mute = true;
                 self.energy_out[i] = true;
+                self.mute_pending[i] = Some(true);
                 changed = true;
             } else if e >= layer && self.energy_out[i] {
                 self.energy_out[i] = false;
-                changed |= t.mute;
-                t.mute = false;
+                if t.mute {
+                    t.mute = false;
+                    self.mute_pending[i] = Some(false);
+                    changed = true;
+                }
             }
         }
         changed
@@ -2175,12 +2196,43 @@ mod tests {
         let mut s = e.song;
         s.macros.energy = 0.25;
         e.handle(Cmd::Song(Box::new(s)));
-        assert!(e.song.track(Voice::Kick).mute && e.song.track(Voice::Bass).mute, "break: kick and bass out");
+        assert!(
+            e.song.track(Voice::Kick).mute && e.song.track(Voice::Bass).mute,
+            "break: kick and bass out"
+        );
         assert!(!e.song.track(Voice::Hat).mute);
         let mut s = e.song;
         s.macros.energy = 1.0;
         e.handle(Cmd::Song(Box::new(s)));
         assert!(!e.song.track(Voice::Kick).mute, "and back");
+    }
+
+    #[test]
+    fn energy_mutes_survive_songs_that_crossed_them() {
+        // The UI keeps sending songs while the fader moves; some still carry the mutes from
+        // before the engine changed them – they mustn't leave tracks muted at 100
+        let mut song = gen::generate(Vibe::Peak, &Default::default(), &mut Rng::new(5));
+        song.macros.energy = 1.0;
+        let mut e = Engine::new(22_050.0, song, Shared::new(), None, 1);
+        let ui = e.song; // what the UI has: nothing muted
+        for v in [0.6, 0.3, 0.1] {
+            let mut s = ui;
+            s.macros.energy = v;
+            e.handle(Cmd::Song(Box::new(s)));
+        }
+        assert!(e.song.track(Voice::Kick).mute, "down: the kick is out");
+        // Back up, still with the UI's old (unmuted) tracks, then once with the engine's
+        let mut s = ui;
+        s.macros.energy = 1.0;
+        e.handle(Cmd::Song(Box::new(s)));
+        let mut s = e.song;
+        s.macros.energy = 1.0;
+        e.handle(Cmd::Song(Box::new(s)));
+        assert!(
+            e.song.tracks.iter().all(|t| !t.mute) || e.song.tracks.iter().zip(&song.tracks).all(|(a, b)| a.mute == b.mute),
+            "at 100 everything is back: {:?}",
+            e.song.tracks.map(|t| t.mute)
+        );
     }
 
     #[test]
