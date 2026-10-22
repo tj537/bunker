@@ -335,6 +335,11 @@ pub struct EnergyOut {
     pub locked_clicked: bool,
 }
 
+/// The energy's colour, as the fader shows it: icy blue in a break, lime when everything plays
+pub fn energy_color(e: f32) -> Color32 {
+    mix(Color32::from_rgb(69, 200, 255), ACID, e.clamp(0.0, 1.0))
+}
+
 /// The energy fader: drag to strip the groove down (break) or build it up; the
 /// full end lets everything play (no drop zone – DROP drops).
 /// `steered`: who moves it instead of you ("AUTO", "SONG") – then it's a slim bar that only
@@ -377,6 +382,27 @@ pub fn energy_fader(ui: &mut Ui, value: &mut f32, width: f32, height: f32, steer
     p.rect_filled(Rect::from_min_max(track.min, pos2(break_x, track.bottom())), 5.0, alpha(cool, 0.22));
     let fill = Rect::from_min_max(track.min, pos2(track.left() + track.width() * *value, track.bottom()));
     p.rect_filled(fill, 5.0, alpha(hot_col, 0.85));
+    // Where each track comes in: a dot in its colour, dark while the energy keeps it muted
+    for (i, &layer) in crate::engine::LAYERS.iter().enumerate() {
+        if layer <= 0.0 {
+            continue;
+        }
+        let x = track.left() + track.width() * layer;
+        let col = track_color(crate::song::Voice::ALL[i]);
+        let on = *value >= layer;
+        p.circle_filled(
+            pos2(x, track.center().y),
+            3.2,
+            if on {
+                mix(col, Color32::BLACK, 0.15)
+            } else {
+                mix(PANEL, col, 0.35)
+            },
+        );
+        if !on {
+            p.circle_stroke(pos2(x, track.center().y), 3.2, stroke(1.0, alpha(col, 0.8)));
+        }
+    }
     let knob = pos2(fill.right(), track.center().y);
     glow(p, knob, 7.0, hot_col, 0.6);
     p.circle_filled(knob, 8.0, TEXT);

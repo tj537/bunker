@@ -698,6 +698,13 @@ impl Engine {
                 if self.breakdown.is_some() && !self.song.auto && self.arrangement.is_none() {
                     self.end_breakdown();
                 }
+                // Stopped, the energy still mutes what it takes out – so it shows before you play
+                if !self.playing {
+                    self.layer_energy = self.song.macros.energy;
+                    if self.energy_mutes() {
+                        self.send_song(None);
+                    }
+                }
             }
             Cmd::Play => {
                 if !self.playing {
@@ -2158,6 +2165,22 @@ mod tests {
         assert_eq!(build_play(Voice::Rim, 0.8, 59, start), BuildPlay::Loop { at: 49, up: 0 });
         assert_eq!(build_play(Voice::OpenHat, 0.6, 50, start), BuildPlay::Rest);
         assert!(matches!(build_play(Voice::Hat, 0.6, 51, start), BuildPlay::Hit(_)));
+    }
+
+    #[test]
+    fn stopped_the_energy_still_shows_what_it_mutes() {
+        let mut song = gen::generate(Vibe::Peak, &Default::default(), &mut Rng::new(5));
+        song.macros.energy = 1.0;
+        let mut e = Engine::new(22_050.0, song, Shared::new(), None, 1);
+        let mut s = e.song;
+        s.macros.energy = 0.25;
+        e.handle(Cmd::Song(Box::new(s)));
+        assert!(e.song.track(Voice::Kick).mute && e.song.track(Voice::Bass).mute, "break: kick and bass out");
+        assert!(!e.song.track(Voice::Hat).mute);
+        let mut s = e.song;
+        s.macros.energy = 1.0;
+        e.handle(Cmd::Song(Box::new(s)));
+        assert!(!e.song.track(Voice::Kick).mute, "and back");
     }
 
     #[test]

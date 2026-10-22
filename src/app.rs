@@ -1446,6 +1446,7 @@ impl SolarumApp {
                     self.settings = !self.settings;
                 }
                 let mut action = None;
+                ui.add_space(10.0);
                 ui.menu_button(egui::RichText::new(format!("{}  File", ph::FOLDER_SIMPLE)).font(bold(13.0)), |ui| {
                     ui.set_min_width(230.0);
                     for (i, label) in [
@@ -1495,6 +1496,7 @@ impl SolarumApp {
                         }
                     }
                 }
+                ui.add_space(10.0);
                 // Clear: an empty sky (undo brings it back)
                 let empty = self.song.tracks.iter().all(|t| t.hits() == 0 || t.lock);
                 let b = egui::Button::new(egui::RichText::new(ph::BROOM).size(18.0)).frame(false);
