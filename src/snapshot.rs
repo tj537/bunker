@@ -210,10 +210,6 @@ mod tests {
         });
         // BUNK says hello as the computer comes on (render time is ~10 s)
         render("bunk", 1100.0, 700.0, |app| {
-            for i in 0..200 {
-                let f = i as f32 / 200.0;
-                app.meter_history.push_back((0.02 + 0.6 * f.powf(0.4)) * (0.9 + 0.1 * (f * 40.0).sin()));
-            }
             app.song.auto = true;
             app.power_at = 8.2;
             app.fake_live = Some(playing(2.0, &[0]));

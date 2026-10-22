@@ -218,14 +218,6 @@ pub struct BunkerApp {
     metronome: bool,
     /// The LIVE section is shown (its heading folds it away)
     live_open: bool,
-    /// The output meter: its history (every 0.1 s), the level falling slowly, the peak it holds
-    /// for two seconds, and how long it has been too quiet
-    pub meter_history: std::collections::VecDeque<f32>,
-    meter_tick: f32,
-    meter_peak: f32,
-    meter_peak_at: f64,
-    meter_level: f32,
-    quiet_for: f32,
     /// The terminal's command line, and whether it has the keyboard
     cmd: String,
     typing: bool,
@@ -408,12 +400,6 @@ impl BunkerApp {
             cmd: String::new(),
             metronome: false,
             live_open: true,
-            meter_history: std::collections::VecDeque::with_capacity(201),
-            meter_tick: 0.0,
-            meter_peak: 0.0,
-            meter_peak_at: 0.0,
-            meter_level: 0.0,
-            quiet_for: 0.0,
             typing: false,
             space_rect: Rect::from_min_size(pos2(280.0, 70.0), vec2(800.0, 600.0)),
             on_start: OnStart::Wait,
@@ -2496,15 +2482,24 @@ impl BunkerApp {
             (true, true) => (68.0, 40.0, 56.0),
             (true, false) => (64.0, 36.0, 48.0),
         };
-        // LIVE (folded or not) and the output meter at the bottom, which takes what's left
-        let meter_min = if tall { 110.0 } else { 70.0 };
+        // LIVE (folded or not) below the sound; what's left over lets LIVE's controls grow a
+        // little, each up to a sensible size
+        let (card_h, eq_h) = if tall { (50.0, 40.0) } else { (46.0, 36.0) };
         let live_h = if self.live_open {
             energy_h + filter_h + 3.0 * bh + drop_h + 6.0 * gap + 14.0
         } else {
             0.0
         };
-        let below = 30.0 + live_h + meter_min + 2.0 * gap;
-        let (card_h, eq_h) = if tall { (50.0, 40.0) } else { (46.0, 36.0) };
+        let sound_need = if self.sound_open {
+            120.0 + 2.0 * card_h + eq_h + 18.0 + 4.0 * gap
+        } else {
+            0.0
+        };
+        let extra = (ui.available_height() - 30.0 - live_h - sound_need - 2.0 * gap).max(0.0);
+        let filter_h = filter_h + (extra * 0.3).min(150.0 - filter_h).max(0.0);
+        let bh = bh + (extra * 0.45 / 3.0).min(70.0 - bh).max(0.0);
+        let drop_h = drop_h + (extra * 0.25).min(120.0 - drop_h).max(0.0);
+        let below = 30.0 + energy_h + filter_h + 3.0 * bh + drop_h + 6.0 * gap + 14.0 + 2.0 * gap;
         if self.sound_open {
             let m = self.song.macros;
             let dm = crate::song::Macros::default();
@@ -2590,45 +2585,6 @@ impl BunkerApp {
         if self.live_open {
             self.live_controls(ui, live, now, w, tall, energy_h, filter_h, bh, drop_h);
         }
-        // The output meter takes the rest, down to the bottom
-        ui.add_space(if tall { 12.0 } else { 6.0 });
-        let h = (ui.available_height() - 4.0).max(meter_min.min(60.0));
-        let (r, _) = ui.allocate_exact_size(vec2(w, h), Sense::hover());
-        let dt = ui.input(|i| i.stable_dt).min(0.1);
-        if live.playing {
-            ui.ctx().request_repaint();
-        }
-        self.meter_level = live.level.max(self.meter_level - dt * 0.8);
-        self.meter_peak = if now - self.meter_peak_at > 2.0 {
-            self.meter_level
-        } else {
-            self.meter_peak.max(self.meter_level)
-        };
-        if self.meter_level >= self.meter_peak {
-            self.meter_peak_at = now;
-        }
-        // The history: one point every 0.1 s, the last 20 s
-        self.meter_tick += dt;
-        while self.meter_tick >= 0.1 {
-            self.meter_tick -= 0.1;
-            self.meter_history.push_back(if live.playing { self.meter_level } else { 0.0 });
-            if self.meter_history.len() > 200 {
-                self.meter_history.pop_front();
-            }
-        }
-        self.quiet_for = if live.playing && self.meter_level < 0.12 {
-            self.quiet_for + dt
-        } else {
-            0.0
-        };
-        controls::level_meter(
-            ui.painter(),
-            r,
-            &self.meter_history,
-            self.meter_level,
-            self.meter_peak,
-            self.quiet_for > 3.0,
-        );
     }
 
     /// LIVE: energy, the filter pad, the effects and DROP

@@ -68,7 +68,7 @@ Bunker is a techno drum machine written in Rust. Your groove is a little solar s
 
   All keys keep working, so <kbd>←</kbd> <kbd>→</kbd> take the set from break to drop.
 - **Files:** `.bunker` files (plain text) keep the groove and all twelve favorites with their names.
-- **Settings (the gear):** volume, the sound output, the MIDI keyboard, what happens when Bunker opens (wait or play – the auto mode is always off at the start), whether a shuffle keeps the tempo, facts and tips in the terminal, the legacy Radar view and the update check (Bunker asks GitHub once at start whether there is a new version – you can switch that off). Headphones and MIDI keyboards are picked up while Bunker runs. The output meter at the bottom right is a loudness meter: a dB scale, the last 20 seconds as a curve, the level now with its peak – and warns when it's too quiet or clips; the LIVE heading folds the live controls away so only the meter stays.
+- **Settings (the gear):** volume, the sound output, the MIDI keyboard, what happens when Bunker opens (wait or play – the auto mode is always off at the start), whether a shuffle keeps the tempo, facts and tips in the terminal, the legacy Radar view and the update check (Bunker asks GitHub once at start whether there is a new version – you can switch that off). Headphones and MIDI keyboards are picked up while Bunker runs. The LIVE heading folds the live controls away.
 
 ## Under the hood
 
