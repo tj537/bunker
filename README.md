@@ -5,8 +5,8 @@
 <h1 align="center">SOLARUM</h1>
 
 <p align="center">
-  <b>Generative techno from another planet.</b><br>
-  A drum machine for people who have never used one – paint a beat on an empty solar system, or switch on Solari and let it play a set.
+  <b>Techno from another planet – easy to use, beautiful to look at.</b><br>
+  For everyone: kids, beginners, people who have never touched music software. Paint a beat on an empty solar system, or let Solari, the little robot, play a whole set for you.
 </p>
 
 <p align="center">
@@ -29,7 +29,17 @@ Solarum is a techno drum machine written in Rust. Your groove is a little solar 
 
 ## Why Solarum
 
-**You don't need to know anything about music to use it.**
+**Easy to use.** No timeline, no mixer, no menus full of words you don't know. Click a planet and it plays. Drag it up and it sings higher.
+
+**Beautiful.** Your beat is a little solar system turning in deep space – every sound has its own colour, every beat lights up as the beam sweeps past.
+
+**For everyone.** Kids, beginners and people without any tech or music experience make something that sounds good from the first click – and if you do know your way around, everything you'd expect is there.
+
+**With an auto mode.** Switch on Solari, pick a vibe, and it builds a whole set by itself: grooves that change, breakdowns, build-ups and drops. You can jump in any time.
+
+> **Still very much under development.** Solarum is young and changing fast. Feedback, criticism, ideas and help are more than welcome – [open an issue](https://github.com/tj537/solarum/issues), start a discussion or send a pull request.
+
+**You don't need to know anything about music to use it:**
 
 - **Grooves that already work.** Pick a vibe and Solarum rolls a pattern that follows the genre's rules: four on the floor, claps on 2 and 4, a bassline that dodges the kick, bass and synth on the same chord. It sounds like techno from the first second.
 - **Words instead of theory.** You don't pick a scale or a chord progression. You pick a mood from the tempo box at the top – its menu shows every mood as a tile with its four chords as steps: *Dark, Hypnotic, Deep, Sad, Euphoric, Dreamy, Epic, Sunny, Mysterious* – or leave it on *Auto* and every shuffle picks one that suits the vibe. Solarum starts on *Neutral* (plain minor, no chord changes); the auto mode picks moods by itself. Each brings its own chords, so the bars move instead of repeating; a mood you pick stays through shuffles and the auto mode. Tempo and swing come with the vibe. Or pick *Custom* and start from an empty pattern.
