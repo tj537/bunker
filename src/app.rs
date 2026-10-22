@@ -909,9 +909,22 @@ impl SolarumApp {
 
     /// A new project: an empty sky, no favorites, not saved anywhere yet
     fn new_project(&mut self) {
-        self.clear(0.0);
-        // The computer is off in a new project; by hand the energy starts full
-        self.song.auto = false;
+        // Everything from scratch: no locked tracks carried over, default tempo, sounds,
+        // volumes and knobs, the computer off, the energy full – only the volume stays
+        let mut fresh = Song::empty();
+        fresh.vibe = Vibe::Custom;
+        fresh.set_mood(crate::song::NEUTRAL);
+        fresh.mood_hold = true;
+        fresh.macros.energy = 1.0;
+        fresh.master = self.song.master;
+        self.song = fresh;
+        self.solo = None;
+        (self.filter, self.filter_res) = (0.0, 0.0);
+        self.send(Cmd::Filter(0.0));
+        self.send(Cmd::FilterRes(0.0));
+        // A new project has its own history
+        self.undo.clear();
+        self.redo.clear();
         self.slots = [None; SLOTS];
         self.names = std::array::from_fn(|_| String::new());
         self.slot_now = None;

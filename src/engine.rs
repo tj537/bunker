@@ -687,11 +687,16 @@ impl Engine {
                         keep[i] = now[i];
                     }
                 }
+                let steps_before = self.song.tracks.map(|t| t.steps);
                 self.song = *s;
                 set_knobs(&mut self.song, keep);
                 // The energy's mutes win over a song from the UI that hasn't seen them yet
                 let mut corrected = false;
-                for (t, pending) in self.song.tracks.iter_mut().zip(&mut self.mute_pending) {
+                for ((t, pending), before) in self.song.tracks.iter_mut().zip(&mut self.mute_pending).zip(&steps_before) {
+                    // Another groove on this track (a new project, a pattern): the energy lets go
+                    if t.steps != *before {
+                        *pending = None;
+                    }
                     if let Some(v) = *pending {
                         if t.mute == v {
                             *pending = None;
@@ -2233,6 +2238,23 @@ mod tests {
             "at 100 everything is back: {:?}",
             e.song.tracks.map(|t| t.mute)
         );
+    }
+
+    #[test]
+    fn a_new_groove_drops_the_energys_old_mutes() {
+        let mut song = gen::generate(Vibe::Peak, &Default::default(), &mut Rng::new(5));
+        song.macros.energy = 1.0;
+        let mut e = Engine::new(22_050.0, song, Shared::new(), None, 1);
+        let mut s = e.song;
+        s.macros.energy = 0.1;
+        e.handle(Cmd::Song(Box::new(s)));
+        assert!(e.song.track(Voice::Kick).mute);
+        // A new project: other steps, nothing muted, energy full – nothing may stay muted
+        let mut fresh = Song::empty();
+        fresh.macros.energy = 1.0;
+        fresh.track_mut(Voice::Kick).steps[0].on = true;
+        e.handle(Cmd::Song(Box::new(fresh)));
+        assert!(e.song.tracks.iter().all(|t| !t.mute), "{:?}", e.song.tracks.map(|t| t.mute));
     }
 
     #[test]
