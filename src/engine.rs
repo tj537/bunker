@@ -38,6 +38,9 @@ pub enum Cmd {
     Arrange(Option<Box<Arrangement>>),
     /// Song mode: go to this section on the next bar
     Jump(usize),
+    /// A fill by hand: in the second half of this bar, or of the next one when this bar's
+    /// is under way – into a waiting pattern it always comes now
+    Fill(Fill),
     /// Switch to this pattern (slot `usize`) on the next bar, with a fill before
     Queue(Box<Song>, usize),
     /// Record everything that plays from now on (true) or end the recording (false)
@@ -394,9 +397,9 @@ struct Breakdown {
     sweep: bool,
 }
 
-/// A one-bar fill at the end of an 8-bar phrase (auto mode)
+/// A one-bar fill at the end of an 8-bar phrase (auto mode, or by hand: `Cmd::Fill`)
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Fill {
+pub enum Fill {
     /// Clap roll into the next phrase
     Roll,
     /// Kick and bass drop out for the last beat
@@ -409,7 +412,19 @@ enum Fill {
     Throw,
 }
 
-const FILLS: [Fill; 5] = [Fill::Roll, Fill::Gap, Fill::Toms, Fill::OpenHats, Fill::Throw];
+pub const FILLS: [Fill; 5] = [Fill::Roll, Fill::Gap, Fill::Toms, Fill::OpenHats, Fill::Throw];
+
+impl Fill {
+    pub fn name(self) -> &'static str {
+        match self {
+            Fill::Roll => "Clap roll",
+            Fill::Gap => "Gap – kick and bass out for a beat",
+            Fill::Toms => "Falling toms",
+            Fill::OpenHats => "Open hats",
+            Fill::Throw => "Clap into the echo",
+        }
+    }
+}
 /// Fills that close 16 bars, and the lighter ones for the 8 bars in between
 const BIG_FILLS: [Fill; 3] = [Fill::Roll, Fill::Toms, Fill::Throw];
 const SMALL_FILLS: [Fill; 2] = [Fill::Gap, Fill::OpenHats];
@@ -805,6 +820,14 @@ impl Engine {
                 self.shared.part.store(0, Ordering::Relaxed);
             }
             Cmd::Jump(i) => self.jump = Some(i),
+            Cmd::Fill(f) => {
+                if self.playing {
+                    let next = self.last_fired.map_or(0, |s| s + 1);
+                    let (bar, in_bar) = (next / STEPS as u64, next % STEPS as u64);
+                    let late = in_bar >= 8 && self.queued.is_none();
+                    self.fill = Some((bar + late as u64, f));
+                }
+            }
             Cmd::Metronome(on) => self.metronome = on,
             Cmd::Grow(target) => {
                 self.grow = Some(target);
@@ -1535,7 +1558,7 @@ impl Engine {
             }
             let si = track.step_at(track_idx);
             let step = track.steps[si];
-            let mut vel = track.volume * if step.accent { 1.0 } else { 0.72 };
+            let mut vel = track.volume * if step.accent { 1.0 } else { 0.72 } * if step.ghost { 0.5 } else { 1.0 };
             // With SOLAR OS on, energy thins out the percussion (below 45) or adds ghost hats (above 60);
             // the choice changes every two bars
             let perc = matches!(voice, Voice::Hat | Voice::Ride | Voice::Rim | Voice::OpenHat);
@@ -2103,6 +2126,28 @@ mod tests {
             assert_eq!(hits(Voice::Hat), bars, "energy {energy}");
             assert_eq!(hits(Voice::Rim), bars, "energy {energy}");
         }
+    }
+
+    #[test]
+    fn a_fill_by_hand_lands_in_the_second_half_of_a_bar() {
+        let mut song = Song::empty();
+        song.bpm = 200.0;
+        let shared = Shared::new();
+        let mut e = Engine::new(22_050.0, song, shared.clone(), None, 3);
+        e.handle(Cmd::Fill(Fill::Roll));
+        assert_eq!(e.fill, None, "not while stopped");
+        e.handle(Cmd::Play);
+        let step = e.step_len() as usize;
+        let mut buf = vec![0.0; 2 * step * 3];
+        e.render(&mut buf);
+        e.handle(Cmd::Fill(Fill::Roll));
+        assert_eq!(e.fill, Some((0, Fill::Roll)), "early in the bar: this one");
+        let mut buf = vec![0.0; 2 * step * 7];
+        e.render(&mut buf);
+        e.handle(Cmd::Fill(Fill::Toms));
+        assert_eq!(e.fill, Some((1, Fill::Toms)), "late in the bar: the next one");
+        // The roll played: claps although the clap track is empty
+        assert!(shared.hits[Voice::Clap.index()].load(Ordering::Relaxed) > 0);
     }
 
     #[test]

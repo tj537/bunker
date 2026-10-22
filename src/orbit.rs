@@ -161,6 +161,11 @@ fn step_menu(ui: &mut Ui, song: &mut Song, t: usize, s: usize) {
     ui.checkbox(&mut st.on, "Plays");
     if ui.checkbox(&mut st.accent, "Accent – louder").changed() && st.accent {
         st.on = true;
+        st.ghost = false;
+    }
+    if ui.checkbox(&mut st.ghost, "Ghost – soft").changed() && st.ghost {
+        st.on = true;
+        st.accent = false;
     }
     if voice == Voice::Acid && ui.checkbox(&mut st.slide, "Slide into this note").changed() && st.slide {
         st.on = true;
@@ -340,7 +345,13 @@ pub fn orbit(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mut 
             let is_now = current == Some(k);
             if step.on {
                 let strength = if muted { 0.25 } else { 0.45 + 0.55 * step.chance as f32 / 100.0 };
-                let rad = if step.accent { dr * 1.2 } else { dr };
+                let rad = if step.accent {
+                    dr * 1.2
+                } else if step.ghost {
+                    dr * 0.7
+                } else {
+                    dr
+                };
                 if is_now && !muted {
                     glow(&p, at, rad, color, flash * 1.6);
                 }

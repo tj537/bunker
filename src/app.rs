@@ -695,6 +695,65 @@ impl SolarumApp {
         }
     }
 
+    /// Right-click on a track's name: by hand, what SOLAR OS would do to it
+    fn track_menu(&mut self, ui: &mut Ui, i: usize, now: f64) {
+        let voice = Voice::ALL[i];
+        ui.set_min_width(240.0);
+        ui.label(egui::RichText::new(voice.name()).font(bold(13.0)).color(track_color(voice)));
+        if self.song.tracks[i].lock {
+            ui.label(egui::RichText::new("Locked – unlock it to change it").color(DIM));
+            return;
+        }
+        let name = voice.name();
+        let mut said = None;
+        if ui.button(format!("{}  New rhythm", ph::DICE_FIVE)).clicked() {
+            self.roll_track(i);
+            said = Some(format!("New {} rhythm", name.to_lowercase()));
+        }
+        if voice.is_synth() || voice == Voice::Bass {
+            if ui.button(format!("{}  New notes, same rhythm", ph::MUSIC_NOTES)).clicked() {
+                gen::new_notes(&mut self.song, voice, &mut self.rng);
+                said = Some(format!("{name}: new notes on the same rhythm"));
+            }
+        } else if voice != Voice::Kick {
+            if ui.button(format!("{}  Add ghost notes", ph::GHOST)).clicked() {
+                said = Some(if gen::add_ghosts(&mut self.song, voice, &mut self.rng) {
+                    format!("{name}: soft ghost notes in between")
+                } else {
+                    format!("{name}: no room for ghost notes")
+                });
+            }
+            if self.song.tracks[i].steps.iter().any(|s| s.ghost) && ui.button(format!("{}  Remove ghost notes", ph::ERASER)).clicked() {
+                gen::remove_ghosts(&mut self.song, voice);
+                said = Some(format!("{name}: ghost notes out"));
+            }
+            if ui
+                .button(format!("{}  Thin out – plain steps play half the time", ph::FUNNEL))
+                .clicked()
+            {
+                gen::set_chance(&mut self.song, voice, 50);
+                said = Some(format!("{name}: thinned out – accents always play"));
+            }
+            if self.song.tracks[i].steps.iter().any(|s| s.on && s.chance < 100)
+                && ui.button(format!("{}  Every step always", ph::CHECK_CIRCLE)).clicked()
+            {
+                gen::set_chance(&mut self.song, voice, 100);
+                said = Some(format!("{name}: every step plays"));
+            }
+        }
+        if ui.button(format!("{}  Clear", ph::TRASH)).clicked() {
+            for st in self.song.tracks[i].steps.iter_mut() {
+                *st = crate::song::Step::default();
+            }
+            said = Some(format!("{name} cleared"));
+        }
+        if let Some(text) = said {
+            self.song.tracks[i].mute = false;
+            self.say(text, now);
+            ui.close_menu();
+        }
+    }
+
     /// A new rhythm for one track (keeps its sound, volume and mute)
     fn roll_track(&mut self, i: usize) {
         if self.song.tracks[i].lock {
@@ -2222,14 +2281,14 @@ impl SolarumApp {
                 },
             );
             let name_hit = Rect::from_min_max(row.left_top() + vec2(0.0, top - row.top()), name_rect.right_bottom());
-            if ui
+            let name_resp = ui
                 .allocate_rect(name_hit, Sense::click())
-                .on_hover_text(format!("{}\nClick to hear it", voice.blurb()))
-                .on_hover_cursor(egui::CursorIcon::PointingHand)
-                .clicked()
-            {
+                .on_hover_text(format!("{}\nClick to hear it · right-click for more", voice.blurb()))
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
+            if name_resp.clicked() {
                 self.hit(voice);
             }
+            name_resp.context_menu(|ui| self.track_menu(ui, i, now));
             // Buttons on the right: solo, mute, dice, lock
             let mut x = row.right() - 2.0;
             let mut icon_btn = |ui: &mut Ui, icon: &str, tip: &str, on: bool, col: Color32| -> egui::Response {
@@ -3037,13 +3096,29 @@ impl SolarumApp {
             bold(9.5),
             alpha(TEXT, 0.35),
         );
-        if resp
-            .on_hover_text("Two bars of build-up from the next bar, then the drop (B)")
-            .on_hover_cursor(egui::CursorIcon::PointingHand)
-            .clicked()
-        {
+        let resp = resp
+            .on_hover_text("Two bars of build-up from the next bar, then the drop (B)\nRight-click: a fill")
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        if resp.clicked() {
             self.drop_now(now);
         }
+        resp.context_menu(|ui| {
+            ui.label(egui::RichText::new("Fill – in this bar's second half, or the next one's").color(DIM));
+            for f in crate::engine::FILLS {
+                if ui.button(f.name()).clicked() {
+                    self.send(Cmd::Fill(f));
+                    self.say(
+                        if self.playing() {
+                            format!("Fill: {}", f.name())
+                        } else {
+                            "Fills play while the music runs".into()
+                        },
+                        now,
+                    );
+                    ui.close_menu();
+                }
+            }
+        });
     }
 
     /// The strip under the orbit: twelve favorites in two rows, and AUTO SONG
@@ -3177,6 +3252,11 @@ impl SolarumApp {
             }
             if filled {
                 resp.context_menu(|ui| {
+                    if !current && self.playing() && ui.button(format!("{}  Switch with a clap roll", ph::HANDS_CLAPPING)).clicked() {
+                        self.slot_clicked(i, false, now);
+                        self.send(Cmd::Fill(crate::engine::Fill::Roll));
+                        ui.close_menu();
+                    }
                     if ui.button(format!("{}  Save what you hear here", ph::FLOPPY_DISK)).clicked() {
                         self.slot_clicked(i, true, now);
                         ui.close_menu();

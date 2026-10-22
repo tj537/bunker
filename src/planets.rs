@@ -103,7 +103,15 @@ impl System {
 
     /// How big a planet is drawn: nearer ones bigger, accents bigger still
     fn body(&self, step: Step, depth: f32) -> f32 {
-        self.planet_radius() * (1.0 + 0.18 * depth) * if step.accent { 1.35 } else { 1.0 }
+        self.planet_radius()
+            * (1.0 + 0.18 * depth)
+            * if step.accent {
+                1.35
+            } else if step.ghost {
+                0.7
+            } else {
+                1.0
+            }
     }
 
     /// The step under `p`, if any. On a planet it's the planet you see there – the one

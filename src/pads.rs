@@ -172,7 +172,20 @@ pub fn pads(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mut P
             p.rect_filled(cell, 4.0, base);
             if inside && step.on {
                 let a = if track.mute { 0.3 } else { 0.5 + 0.5 * step.chance as f32 / 100.0 };
-                p.rect_filled(cell, 4.0, alpha(color, a * if step.accent { 1.0 } else { 0.7 }));
+                p.rect_filled(
+                    cell,
+                    4.0,
+                    alpha(
+                        color,
+                        a * if step.accent {
+                            1.0
+                        } else if step.ghost {
+                            0.4
+                        } else {
+                            0.7
+                        },
+                    ),
+                );
                 if step.accent {
                     p.rect_filled(
                         Rect::from_center_size(cell.center(), vec2(4.0, 4.0)),

@@ -832,15 +832,52 @@ fn big_change(song: &mut Song, rng: &mut Rng, mutes: bool, recent: &mut Recent) 
 /// mood changed, so they follow the new scale and chords
 pub fn refit_notes(song: &mut Song, rng: &mut Rng) {
     for v in [Voice::Bass, Voice::Acid] {
-        if song.track(v).lock {
-            continue;
+        if !song.track(v).lock {
+            new_notes(song, v, rng);
         }
-        let fresh = track_for(v, song.vibe, song.macros.energy, song, rng);
-        let t = song.track_mut(v);
-        let mut fresh_notes = fresh.steps.iter().filter(|s| s.on).map(|s| s.note).cycle();
-        for s in t.steps.iter_mut().filter(|s| s.on) {
-            s.note = fresh_notes.next().unwrap_or(s.note);
+    }
+}
+
+/// New notes on the same rhythm for one track, fitting the vibe and the chords
+pub fn new_notes(song: &mut Song, v: Voice, rng: &mut Rng) {
+    let fresh = track_for(v, song.vibe, song.macros.energy, song, rng);
+    let t = song.track_mut(v);
+    let mut fresh_notes = fresh.steps.iter().filter(|s| s.on).map(|s| s.note).cycle();
+    for s in t.steps.iter_mut().filter(|s| s.on) {
+        s.note = fresh_notes.next().unwrap_or(s.note);
+    }
+}
+
+/// What the energy does to the hats in the auto mode, written into the pattern: soft ghost
+/// notes on about half the free off-beat 16ths. False when there was no room.
+pub fn add_ghosts(song: &mut Song, v: Voice, rng: &mut Rng) -> bool {
+    let t = song.track_mut(v);
+    let mut added = false;
+    for (i, s) in t.steps.iter_mut().enumerate() {
+        if !s.on && i % 4 != 0 && rng.chance(0.5) {
+            *s = Step {
+                on: true,
+                ghost: true,
+                ..Step::default()
+            };
+            added = true;
         }
+    }
+    added
+}
+
+/// Every ghost note of a track out again
+pub fn remove_ghosts(song: &mut Song, v: Voice) {
+    for s in song.track_mut(v).steps.iter_mut().filter(|s| s.ghost) {
+        *s = Step::default();
+    }
+}
+
+/// What low energy does to the percussion in the auto mode, written into the pattern: the
+/// steps without an accent play only half the time (100: back to always)
+pub fn set_chance(song: &mut Song, v: Voice, chance: u8) {
+    for s in song.track_mut(v).steps.iter_mut().filter(|s| s.on && !s.accent) {
+        s.chance = chance;
     }
 }
 
@@ -1122,6 +1159,25 @@ mod tests {
                 before.track(Voice::Bass).steps.map(|st| st.on)
             );
         }
+    }
+
+    #[test]
+    fn ghost_notes_and_thinning_by_hand() {
+        let mut song = Song::empty();
+        let hat = Voice::Hat;
+        song.track_mut(hat).steps[0] = Step::hit();
+        song.track_mut(hat).steps[2] = Step {
+            accent: true,
+            ..Step::hit()
+        };
+        assert!(add_ghosts(&mut song, hat, &mut Rng::new(1)));
+        let t = song.track(hat);
+        assert!(t.steps.iter().enumerate().all(|(i, s)| !s.ghost || (i % 4 != 0 && s.on)));
+        assert!(t.steps[0].on && !t.steps[0].ghost && t.steps[2].accent);
+        set_chance(&mut song, hat, 50);
+        assert!(song.track(hat).steps.iter().filter(|s| s.on).all(|s| (s.chance == 50) != s.accent));
+        remove_ghosts(&mut song, hat);
+        assert_eq!(song.track(hat).hits(), 2);
     }
 
     #[test]

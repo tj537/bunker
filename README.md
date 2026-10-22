@@ -50,7 +50,7 @@ Solarum is a techno drum machine written in Rust. Your groove is a little solar 
 
 **And if you do know what you're doing,** you still get per-step accents, slides and probability, tune and decay per track, a master EQ, MIDI in and WAV recording.
 
-**By hand means by hand.** With SOLAR OS off, Solarum plays exactly what you programmed and changes nothing by itself: no ghost hats, no thinned-out percussion, no clap roll before a favorite, and a new synth sound or mood keeps your bass and synth lines (a mood just moves their notes into its scale). Only the controls you touch – energy, DROP, the effects – change what plays. While SOLAR OS plays, *Settings → SOLAR OS* can switch off the ghost hats and thinning too.
+**By hand means by hand.** With SOLAR OS off, Solarum plays exactly what you programmed and changes nothing by itself: no ghost hats, no thinned-out percussion, no clap roll before a favorite, and a new synth sound or mood keeps your bass and synth lines (a mood just moves their notes into its scale). Only the controls you touch – energy, DROP, the effects – change what plays. And everything SOLAR OS does you can do yourself, with a right-click: on a **track's name** – new rhythm, new notes on the same rhythm (bass, synth), add or remove ghost notes, thin out (plain steps play half the time), clear; on a **step** – ghost (soft), accent, how often, the note; on **DROP** – a fill (clap roll, gap, falling toms, open hats, clap into the echo); on a **favorite** – switch with a clap roll. While SOLAR OS plays, *Settings → SOLAR OS* can switch off the ghost hats and thinning too.
 
 ## What it does
 

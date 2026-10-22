@@ -105,6 +105,8 @@ pub struct Step {
     pub slide: bool,
     /// Probability in percent that the step plays
     pub chance: u8,
+    /// A ghost note: played soft, at half the velocity
+    pub ghost: bool,
 }
 
 impl Default for Step {
@@ -115,6 +117,7 @@ impl Default for Step {
             note: 0,
             slide: false,
             chance: 100,
+            ghost: false,
         }
     }
 }
