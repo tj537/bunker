@@ -382,27 +382,6 @@ pub fn energy_fader(ui: &mut Ui, value: &mut f32, width: f32, height: f32, steer
     p.rect_filled(Rect::from_min_max(track.min, pos2(break_x, track.bottom())), 5.0, alpha(cool, 0.22));
     let fill = Rect::from_min_max(track.min, pos2(track.left() + track.width() * *value, track.bottom()));
     p.rect_filled(fill, 5.0, alpha(hot_col, 0.85));
-    // Where each track comes in: a dot in its colour, dark while the energy keeps it muted
-    for (i, &layer) in crate::engine::LAYERS.iter().enumerate() {
-        if layer <= 0.0 {
-            continue;
-        }
-        let x = track.left() + track.width() * layer;
-        let col = track_color(crate::song::Voice::ALL[i]);
-        let on = *value >= layer;
-        p.circle_filled(
-            pos2(x, track.center().y),
-            3.2,
-            if on {
-                mix(col, Color32::BLACK, 0.15)
-            } else {
-                mix(PANEL, col, 0.35)
-            },
-        );
-        if !on {
-            p.circle_stroke(pos2(x, track.center().y), 3.2, stroke(1.0, alpha(col, 0.8)));
-        }
-    }
     let knob = pos2(fill.right(), track.center().y);
     glow(p, knob, 7.0, hot_col, 0.6);
     p.circle_filled(knob, 8.0, TEXT);
@@ -628,6 +607,7 @@ pub fn fit_text(p: &egui::Painter, text: &str, font: egui::FontId, max_w: f32) -
 
 /// The Solarum logo: the lime sun with its rings of light, on black. `tile`: on its rounded
 /// square (the app icon), else bare. `time` turns the patches on its surface (0: still).
+#[cfg_attr(not(test), allow(dead_code))] // (only the icon test draws it now)
 pub fn logo(p: &egui::Painter, r: Rect, tile: bool, time: f32) {
     let s = r.width().min(r.height()) / 100.0;
     let c = r.center();

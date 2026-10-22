@@ -385,13 +385,11 @@ pub fn planets(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mu
     }
 
     // ── The sun: the play button ──
-    // A solid ball of fire with rings of light around it: lime while it waits, warming
-    // slowly to orange when the beat starts, red through a build-up
-    let heat = ui.ctx().animate_bool_with_time(egui::Id::new("sun_heat"), live.playing, 1.5);
+    // A solid ball of fire with rings of light around it
     let rs = sys.sun() * (1.0 + 0.06 * kick + 0.2 * build);
-    // Waiting it shines in the energy's colour (blue in a break, lime when full), then warms up
-    let rest = crate::widgets::energy_color(song.macros.energy);
-    let warm = mix(rest, mix(mix(RED, track_color(Voice::Clap), 0.55), RED, build), heat);
+    // It always shines in the energy's colour – icy blue in a break, lime when full – and
+    // turns red only through a build-up
+    let warm = mix(crate::widgets::energy_color(song.macros.energy), RED, build);
     let time = ui.input(|i| i.time) as f32;
     sun_ball(
         &p,

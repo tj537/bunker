@@ -1395,10 +1395,6 @@ impl SolarumApp {
     fn top_bar(&mut self, ui: &mut Ui, now: f64) {
         ui.horizontal_centered(|ui| {
             ui.add_space(6.0);
-            // The logo before the name
-            let (lr, _) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::hover());
-            widgets::logo(ui.painter(), lr, true, 0.0);
-            ui.add_space(2.0);
             if ui
                 .add(
                     egui::Label::new(
@@ -3126,12 +3122,13 @@ impl SolarumApp {
                     stroke(1.0, if hot { alpha(TEXT, 0.3) } else { LINE }),
                     egui::StrokeKind::Inside,
                 );
-                let label = if cw > 54.0 {
-                    format!("{}  {num}", ph::PLUS)
-                } else {
-                    ph::PLUS.to_string()
-                };
-                p.text(r.center(), Align2::CENTER_CENTER, label, bold(12.0), if hot { TEXT } else { DIM });
+                p.text(
+                    r.center(),
+                    Align2::CENTER_CENTER,
+                    ph::PLUS,
+                    body(20.0),
+                    if hot { TEXT } else { DIM },
+                );
             }
             let tip = match (filled, current) {
                 (false, _) => format!("Empty – click to keep the groove you hear now as favorite {num}"),
