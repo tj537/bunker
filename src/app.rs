@@ -1055,7 +1055,7 @@ impl SolarumApp {
     fn open_file(&mut self, path: Option<PathBuf>, now: f64) {
         let path = path.or_else(|| {
             rfd::FileDialog::new()
-                .add_filter("Solarum", &[file::EXTENSION, file::OLD_EXTENSION])
+                .add_filter("Solarum", &[file::EXTENSION])
                 .pick_file()
         });
         let Some(path) = path else { return };
@@ -1469,7 +1469,7 @@ impl SolarumApp {
                     }
                     ui.label(
                         egui::RichText::new(
-                            "A project is one .solarum file: the groove and its twelve favorites. A new project starts without favorites. (Old .bunker files open too.)",
+                            "A project is one .solarum file: the groove and its twelve favorites. A new project starts without favorites.",
                         )
                         .font(body(11.0))
                         .color(FAINT),
@@ -3511,11 +3511,11 @@ impl SolarumApp {
             ctx.request_repaint_after(std::time::Duration::from_secs(3));
         }
 
-        // A .bunker file dropped onto the window
+        // A .solarum file dropped onto the window
         let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
         if let Some(path) = dropped
             .into_iter()
-            .find(|p| p.extension().is_some_and(|e| e == file::EXTENSION || e == file::OLD_EXTENSION))
+            .find(|p| p.extension().is_some_and(|e| e == file::EXTENSION))
         {
             self.open_file(Some(path), now);
         }
@@ -4021,7 +4021,7 @@ mod tests {
         f.scenes[1] = Some(gen::generate(Vibe::Dub, &Default::default(), &mut Rng::new(4)));
         f.names[1] = "Sunday".into();
         app.song.master = 0.4;
-        app.load_file(SolarumFile::from_text(&f.to_text()).unwrap(), "test.bunker", 0.0);
+        app.load_file(SolarumFile::from_text(&f.to_text()).unwrap(), "test.solarum", 0.0);
         assert_eq!(app.song.tracks, f.song.tracks);
         assert_eq!(app.song.master, 0.4, "volume belongs to the moment");
         assert_eq!(app.slots.to_vec(), f.scenes);

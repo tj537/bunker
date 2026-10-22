@@ -242,7 +242,7 @@ pub fn home(ui: &mut Ui, recent: &[Recent], last: Option<&Song>, update: Option<
             "open",
             ph::FOLDER_OPEN,
             "Open a project…",
-            "A .solarum (or .bunker) file",
+            "A .solarum file",
             false,
             true,
             Action::Open,

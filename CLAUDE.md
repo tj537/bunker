@@ -29,7 +29,7 @@ Commit only when `cargo test` exits 0.
 
 ## Releases
 
-Asset names never change (`Bunker-macos-universal.zip`, `Bunker-windows-x64.zip`) so `releases/latest/download/…` links keep working. They keep the old name from before the rename to Solarum (the zips hold `Solarum.app` / `Solarum.exe`); the app also keeps its storage under "Bunker" (`main.rs`) and opens old `.bunker` files, so nothing saved gets lost.
+Asset names never change (`Bunker-macos-universal.zip`, `Bunker-windows-x64.zip`) so `releases/latest/download/…` links keep working. They keep the old name from before the rename to Solarum (the zips hold `Solarum.app` / `Solarum.exe`); the app also keeps its storage under "Bunker" (`main.rs`) so nothing saved gets lost.
 
 1. Raise `version` in `Cargo.toml`, commit.
 2. Write `.github/release-notes/vX.Y.Z.md` (English).

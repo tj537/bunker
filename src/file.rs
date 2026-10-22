@@ -1,4 +1,4 @@
-//! `.solarum` files (and `.bunker` ones from before the rename): the groove and the favorites (with their names) in one readable
+//! `.solarum` files: the groove and the favorites (with their names) in one readable
 //! text file (RON), to keep or to share. Older files have four favorites ("scenes")
 //! and scene lengths and drops – they still open.
 
@@ -7,8 +7,6 @@ use crate::song::Song;
 use serde::{Deserialize, Serialize};
 
 pub const EXTENSION: &str = "solarum";
-/// Files saved before the rename still open
-pub const OLD_EXTENSION: &str = "bunker";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
