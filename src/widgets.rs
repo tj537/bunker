@@ -599,3 +599,38 @@ pub fn fit_text(p: &egui::Painter, text: &str, font: egui::FontId, max_w: f32) -
     }
     String::new()
 }
+
+/// The Solarum logo, the step ring: sixteen steps round a lime sun, the four beats bright,
+/// a beam just passing. `tile`: on its dark rounded square (the app icon), else bare.
+pub fn logo(p: &egui::Painter, r: Rect, tile: bool) {
+    let s = r.width().min(r.height()) / 100.0;
+    let at = |x: f32, y: f32| r.center() + vec2((x - 50.0) * s, (y - 50.0) * s);
+    if tile {
+        let sq = Rect::from_center_size(r.center(), vec2(100.0 * s, 100.0 * s));
+        p.rect_filled(sq, 22.0 * s, Color32::from_rgb(20, 20, 23));
+        p.rect_stroke(
+            sq,
+            22.0 * s,
+            stroke((1.0 * s).max(0.5), Color32::from_rgb(44, 44, 51)),
+            egui::StrokeKind::Inside,
+        );
+    }
+    let c = at(50.0, 50.0);
+    // The beam: from the first step to the third
+    let mut wedge = vec![c];
+    for i in 0..=12 {
+        let a = -std::f32::consts::FRAC_PI_2 + std::f32::consts::FRAC_PI_4 * i as f32 / 12.0;
+        wedge.push(c + vec2(a.cos(), a.sin()) * 34.0 * s);
+    }
+    p.add(egui::Shape::convex_polygon(wedge, ACID.gamma_multiply(0.18), egui::Stroke::NONE));
+    for k in 0..16 {
+        let a = -std::f32::consts::FRAC_PI_2 + k as f32 / 16.0 * std::f32::consts::TAU;
+        let pt = c + vec2(a.cos(), a.sin()) * 34.0 * s;
+        if k % 4 == 0 {
+            p.circle_filled(pt, 5.0 * s, Color32::from_rgb(236, 235, 230));
+        } else {
+            p.circle_filled(pt, 2.0 * s, Color32::from_rgb(107, 107, 116));
+        }
+    }
+    p.circle_filled(c, 12.0 * s, ACID);
+}

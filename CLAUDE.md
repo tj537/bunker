@@ -40,4 +40,4 @@ Asset names never change (`Bunker-macos-universal.zip`, `Bunker-windows-x64.zip`
 - Windows: `build.rs` embeds `assets/icon.ico` (only when building on Windows); `main.rs` sets the GUI subsystem.
 - Linux builds need `libasound2-dev` and `libgtk-3-dev` (CI installs them); Linux isn't released.
 - The Mac bundle is ad-hoc signed only (no notarization yet), so first launch needs *Open Anyway*.
-- Icons: `assets/icon.svg` is the source; `icon.png`, `icon.ico` and `icon.icns` are generated from it (e.g. with `npx @tauri-apps/cli icon assets/icon.svg -o <dir>`).
+- Icons: the logo is drawn by `widgets::logo` (the step ring – top bar, start screen); `cargo test --release render_icon -- --ignored` renders it to `target/snapshots/icon.png` (1024 px), and `icon.png` (512), `icon.icns` (sips + iconutil) and `icon.ico` (PNG entries) come from that. `assets/icon.svg` is the same drawing as a vector.

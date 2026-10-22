@@ -238,8 +238,6 @@ pub struct SolarumApp {
     /// Leaving a project with unsaved changes (New, Open, a recent one, Solari): what waits
     /// for the answer
     pending: Option<crate::home::Action>,
-    /// What the start screen's solar system shows when there's nothing from last time
-    demo: Song,
     /// The file the project was last saved to or opened from – Save writes there
     project: Option<PathBuf>,
     /// When the computer (the auto mode) was switched on or off – for its animation
@@ -432,7 +430,6 @@ impl SolarumApp {
             last_session: None,
             saved: None,
             pending: None,
-            demo: Song::default(),
             project: None,
             cmd: String::new(),
             metronome: false,
@@ -1402,6 +1399,10 @@ impl SolarumApp {
     fn top_bar(&mut self, ui: &mut Ui, now: f64) {
         ui.horizontal_centered(|ui| {
             ui.add_space(6.0);
+            // The logo before the name
+            let (lr, _) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::hover());
+            widgets::logo(ui.painter(), lr, true);
+            ui.add_space(2.0);
             if ui
                 .add(
                     egui::Label::new(
@@ -3537,7 +3538,6 @@ impl SolarumApp {
                         ui,
                         &self.recent_cache,
                         self.last_session.as_ref().map(|l| &l.song),
-                        &self.demo,
                         update.as_deref(),
                     );
                 });

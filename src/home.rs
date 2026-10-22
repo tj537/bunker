@@ -166,7 +166,7 @@ fn about(song: &Song) -> String {
 }
 
 /// The start screen; returns what was clicked. `demo` is shown when there's nothing from last time.
-pub fn home(ui: &mut Ui, recent: &[Recent], last: Option<&Song>, demo: &Song, update: Option<&str>) -> Option<Action> {
+pub fn home(ui: &mut Ui, recent: &[Recent], last: Option<&Song>, update: Option<&str>) -> Option<Action> {
     let mut action = None;
     let full = ui.max_rect();
     let p = ui.painter().clone();
@@ -184,12 +184,10 @@ pub fn home(ui: &mut Ui, recent: &[Recent], last: Option<&Song>, demo: &Song, up
         vec2(content.width(), hero_h),
     );
 
-    // The solar system on the right, turning slowly: last time's groove, or a demo
-    let system = Rect::from_min_max(
-        pos2(hero.left() + 380.0f32.min(hero.width() * 0.45), hero.top() - 20.0),
-        pos2(hero.right() + 30.0, hero.bottom() + 10.0),
-    );
-    preview(&p, system, last.unwrap_or(demo), t * 0.12);
+    // The logo, big, on the right
+    let side = Rect::from_min_max(pos2(hero.left() + 380.0f32.min(hero.width() * 0.45), hero.top()), hero.max);
+    let size = side.width().min(side.height()) * 0.78;
+    crate::widgets::logo(&p, Rect::from_center_size(side.center(), vec2(size, size)), false);
 
     // The left: the name, a line, the buttons
     let col = 360.0f32.min(hero.width() * 0.48);
@@ -202,7 +200,8 @@ pub fn home(ui: &mut Ui, recent: &[Recent], last: Option<&Song>, demo: &Song, up
         alpha(TEXT, 0.5),
     );
     y += 22.0;
-    p.text(pos2(hero.left() - 3.0, y), Align2::LEFT_TOP, "SOLARUM", display(68.0), TEXT);
+    crate::widgets::logo(&p, Rect::from_min_size(pos2(hero.left(), y + 6.0), vec2(62.0, 62.0)), true);
+    p.text(pos2(hero.left() + 76.0, y), Align2::LEFT_TOP, "SOLARUM", display(68.0), TEXT);
     y += 88.0;
     let intro = p.layout(
         "Paint a beat on an empty sky, or let Solari, the computer, build a whole set.".to_string(),

@@ -293,4 +293,21 @@ mod tests {
             });
         });
     }
+
+    /// The app icon from the logo: `target/snapshots/icon.png`, 1024 px with the macOS margin
+    /// (the source of assets/icon.png, .icns and .ico)
+    #[test]
+    #[ignore]
+    fn render_icon() {
+        let mut snap = Offscreen::new(1024.0, 1024.0);
+        let shapes = snap.frame(0.0, |ctx| {
+            eframe::egui::CentralPanel::default()
+                .frame(eframe::egui::Frame::new())
+                .show(ctx, |ui| {
+                    let r = eframe::egui::Rect::from_center_size(eframe::egui::pos2(512.0, 512.0), eframe::egui::vec2(824.0, 824.0));
+                    crate::widgets::logo(ui.painter(), r, true);
+                });
+        });
+        snap.save(&shapes, Path::new("target/snapshots/icon.png"));
+    }
 }
