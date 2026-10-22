@@ -1231,9 +1231,11 @@ impl SolarumApp {
                         }
                     }
                     ui.label(
-                        egui::RichText::new(".solarum files keep the groove and all twelve favorites – to share or back up (old .bunker files open too)")
-                            .font(body(11.0))
-                            .color(FAINT),
+                        egui::RichText::new(
+                            ".solarum files keep the groove and all twelve favorites – to share or back up (old .bunker files open too)",
+                        )
+                        .font(body(11.0))
+                        .color(FAINT),
                     );
                 });
                 match action {
@@ -2824,11 +2826,11 @@ impl SolarumApp {
                     r,
                     8.0,
                     if current {
-                        mix(PANEL, ACID, 0.12)
+                        mix(PANEL_HI, ACID, 0.14)
                     } else if hot {
-                        PANEL_HI
+                        mix(PANEL_HI, TEXT, 0.1)
                     } else {
-                        mix(PANEL, PANEL_HI, 0.6)
+                        mix(PANEL_HI, TEXT, 0.05)
                     },
                 );
                 // Waiting for the next bar: the border blinks
@@ -2837,7 +2839,7 @@ impl SolarumApp {
                 } else if current {
                     ACID
                 } else {
-                    LINE
+                    alpha(TEXT, if hot { 0.4 } else { 0.22 })
                 };
                 p.rect_stroke(
                     r,
@@ -2846,17 +2848,30 @@ impl SolarumApp {
                     egui::StrokeKind::Inside,
                 );
                 let label = if queued { "next bar…".to_string() } else { name.clone() };
-                let (num_col, name_col) = if current {
-                    (ACID, TEXT)
-                } else if queued {
-                    (TEXT, TEXT)
-                } else {
-                    (TEXT, DIM)
-                };
+                let (num_col, name_col) = (if current { ACID } else { TEXT }, TEXT);
+                // A tiny picture of the groove: its steps as grey dots, one row per track
+                if cw >= 150.0 {
+                    if let Some(song) = &self.slots[i] {
+                        let (dx, dy) = (3.6, (r.height() - 14.0) / TRACKS as f32);
+                        let x0 = r.right() - 10.0 - dx * 15.0;
+                        for (t, track) in song.tracks.iter().enumerate() {
+                            for (k, st) in track.steps.iter().enumerate() {
+                                let at = pos2(x0 + k as f32 * dx, r.top() + 7.0 + (t as f32 + 0.5) * dy);
+                                let c = if st.on {
+                                    alpha(TEXT, if current { 0.75 } else { 0.55 })
+                                } else {
+                                    alpha(TEXT, 0.08)
+                                };
+                                p.circle_filled(at, 1.1, c);
+                            }
+                        }
+                    }
+                }
                 if cw >= 110.0 {
                     // Wide: number and name side by side
                     p.text(r.left_center() + vec2(8.0, 0.0), Align2::LEFT_CENTER, &num, display(15.0), num_col);
-                    let label = fit_text(&p, &label, bold(11.0), cw - 34.0);
+                    let room = if cw >= 150.0 { cw - 34.0 - 3.6 * 15.0 - 18.0 } else { cw - 34.0 };
+                    let label = fit_text(&p, &label, bold(11.0), room);
                     p.text(r.left_center() + vec2(28.0, 0.0), Align2::LEFT_CENTER, label, bold(11.0), name_col);
                 } else {
                     // Narrow: number on top, the name below it with the whole width
@@ -2865,13 +2880,19 @@ impl SolarumApp {
                     p.text(r.left_bottom() + vec2(7.0, -5.0), Align2::LEFT_BOTTOM, label, bold(10.0), name_col);
                 }
             } else {
-                p.rect_stroke(r, 8.0, stroke(1.0, if hot { FAINT } else { LINE }), egui::StrokeKind::Inside);
+                p.rect_filled(r, 8.0, Color32::from_black_alpha(if hot { 40 } else { 60 }));
+                p.rect_stroke(
+                    r,
+                    8.0,
+                    stroke(1.0, alpha(TEXT, if hot { 0.35 } else { 0.14 })),
+                    egui::StrokeKind::Inside,
+                );
                 let label = if cw > 54.0 {
                     format!("{}  {num}", ph::PLUS)
                 } else {
                     ph::PLUS.to_string()
                 };
-                p.text(r.center(), Align2::CENTER_CENTER, label, bold(12.0), if hot { TEXT } else { FAINT });
+                p.text(r.center(), Align2::CENTER_CENTER, label, bold(12.0), if hot { TEXT } else { DIM });
             }
             let tip = match (filled, current) {
                 (false, _) => format!("Empty – click to keep the groove you hear now as favorite {num}"),
