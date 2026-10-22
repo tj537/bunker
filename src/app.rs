@@ -321,6 +321,7 @@ impl SolarumApp {
         let get = |key: &str| cc.storage.and_then(|s| eframe::get_value::<bool>(s, key));
         app.log.facts = get("log_facts").unwrap_or(true);
         app.keep_tempo = get("keep_tempo").unwrap_or(false);
+        app.shared.touches.store(get("touches").unwrap_or(true), Ordering::Relaxed);
         app.on_start = cc.storage.and_then(|s| eframe::get_value(s, "on_start")).unwrap_or(OnStart::Wait);
         // Straight into the music, if the settings say so
         if app.on_start != OnStart::Wait && app.audio.is_ok() {
@@ -682,7 +683,8 @@ impl SolarumApp {
         }
         self.song.tracks[i].sound = sound;
         let name = voice.sounds()[sound as usize];
-        if voice == Voice::Acid && synth_family(old) != synth_family(sound) {
+        // With SOLAR OS on, a sound of another family gets a fitting line – by hand your line stays
+        if voice == Voice::Acid && self.song.auto && synth_family(old) != synth_family(sound) {
             self.roll_track(i);
             self.say(format!("{name}: new line to fit the sound (undo keeps the old one)"), now);
         } else {
@@ -1932,10 +1934,17 @@ impl SolarumApp {
                         note(ui, "Solarum always starts with an empty sky and the auto mode off.");
                     });
 
+                    let mut touches = self.shared.touches.load(Ordering::Relaxed);
                     group(ui, ph::ROBOT, "SOLAR OS", &mut |ui| {
                         ui.checkbox(&mut self.log.facts, "Facts about the set and tips in the log");
-                        note(ui, "How often Solari changes something and AUTO FX are under SET in its title bar.");
+                        ui.checkbox(&mut touches, "Ghost hats and thinner percussion from the energy");
+                        note(
+                            ui,
+                            "With SOLAR OS off, Solarum plays exactly what you programmed and changes nothing by itself. \
+                             How often Solari changes something and AUTO FX are under SET in its title bar.",
+                        );
                     });
+                    self.shared.touches.store(touches, Ordering::Relaxed);
 
                     let mut radar = self.radar;
                     group(ui, ph::CIRCLES_THREE, "Views", &mut |ui| {
@@ -1962,7 +1971,7 @@ impl SolarumApp {
                                 .color(FAINT),
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.hyperlink_to(format!("{}  github.com/tj537/bunker", ph::GITHUB_LOGO), update::REPO_URL);
+                            ui.hyperlink_to(format!("{}  github.com/tj537/solarum", ph::GITHUB_LOGO), update::REPO_URL);
                         });
                     });
                 });
@@ -2161,11 +2170,16 @@ impl SolarumApp {
                 self.song.mood_hold = true;
                 if current != Some(k) {
                     self.song.set_mood(k);
-                    gen::refit_notes(&mut self.song, &mut self.rng);
-                    // The synth carries the mood – a mood with it muted would hardly be heard
-                    let synth = self.song.track_mut(Voice::Acid);
-                    if !synth.lock && k != crate::song::NEUTRAL {
-                        synth.mute = false;
+                    if self.song.auto {
+                        gen::refit_notes(&mut self.song, &mut self.rng);
+                        // The synth carries the mood – a mood with it muted would hardly be heard
+                        let synth = self.song.track_mut(Voice::Acid);
+                        if !synth.lock && k != crate::song::NEUTRAL {
+                            synth.mute = false;
+                        }
+                    } else {
+                        // By hand your lines and mutes stay: every note just moves into the new scale
+                        gen::snap_notes(&mut self.song);
                     }
                 }
                 self.say(format!("Mood: {}", MOODS[k].0), now);
@@ -3490,6 +3504,7 @@ impl eframe::App for SolarumApp {
         eframe::set_value(storage, "radar", &self.radar);
         eframe::set_value(storage, "log_facts", &self.log.facts);
         eframe::set_value(storage, "keep_tempo", &self.keep_tempo);
+        eframe::set_value(storage, "touches", &self.shared.touches.load(Ordering::Relaxed));
         let recent: Vec<String> = self.recent.iter().map(|p| p.display().to_string()).collect();
         eframe::set_value(storage, "recent", &recent);
         eframe::set_value(storage, "on_start", &self.on_start);

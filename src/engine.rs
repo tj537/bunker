@@ -180,6 +180,9 @@ pub struct Shared {
     pub cycle_len: AtomicU32,
     pub cycle_break: AtomicU32,
     pub heat: AtomicU32,
+    /// Set by the UI: while SOLAR OS plays, the energy may add ghost hats and thin out the
+    /// percussion. By hand (auto off, no song) the pattern always plays exactly as written.
+    pub touches: AtomicBool,
 }
 
 /// `Shared::cycle_break` of a cycle without a breakdown
@@ -202,6 +205,7 @@ impl Shared {
             filter_now: AtomicU32::new(0),
             cycle_len: AtomicU32::new(32),
             cycle_break: AtomicU32::new(NO_BREAK),
+            touches: AtomicBool::new(true),
             heat: AtomicU32::new(500),
         })
     }
@@ -825,9 +829,10 @@ impl Engine {
             Cmd::Queue(s, slot) => {
                 if self.playing {
                     self.queued = Some((s, slot));
-                    // A clap roll leads into it, unless a build-up is on
+                    // With SOLAR OS on a clap roll leads into it, unless a build-up is on – by
+                    // hand the pattern just switches on the one
                     let bar = self.last_fired.map_or(0, |i| i / STEPS as u64);
-                    if self.build.is_none() {
+                    if self.build.is_none() && self.song.auto {
                         self.fill = Some((bar, Fill::Roll));
                     }
                 } else {
@@ -994,6 +999,12 @@ impl Engine {
                 (self.auto_rng.f32() * 2.0 - 1.0) * r
             };
         }
+    }
+
+    /// The energy may play with the pattern (ghost hats, thinner percussion): only while
+    /// SOLAR OS plays (auto or song mode) and the setting allows it
+    fn touches(&self) -> bool {
+        (self.song.auto || self.arrangement.is_some()) && self.shared.touches.load(Ordering::Relaxed)
     }
 
     /// Solarum moves the energy: the auto mode with AUTO FX, or a song
@@ -1476,6 +1487,7 @@ impl Engine {
         let fill = self.fill.filter(|(b, _)| *b == idx / STEPS as u64).map(|(_, f)| f);
         let step_len = self.step_len() as f32;
         let energy = self.layer_energy;
+        let touches = self.touches();
         // The kick roll of a build-up comes in even when the energy or a breakdown took the kick out
         let kick = Voice::Kick.index();
         let kick_by_hand = self.breakdown.as_ref().map_or(self.song.tracks[kick].mute, |b| {
@@ -1524,16 +1536,16 @@ impl Engine {
             let si = track.step_at(track_idx);
             let step = track.steps[si];
             let mut vel = track.volume * if step.accent { 1.0 } else { 0.72 };
-            // Energy thins out the percussion (below 45) or adds ghost hats (above 60);
+            // With SOLAR OS on, energy thins out the percussion (below 45) or adds ghost hats (above 60);
             // the choice changes every two bars
             let perc = matches!(voice, Voice::Hat | Voice::Ride | Voice::Rim | Voice::OpenHat);
             let h = hash01(ti as u64 * 7919 + si as u64 * 104_729 + (play_idx / 32) * 15_485_863);
             let mut on = step.on;
-            if on && perc && !step.accent && energy < 0.45 && h < (0.45 - energy) * 1.8 {
+            if on && touches && perc && !step.accent && energy < 0.45 && h < (0.45 - energy) * 1.8 {
                 on = false;
             }
             // (only on a hat that plays something – an empty track stays silent)
-            if !step.on && voice == Voice::Hat && energy > 0.6 && track.hits() > 0 && h < (energy - 0.6) * 1.5 {
+            if !step.on && touches && voice == Voice::Hat && energy > 0.6 && track.hits() > 0 && h < (energy - 0.6) * 1.5 {
                 on = true;
                 vel *= 0.5;
             }
@@ -2070,6 +2082,27 @@ mod tests {
         assert_eq!(shared.step.load(Ordering::Relaxed), 7);
         e.render(&mut buf[..2 * 2000]);
         assert_eq!(shared.step.load(Ordering::Relaxed), 8);
+    }
+
+    #[test]
+    fn by_hand_the_pattern_plays_exactly_as_written() {
+        // One hat and one rim, energy high and low: no ghost hats, nothing thinned out
+        for energy in [0.95, 0.35] {
+            let mut song = Song::empty();
+            song.bpm = 200.0;
+            song.macros.energy = energy;
+            song.track_mut(Voice::Hat).steps[2] = crate::song::Step::hit();
+            song.track_mut(Voice::Rim).steps[6] = crate::song::Step::hit();
+            let shared = Shared::new();
+            let mut e = Engine::new(22_050.0, song, shared.clone(), None, 3);
+            e.handle(Cmd::Play);
+            let bars = 8;
+            let mut buf = vec![0.0; 2 * (e.step_len() * (STEPS * bars) as f64) as usize];
+            e.render(&mut buf);
+            let hits = |v: Voice| shared.hits[v.index()].load(Ordering::Relaxed) as usize;
+            assert_eq!(hits(Voice::Hat), bars, "energy {energy}");
+            assert_eq!(hits(Voice::Rim), bars, "energy {energy}");
+        }
     }
 
     #[test]
@@ -2695,12 +2728,16 @@ mod tests {
         e.render(&mut buf);
         e.handle(Cmd::Queue(Box::new(b), 1));
         assert_eq!(e.song.tracks.map(|t| t.steps), a.tracks.map(|t| t.steps), "not yet");
-        assert_eq!(e.fill, Some((0, Fill::Roll)), "a clap roll leads into it");
+        assert_eq!(e.fill, None, "by hand no clap roll leads into it");
         let mut buf = vec![0.0; 2 * step * 12];
         e.render(&mut buf);
         assert_eq!(e.song.tracks.map(|t| t.steps), b.tracks.map(|t| t.steps));
         let changes: Vec<Change> = rx.try_iter().filter_map(Event::change).collect();
         assert_eq!(changes, vec![Change::Scene(1)]);
+        // With SOLAR OS on, a clap roll leads into the next one
+        e.song.auto = true;
+        e.handle(Cmd::Queue(Box::new(a), 0));
+        assert!(matches!(e.fill, Some((_, Fill::Roll))), "a clap roll leads into it");
     }
 
     #[test]

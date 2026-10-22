@@ -844,6 +844,16 @@ pub fn refit_notes(song: &mut Song, rng: &mut Rng) {
     }
 }
 
+/// Bass and synth notes moved to the closest note of the scale (rhythm and line stay)
+pub fn snap_notes(song: &mut Song) {
+    let scale = song.scale;
+    for v in [Voice::Bass, Voice::Acid] {
+        for s in song.track_mut(v).steps.iter_mut() {
+            s.note = scale.shift(s.note, 0);
+        }
+    }
+}
+
 /// A gentle change for a song: new notes for bass or synth, a new pattern for one of the
 /// hats or percussion, or another sound for it – never a track out, never a shifted rhythm
 pub fn vary(song: &mut Song, rng: &mut Rng) -> Option<Change> {
