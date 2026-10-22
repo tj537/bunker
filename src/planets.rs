@@ -67,7 +67,7 @@ impl System {
     }
 
     pub fn sun(&self) -> f32 {
-        self.r_max * 0.12
+        self.r_max * 0.085
     }
 
     /// The angle `steps` (with fraction) into the bar: step 1 at the back, like 12 o'clock
