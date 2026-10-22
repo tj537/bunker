@@ -390,35 +390,16 @@ pub fn planets(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mu
     let heat = ui.ctx().animate_bool_with_time(egui::Id::new("sun_heat"), live.playing, 1.5);
     let rs = sys.sun() * (1.0 + 0.06 * kick + 0.2 * build);
     let warm = mix(ACID, mix(mix(RED, track_color(Voice::Clap), 0.55), RED, build), heat);
-    glow(
+    let time = ui.input(|i| i.time) as f32;
+    sun_ball(
         &p,
         sys.c,
-        rs * 1.3,
+        rs,
         warm,
+        kick,
         0.16 + 0.3 * kick + 0.45 * build + if on_sun { 0.1 } else { 0.0 },
+        time,
     );
-    let skin = mix(warm, Color32::WHITE, 0.08 + 0.12 * kick);
-    p.circle_filled(sys.c, rs, skin);
-    // Its surface: a few hotter and cooler patches, turning slowly with the sun
-    let time = ui.input(|i| i.time) as f32;
-    for k in 0..9u32 {
-        let r = rs * (0.12 + 0.12 * hash01(k * 3 + 1));
-        let lat = (hash01(k * 3 + 2) - 0.5) * 1.5 * (rs - r);
-        let lon = hash01(k * 3) * TAU + time * 0.12;
-        // Round the back and out of sight again: only the visible half
-        if lon.cos() < -0.1 {
-            continue;
-        }
-        let w = (rs - r) * (1.0 - (lat / rs).powi(2)).max(0.0).sqrt();
-        let at = sys.c + vec2(w * lon.sin(), lat);
-        let hot = k % 3 != 0;
-        let col = if hot {
-            mix(warm, Color32::WHITE, 0.4)
-        } else {
-            mix(warm, SPACE, 0.3)
-        };
-        p.circle_filled(at, r * lon.cos().max(0.35).sqrt(), mix(skin, col, lon.cos().max(0.0) * 0.8));
-    }
     let icon = if live.playing { ph::STOP } else { ph::PLAY };
     let ink = mix(warm, SPACE, 0.8);
     p.text(sys.c - vec2(0.0, rs * 0.16), Align2::CENTER_CENTER, icon, body(rs * 0.6), ink);
@@ -461,6 +442,35 @@ pub fn planets(ui: &mut Ui, rect: Rect, song: &mut Song, live: &Live, paint: &mu
         p.text(info_pos, Align2::LEFT_BOTTOM, text, bold(12.5), track_color(v));
     }
     out
+}
+
+/// The sun: a glowing ball of `warm` light with hotter and cooler patches turning slowly
+/// over its face (`time` in seconds); `kick` brightens it, `shine` is the glow's strength.
+/// Returns its skin colour (for what's drawn on it). The planets view's play button and the
+/// start screen's sun.
+pub fn sun_ball(p: &egui::Painter, c: Pos2, rs: f32, warm: Color32, kick: f32, shine: f32, time: f32) -> Color32 {
+    glow(p, c, rs * 1.3, warm, shine);
+    let skin = mix(warm, Color32::WHITE, 0.08 + 0.12 * kick);
+    p.circle_filled(c, rs, skin);
+    for k in 0..9u32 {
+        let r = rs * (0.12 + 0.12 * hash01(k * 3 + 1));
+        let lat = (hash01(k * 3 + 2) - 0.5) * 1.5 * (rs - r);
+        let lon = hash01(k * 3) * TAU + time * 0.12;
+        // Round the back and out of sight again: only the visible half
+        if lon.cos() < -0.1 {
+            continue;
+        }
+        let w = (rs - r) * (1.0 - (lat / rs).powi(2)).max(0.0).sqrt();
+        let at = c + vec2(w * lon.sin(), lat);
+        let hot = k % 3 != 0;
+        let col = if hot {
+            mix(warm, Color32::WHITE, 0.4)
+        } else {
+            mix(warm, SPACE, 0.3)
+        };
+        p.circle_filled(at, r * lon.cos().max(0.35).sqrt(), mix(skin, col, lon.cos().max(0.0) * 0.8));
+    }
+    skin
 }
 
 /// A scale degree as the ladder shows it: 0 is the root, then +1, +2 … or -1, -2 …

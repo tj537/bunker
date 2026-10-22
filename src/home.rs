@@ -161,48 +161,33 @@ pub fn home(ui: &mut Ui, recent: &[Recent], last: Option<&Song>, update: Option<
     let size = (side.width().min(side.height()) * 0.72).min(300.0);
     let sun = side.center();
 
-    // Space, its stars flying out from the light
+    // Space, its stars flying out from the sun
     p.rect_filled(full, 0.0, SPACE);
     crate::widgets::warp_field(&p, full, sun, t);
-    // The light: a wide soft glow that falls over the page, and slow rays turning in it
-    for (radius, a) in [(1.6f32, 0.035f32), (1.05, 0.05), (0.7, 0.07)] {
-        let r = size * radius;
-        let steps = 28;
-        for i in 0..steps {
-            let f = 1.0 - i as f32 / steps as f32;
-            p.circle_filled(sun, r * f, ACID.gamma_multiply(a * (1.0 - f) * (1.0 - f) * 0.7));
-        }
+    // The sun from the planets view, big: lime, its surface turning; a click warms it to red
+    // (and back)
+    let rs = size * 0.36;
+    let sun_resp = ui.interact(
+        Rect::from_center_size(sun, vec2(rs * 2.0, rs * 2.0)),
+        ui.id().with("home_sun"),
+        Sense::click(),
+    );
+    let lit_id = ui.id().with("home_sun_red");
+    let red = ui.data(|d| d.get_temp::<bool>(lit_id)).unwrap_or(false);
+    if sun_resp.clicked() {
+        ui.data_mut(|d| d.insert_temp(lit_id, !red));
     }
-    for i in 0..18 {
-        let ang = i as f32 / 18.0 * std::f32::consts::TAU + t * 0.03 + (i % 3) as f32 * 0.07;
-        let len = size * (0.9 + 0.6 * crate::widgets::hash(i as u32 * 31));
-        let dir = vec2(ang.cos(), ang.sin());
-        let mut mesh = egui::Mesh::default();
-        let width = size * 0.035;
-        let side_v = vec2(-dir.y, dir.x) * width;
-        let c0 = ACID.gamma_multiply(0.07);
-        let c1 = Color32::TRANSPARENT;
-        let from = sun + dir * size * 0.42;
-        let to = sun + dir * (size * 0.42 + len);
-        for (pt, c) in [
-            (from - side_v * 0.3, c0),
-            (from + side_v * 0.3, c0),
-            (to + side_v, c1),
-            (to - side_v, c1),
-        ] {
-            mesh.colored_vertex(pt, c);
-        }
-        mesh.add_triangle(0, 1, 2);
-        mesh.add_triangle(0, 2, 3);
-        p.add(egui::Shape::mesh(mesh));
-    }
-    // The radar turns slowly, once every eight seconds
-    crate::widgets::logo(&p, Rect::from_center_size(sun, vec2(size, size)), false, (t / 8.0).fract() + 1e-3);
+    let heat = ui.ctx().animate_bool_with_time(lit_id, red, 1.5);
+    let warm = mix(ACID, RED, heat);
+    let pulse = 0.5 + 0.5 * (t * 2.2).sin();
+    let shine = 0.16 + 0.05 * pulse + if sun_resp.hovered() { 0.08 } else { 0.0 };
+    crate::planets::sun_ball(&p, sun, rs, warm, 0.0, shine, t);
+    sun_resp.on_hover_cursor(egui::CursorIcon::PointingHand);
 
     // The left: the name, then the buttons
     let mut y = hero.top();
-    p.text(pos2(hero.left() - 4.0, y), Align2::LEFT_TOP, "SOLARUM", display(96.0), TEXT);
-    y += 128.0;
+    p.text(pos2(hero.left() - 6.0, y), Align2::LEFT_TOP, "SOLARUM", display(132.0), TEXT);
+    y += 172.0;
     let bh = 54.0;
     let gap = 12.0;
     // New project, with Continue attached on its right like the record button's arrow
