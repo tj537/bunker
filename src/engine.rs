@@ -1196,6 +1196,10 @@ impl Engine {
         if !self.recording {
             return;
         }
+        // A set recording only takes what plays: armed while stopped, paused while paused
+        if self.capturing && !self.playing && self.rec_tail.is_none() {
+            return;
+        }
         let frames = out.len() / 2;
         let take = match &mut self.rec_tail {
             Some(left) => {
@@ -2537,7 +2541,7 @@ mod tests {
         let second = vec![0.0; 2 * sr as usize];
         let mut buf = second.clone();
         e.render(&mut buf);
-        e.handle(Cmd::Stop); // a pause in the jam – the recording goes on
+        e.handle(Cmd::Stop); // a pause in the jam – the recording waits, it doesn't end
         e.render(&mut buf);
         e.handle(Cmd::Play);
         e.render(&mut buf);
@@ -2555,7 +2559,7 @@ mod tests {
         }
         assert_eq!(done, 1);
         let secs = samples as f32 / 2.0 / sr;
-        assert!((4.9..=5.1).contains(&secs), "3 s played and paused + 2 s tail: {secs}");
+        assert!((3.9..=4.1).contains(&secs), "2 s played (the pause left out) + 2 s tail: {secs}");
     }
 
     #[test]
@@ -2755,6 +2759,30 @@ mod tests {
         e.handle(Cmd::Metronome(true));
         e.render(&mut buf);
         assert!(buf.iter().any(|x| x.abs() > 0.05), "the metronome clicks");
+    }
+
+    #[test]
+    fn a_set_recording_waits_for_play_and_pauses_with_it() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let song = gen::generate(Vibe::Peak, &Default::default(), &mut Rng::new(5));
+        let mut e = Engine::new(11_025.0, song, Shared::new(), Some(tx), 1);
+        let mut buf = vec![0.0; 2 * 11_025];
+        e.handle(Cmd::Capture(true));
+        e.render(&mut buf);
+        assert!(e.rec.is_empty(), "armed, nothing recorded while stopped");
+        e.handle(Cmd::Play);
+        e.render(&mut buf);
+        let after_play = e.rec.len();
+        assert!(after_play > 0, "it records once playing");
+        e.handle(Cmd::Stop);
+        e.handle(Cmd::Capture(true));
+        e.render(&mut buf);
+        e.render(&mut buf);
+        assert!(
+            e.rec.len() <= after_play + buf.len(),
+            "paused: no more than a moment after the stop"
+        );
+        drop(rx);
     }
 
     #[test]

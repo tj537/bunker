@@ -1095,7 +1095,7 @@ impl BunkerApp {
     }
 
     /// Record the session: everything you hear until it's switched off, then save it as a WAV
-    fn toggle_capture(&mut self, _now: f64) {
+    fn toggle_capture(&mut self, now: f64) {
         if self.capture {
             self.capture = false;
             self.send(Cmd::Capture(false));
@@ -1105,6 +1105,9 @@ impl BunkerApp {
             self.rec_sr = self.audio.as_ref().map_or(44_100, |a| a.sample_rate);
             self.capture = true;
             self.send(Cmd::Capture(true));
+            if !self.playing() {
+                self.say("Recording armed – it starts when you press play", now);
+            }
         }
     }
 
@@ -3532,8 +3535,9 @@ mod tests {
         app.toggle_capture(0.0);
         tick(&mut app, &mut e, 3);
         assert!(matches!(app.export, Export::Recorded), "the save dialog is up");
+        // Three seconds of music and two of tail – the second while it was stopped isn't in it
         let secs = app.recording.len() as f32 / 2.0 / app.rec_sr as f32;
-        assert!(secs > 5.0, "{secs} s recorded");
+        assert!((4.5..5.6).contains(&secs), "{secs} s recorded");
     }
 
     #[test]
