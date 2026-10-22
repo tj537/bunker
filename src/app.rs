@@ -1479,6 +1479,8 @@ impl SolarumApp {
                     Some(4) => self.open_home(),
                     _ => {}
                 }
+                // Some air between the menu and the editing buttons
+                ui.add_space(14.0);
                 for (icon, tip, is_redo) in [
                     (ph::ARROW_CLOCKWISE, "Redo (⌘/Ctrl + Shift + Z)", true),
                     (ph::ARROW_COUNTER_CLOCKWISE, "Undo (⌘/Ctrl + Z)", false),
@@ -2159,7 +2161,7 @@ impl SolarumApp {
     fn tracks_panel(&mut self, ui: &mut Ui, live: &Live, now: f64) {
         let w = ui.available_width();
         // The rows leave room for the log below the mood
-        let reserve = 352.0;
+        let reserve = 360.0;
         let row_h = ((ui.available_height() - reserve) / TRACKS as f32).clamp(40.0, 54.0);
         for (i, voice) in Voice::ALL.into_iter().enumerate() {
             let color = track_color(voice);
@@ -2401,7 +2403,7 @@ impl SolarumApp {
             self.song.tracks[i].volume = vol;
         }
 
-        ui.add_space(8.0);
+        ui.add_space(16.0);
         let energy = (self.song.auto && self.song.auto_fx && self.song_form.is_none()).then_some(self.song.macros.energy);
         self.computer(ui, energy, now);
     }
@@ -2787,7 +2789,7 @@ impl SolarumApp {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
                 controls::pitch_card(ui, &mut semis, 5, &pitch_text, track_color(Voice::Bass), cw, card_h).on_hover_text(
-                    "Pitch: the key bass and synth sit on – drums stay where they are\nClick a step or drag along the scale · double-click resets",
+                    "Key: what key the whole song is in – bass and synth move with it, drums stay.\nThe planets' own notes are steps of the scale, so the melody stays the same.\nDrag along it · double-click resets",
                 );
                 controls::drive_card(ui, &mut drive, crate::song::MasterEq::default().drive, RED, cw, card_h)
                     .on_hover_text("Drive: saturation on the whole mix – warmer and louder\nDrag up or down · double-click resets");
@@ -3440,9 +3442,9 @@ impl SolarumApp {
                     row(ui, ph::PLANET, "2 · Read the planets", "Every track is an orbit round the sun, once round is one bar of 16 steps – it starts at the back, where the faint arrow at the top begins, and runs the way it points. Every step that plays is a planet; the beam sweeps round and lights up each one it passes. Bass and synth planets float higher or lower with their note. A ring like Saturn's: accent (louder). A coloured circle around it: it only plays sometimes. A trail to the planet before: the synth slides into it. A faded orbit: that track is muted. The sun is the play button. CLASSIC at the top shows the same as pads and a step grid (Tab switches); the older RADAR view can be switched on in the settings.");
                     row(ui, ph::HAND_POINTING, "3 · Change the groove", "Click a dot to switch it on or off, drag to paint. Right-click a dot (or a tile in CLASSIC, the pads and step grid – Tab) for its menu: on, accent, slide, how often it plays and – on bass and synth – its note. The mouse wheel on a bass or synth dot moves its note too.");
                     row(ui, ph::LIST, "4 · Tracks", "S solos a track, the speaker mutes it, the dice rolls a new rhythm for it (right-click: clear), the lock keeps shuffle and the auto mode away from it. The coloured pill is its sound – click it for the list, tune and decay.");
-                    row(ui, ph::MUSIC_NOTES, "5 · Mood & pitch", "MOOD (in the tempo box's menu at the top) picks the notes and chords of bass and synth – from Dark and Hypnotic to Euphoric, Sunny or Mysterious. On Auto every shuffle picks one that suits the vibe; a mood you pick stays. PITCH (top right) moves them lower or higher.");
+                    row(ui, ph::MUSIC_NOTES, "5 · Mood & pitch", "MOOD (in the tempo box's menu at the top) picks the notes and chords of bass and synth – from Dark and Hypnotic to Euphoric, Sunny or Mysterious. On Auto every shuffle picks one that suits the vibe; a mood you pick stays. KEY (top right) moves the whole song to another key.");
                     row(ui, ph::LIGHTNING, "6 · Energy & drop", "The energy bar is the arrangement, not the volume (← →): under 30 a break with no kick and bass, then the tracks come in one by one, from 70 everything plays (a track the energy takes out is muted – the mute button shows it); by hand it starts full. DROP (B) builds up for two bars and drops.");
-                    row(ui, ph::WAVEFORM, "7 · Effects & sound", "Hold STUTTER (Q), ECHO (W), WASH (E), CRUSH (X), GATE (C) or TAPE STOP (V) and combine them; The filter pad: left low-pass, right high-pass, up resonance – it springs back when you let go. Top right: the character pad (up DARK, right ACID), SPACE, PUMP, PITCH and DRIVE (drag up or down), and the EQ curve – drag its points. Double-click resets.");
+                    row(ui, ph::WAVEFORM, "7 · Effects & sound", "Hold STUTTER (Q), ECHO (W), WASH (E), CRUSH (X), GATE (C) or TAPE STOP (V) and combine them; The filter pad: left low-pass, right high-pass, up resonance – it springs back when you let go. Top right: the character pad (up DARK, right ACID), SPACE, PUMP, KEY (the song's key – the planets' notes stay steps of the scale) and DRIVE, and the EQ curve – drag its points. Double-click resets.");
                     row(ui, ph::INFINITY, "8 · Auto mode", "The computer under the mood is the auto mode: its power button switches it on, Solari says hello and keeps the groove moving – something changes every 1 to 16 bars (SET in its title bar, where AUTO FX is too; OFF switches it off). Type to Solari: shuffle, vibe acid, drop, fx off, every 8, mood dark, bpm 135, status, joke, off. With AUTO FX on it also steers the energy and plays breakdowns, build-ups and drops by itself. With AUTO FX off the energy bar is yours and no track is ever taken out.");
                     row(ui, ph::STACK, "9 · Favorites & auto song", "Click + under the space window to keep what you hear (twelve slots), click a full one to switch on the next bar, right-click to rename, save over or clear. AUTO SONG (the arrow next to the record button) makes a whole track from favorite 1 – a quiet intro, two or three drops, favorite 2 after the first – while you jam along. Click a part in the strip to jump there.");
                     row(ui, ph::RECORD, "10 · Record", "The red record button at the top (R) records everything you hear until you click it again – then save it as a WAV. An AUTO SONG records itself.");

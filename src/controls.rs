@@ -363,13 +363,14 @@ pub fn drive_card(ui: &mut Ui, value: &mut f32, default: f32, color: Color32, wi
     resp.on_hover_cursor(egui::CursorIcon::ResizeVertical)
 }
 
-/// PITCH as a scale: twelve steps rising from left to right (C … B), the one bass and synth
-/// sit on lit; click a step or drag along it (or scroll), double-click resets
+/// KEY as a slider (C … B): the key the whole song is in – bass and synth move with it, the
+/// notes of the planets stay the same steps of the scale; drag or click along it (or scroll),
+/// double-click resets
 pub fn pitch_card(ui: &mut Ui, semis: &mut u8, default: u8, label: &str, color: Color32, width: f32, height: f32) -> Response {
     let (rect, mut resp) = ui.allocate_exact_size(vec2(width, height), Sense::click_and_drag());
     let p = ui.painter_at(rect);
     let hot = resp.hovered() || resp.dragged();
-    let area = card(&p, rect, "PITCH", label, color, hot);
+    let area = card(&p, rect, "KEY", label, color, hot);
     let sw = area.width() / 12.0;
     let step_at = |x: f32| (((x - area.left()) / sw).floor() as i32).clamp(0, 11) as u8;
     let mut picked = *semis;
@@ -393,28 +394,26 @@ pub fn pitch_card(ui: &mut Ui, semis: &mut u8, default: u8, label: &str, color: 
         *semis = picked;
         resp.mark_changed();
     }
-    // The steps: each a little higher than the one before, the sharps a shade darker
+    // A slider: a line with a tick per key, the sharps shorter, a knob on the one picked
+    let y = area.center().y + 2.0;
+    let x_of = |k: u8| area.left() + (k as f32 + 0.5) * sw;
+    p.line_segment([pos2(x_of(0), y), pos2(x_of(11), y)], stroke(2.0, Color32::from_white_alpha(30)));
+    p.line_segment([pos2(x_of(0), y), pos2(x_of(*semis), y)], stroke(2.5, color));
     for k in 0..12u8 {
-        let h = area.height() * (0.25 + 0.75 * k as f32 / 11.0);
-        let r = Rect::from_min_max(
-            pos2(area.left() + k as f32 * sw + 1.0, area.bottom() - h),
-            pos2(area.left() + (k + 1) as f32 * sw - 1.0, area.bottom()),
-        );
         let sharp = matches!(k, 1 | 3 | 6 | 8 | 10);
-        let on = k == *semis;
-        let fill = if on {
-            color
-        } else if sharp {
-            Color32::from_white_alpha(14)
-        } else {
-            Color32::from_white_alpha(26)
-        };
-        p.rect_filled(r, 2.0, fill);
-        if on {
-            glow(&p, r.center_top(), 5.0, color, if hot { 0.7 } else { 0.45 });
-        }
+        let h = if sharp { 3.0 } else { 6.0 };
+        p.line_segment(
+            [pos2(x_of(k), y - h), pos2(x_of(k), y + h)],
+            stroke(1.0, Color32::from_white_alpha(if k <= *semis { 90 } else { 40 })),
+        );
     }
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+    let knob = pos2(x_of(*semis), y);
+    if hot {
+        glow(&p, knob, 6.0, color, 0.6);
+    }
+    p.circle_filled(knob, 7.0, TEXT);
+    p.circle_filled(knob, 3.0, color);
+    resp.on_hover_cursor(egui::CursorIcon::ResizeHorizontal)
 }
 
 /// The picture on an effect button (in `Fx::ALL` order), moving with `t`: stutter repeats a

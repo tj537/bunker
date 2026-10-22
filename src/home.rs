@@ -353,15 +353,7 @@ pub fn home(ui: &mut Ui, recent: &[Recent], last: Option<&Song>, update: Option<
             let ok = rec.song.is_some();
             let hot = ok && resp.hovered();
             // A solid card, in front of the sun: the picture on top, the name and a line below
-            p.rect_filled(
-                r,
-                14.0,
-                if hot {
-                    mix(SPACE, PANEL, 0.55)
-                } else {
-                    mix(SPACE, PANEL, 0.35)
-                },
-            );
+            p.rect_filled(r, 14.0, if hot { mix(SPACE, PANEL, 0.55) } else { mix(SPACE, PANEL, 0.35) });
             p.rect_stroke(
                 r,
                 14.0,

@@ -57,7 +57,7 @@ Solarum is a techno drum machine written in Rust. Your groove is a little solar 
   It's a little operating system, **SOLAR OS**: the title bar has **SET** (how often Solari changes something, AUTO FX) and **OFF**, the menu below it **VIBE** (a pick rolls a groove in it) and **SHUFFLE**, and at the bottom Solari's prompt: type `shuffle`, `vibe acid` (or just `acid`), `vibes`, `drop`, `fx off`, `every 8`, `mood dark`, `bpm 135`, `status`, `joke`, `help` or `off`.
 - **The sound** sits at the top right (a click on SOUND shows or folds it):
   - a **character pad** – drag up for DARK, right for ACID;
-  - **SPACE, PUMP, PITCH and DRIVE** as little pictures of what they do – echoes rippling out, the mix ducking under the kick, a little scale of twelve steps for the pitch, a wave pushed into saturation – all dragged up or down;
+  - **SPACE, PUMP, KEY and DRIVE** as little pictures of what they do – echoes rippling out, the mix ducking under the kick, a KEY slider (the key the whole song is in; the planets' own notes are steps of the scale, so the melody stays), a wave pushed into saturation – all dragged up or down;
   - the **master EQ** as a curve with three points to drag.
 
   Double-click resets. When the auto mode sweeps the acid or a breakdown sweeps the filter, the pucks move with it.

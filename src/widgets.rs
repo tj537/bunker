@@ -608,14 +608,23 @@ pub fn logo(p: &egui::Painter, r: Rect, tile: bool, time: f32) {
     if tile {
         let sq = Rect::from_center_size(c, vec2(100.0 * s, 100.0 * s));
         p.rect_filled(sq, 22.0 * s, Color32::from_rgb(4, 4, 6));
-        p.rect_stroke(sq, 22.0 * s, stroke((1.0 * s).max(0.5), Color32::from_rgb(36, 36, 42)), egui::StrokeKind::Inside);
+        p.rect_stroke(
+            sq,
+            22.0 * s,
+            stroke((1.0 * s).max(0.5), Color32::from_rgb(36, 36, 42)),
+            egui::StrokeKind::Inside,
+        );
     }
     // Its rings of light, fading out well inside the edge, then the sun itself
     let rs = 22.0 * s;
     for i in (0..5).rev() {
         let k = i as f32 / 4.0;
         // Solid shades of lime into black – crisp rings, like the planets view's glow
-        p.circle_filled(c, rs * (1.12 + k * 0.85), mix(Color32::from_rgb(4, 4, 6), ACID, 0.1 + 0.42 * (1.0 - k).powi(2)));
+        p.circle_filled(
+            c,
+            rs * (1.12 + k * 0.85),
+            mix(Color32::from_rgb(4, 4, 6), ACID, 0.1 + 0.42 * (1.0 - k).powi(2)),
+        );
     }
     crate::planets::sun_ball(p, c, rs, ACID, 0.0, 0.0, time);
 }
