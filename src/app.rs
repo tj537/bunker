@@ -1053,11 +1053,7 @@ impl SolarumApp {
     }
 
     fn open_file(&mut self, path: Option<PathBuf>, now: f64) {
-        let path = path.or_else(|| {
-            rfd::FileDialog::new()
-                .add_filter("Solarum", &[file::EXTENSION])
-                .pick_file()
-        });
+        let path = path.or_else(|| rfd::FileDialog::new().add_filter("Solarum", &[file::EXTENSION]).pick_file());
         let Some(path) = path else { return };
         match SolarumFile::load(&path) {
             Ok(f) => {
@@ -3513,10 +3509,7 @@ impl SolarumApp {
 
         // A .solarum file dropped onto the window
         let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
-        if let Some(path) = dropped
-            .into_iter()
-            .find(|p| p.extension().is_some_and(|e| e == file::EXTENSION))
-        {
+        if let Some(path) = dropped.into_iter().find(|p| p.extension().is_some_and(|e| e == file::EXTENSION)) {
             self.open_file(Some(path), now);
         }
 

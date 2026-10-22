@@ -621,12 +621,18 @@ pub fn logo(p: &egui::Painter, r: Rect, tile: bool, sweep: f32) {
     let top = -std::f32::consts::FRAC_PI_2;
     // The beam: a wedge an eighth of the way round, its leading edge at `sweep`
     let lead = top + std::f32::consts::FRAC_PI_4 + sweep * tau;
-    let mut wedge = vec![c];
-    for i in 0..=12 {
-        let a = lead - std::f32::consts::FRAC_PI_4 * (1.0 - i as f32 / 12.0);
-        wedge.push(c + vec2(a.cos(), a.sin()) * 34.0 * s);
+    // Bright at the sun, fading out towards the steps – and towards its trailing edge
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(c, ACID.gamma_multiply(0.22));
+    for i in 0..=16 {
+        let f = i as f32 / 16.0;
+        let a = lead - std::f32::consts::FRAC_PI_4 * (1.0 - f);
+        mesh.colored_vertex(c + vec2(a.cos(), a.sin()) * 34.0 * s, ACID.gamma_multiply(0.06 * f));
+        if i > 0 {
+            mesh.add_triangle(0, i, i + 1);
+        }
     }
-    p.add(egui::Shape::convex_polygon(wedge, ACID.gamma_multiply(0.18), egui::Stroke::NONE));
+    p.add(egui::Shape::mesh(mesh));
     let white = Color32::from_rgb(236, 235, 230);
     let grey = Color32::from_rgb(107, 107, 116);
     for k in 0..16 {

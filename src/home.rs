@@ -159,6 +159,50 @@ fn button(ui: &mut Ui, r: Rect, id: &str, icon: &str, title: &str, line: &str, p
     .clicked()
 }
 
+/// "Let Solari play" as a little SOLAR OS screen: green on black, a monospace prompt, faint
+/// scanlines, Solari's face and a blinking cursor
+fn solari_button(ui: &mut Ui, r: Rect, t: f32) -> bool {
+    let resp = ui.interact(r, ui.id().with("auto"), Sense::click());
+    let hot = resp.hovered();
+    let p = ui.painter().with_clip_rect(r);
+    p.rect_filled(r, 12.0, Color32::from_rgb(8, 11, 6));
+    let mut y = r.top() + 2.0;
+    while y < r.bottom() {
+        p.line_segment([pos2(r.left(), y), pos2(r.right(), y)], stroke(1.0, ACID.gamma_multiply(0.035)));
+        y += 3.0;
+    }
+    p.rect_stroke(
+        r,
+        12.0,
+        stroke(if hot { 1.6 } else { 1.0 }, ACID.gamma_multiply(if hot { 0.9 } else { 0.5 })),
+        egui::StrokeKind::Inside,
+    );
+    crate::log::robot(&p, pos2(r.left() + 28.0, r.center().y - 4.0), 20.0, if hot { t } else { 0.0 }, ACID);
+    let mono = |s: f32| egui::FontId::monospace(s);
+    p.text(
+        pos2(r.left() + 50.0, r.center().y - 9.0),
+        Align2::LEFT_CENTER,
+        "> Let Solari play",
+        mono(13.5),
+        ACID,
+    );
+    let galley = p.layout_no_wrap(
+        "  The auto mode builds a set by itself".to_string(),
+        mono(10.5),
+        ACID.gamma_multiply(0.6),
+    );
+    let w = galley.size().x;
+    p.galley(pos2(r.left() + 50.0, r.center().y + 3.0), galley, ACID);
+    if (t * 0.8).fract() < 0.55 {
+        p.rect_filled(
+            Rect::from_min_size(pos2(r.left() + 52.0 + w, r.center().y + 4.0), vec2(6.0, 11.0)),
+            0.0,
+            ACID.gamma_multiply(0.8),
+        );
+    }
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+}
+
 /// A short line about a groove: vibe, mood, tempo
 fn about(song: &Song) -> String {
     let mood = song.mood().map_or(String::new(), |k| format!(" · {}", crate::song::MOODS[k].0));
@@ -186,12 +230,12 @@ pub fn home(ui: &mut Ui, recent: &[Recent], last: Option<&Song>, update: Option<
     // Space, all of it, with stars flying out from behind the logo
     p.rect_filled(full, 0.0, SPACE);
     crate::widgets::warp_field(&p, full, side.center(), t);
-    // The radar turns once every four seconds, like a bar at 120 BPM
+    // The radar turns slowly, once every eight seconds
     crate::widgets::logo(
         &p,
         Rect::from_center_size(side.center(), vec2(size, size)),
         false,
-        (t / 4.0).fract() + 1e-3,
+        (t / 8.0).fract() + 1e-3,
     );
 
     // The left: the name, a line, the buttons
@@ -259,7 +303,13 @@ pub fn home(ui: &mut Ui, recent: &[Recent], last: Option<&Song>, update: Option<
     ];
     for (id, icon, title, line, primary, enabled, act) in items {
         let r = Rect::from_min_size(pos2(hero.left(), y), vec2(col, bh));
-        if button(ui, r, id, icon, title, line, primary, enabled) {
+        // Solari's button looks like its computer: a little SOLAR OS screen
+        let clicked = if id == "auto" {
+            solari_button(ui, r, t)
+        } else {
+            button(ui, r, id, icon, title, line, primary, enabled)
+        };
+        if clicked {
             action = Some(act);
         }
         y += bh + gap;
