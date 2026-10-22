@@ -600,57 +600,24 @@ pub fn fit_text(p: &egui::Painter, text: &str, font: egui::FontId, max_w: f32) -
     String::new()
 }
 
-/// The Solarum logo, the step ring: sixteen steps round a lime sun, the four beats bright,
-/// a beam just passing. `tile`: on its dark rounded square (the app icon), else bare.
-/// `sweep`: how far round the beam has turned (0…1 a bar; 0 = the still logo) – the steps it
-/// has just passed light up, like the radar in the app.
-pub fn logo(p: &egui::Painter, r: Rect, tile: bool, sweep: f32) {
+/// The Solarum logo: the lime sun with its rings of light, on black. `tile`: on its rounded
+/// square (the app icon), else bare. `time` turns the patches on its surface (0: still).
+pub fn logo(p: &egui::Painter, r: Rect, tile: bool, time: f32) {
     let s = r.width().min(r.height()) / 100.0;
     let c = r.center();
     if tile {
         let sq = Rect::from_center_size(c, vec2(100.0 * s, 100.0 * s));
-        p.rect_filled(sq, 22.0 * s, Color32::from_rgb(20, 20, 23));
-        p.rect_stroke(
-            sq,
-            22.0 * s,
-            stroke((1.0 * s).max(0.5), Color32::from_rgb(44, 44, 51)),
-            egui::StrokeKind::Inside,
-        );
+        p.rect_filled(sq, 22.0 * s, Color32::from_rgb(4, 4, 6));
+        p.rect_stroke(sq, 22.0 * s, stroke((1.0 * s).max(0.5), Color32::from_rgb(36, 36, 42)), egui::StrokeKind::Inside);
     }
-    let tau = std::f32::consts::TAU;
-    let top = -std::f32::consts::FRAC_PI_2;
-    // The beam: a wedge an eighth of the way round, its leading edge at `sweep`
-    let lead = top + std::f32::consts::FRAC_PI_4 + sweep * tau;
-    // Bright at the sun, fading out towards the steps – and towards its trailing edge
-    let mut mesh = egui::Mesh::default();
-    mesh.colored_vertex(c, ACID.gamma_multiply(0.22));
-    for i in 0..=16 {
-        let f = i as f32 / 16.0;
-        let a = lead - std::f32::consts::FRAC_PI_4 * (1.0 - f);
-        mesh.colored_vertex(c + vec2(a.cos(), a.sin()) * 34.0 * s, ACID.gamma_multiply(0.06 * f));
-        if i > 0 {
-            mesh.add_triangle(0, i, i + 1);
-        }
+    // Its rings of light, fading out well inside the edge, then the sun itself
+    let rs = 22.0 * s;
+    for i in (0..5).rev() {
+        let k = i as f32 / 4.0;
+        // Solid shades of lime into black – crisp rings, like the planets view's glow
+        p.circle_filled(c, rs * (1.12 + k * 0.85), mix(Color32::from_rgb(4, 4, 6), ACID, 0.1 + 0.42 * (1.0 - k).powi(2)));
     }
-    p.add(egui::Shape::mesh(mesh));
-    let white = Color32::from_rgb(236, 235, 230);
-    let grey = Color32::from_rgb(107, 107, 116);
-    for k in 0..16 {
-        let a = top + k as f32 / 16.0 * tau;
-        let pt = c + vec2(a.cos(), a.sin()) * 34.0 * s;
-        // How recently the beam passed this step (1 = just now, fading over a quarter turn)
-        let behind = (lead - a).rem_euclid(tau) / tau;
-        let lit = if sweep != 0.0 { (1.0 - behind * 4.0).max(0.0) } else { 0.0 };
-        if k % 4 == 0 {
-            if lit > 0.0 {
-                glow(p, pt, 6.0 * s, ACID, 0.6 * lit);
-            }
-            p.circle_filled(pt, 5.0 * s * (1.0 + 0.25 * lit), mix(white, ACID, lit));
-        } else {
-            p.circle_filled(pt, 2.0 * s * (1.0 + 0.4 * lit), mix(grey, ACID, lit));
-        }
-    }
-    p.circle_filled(c, 12.0 * s, ACID);
+    crate::planets::sun_ball(p, c, rs, ACID, 0.0, 0.0, time);
 }
 
 /// Stars flying out of the middle towards you – the start screen's warp

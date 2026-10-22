@@ -352,14 +352,14 @@ pub fn home(ui: &mut Ui, recent: &[Recent], last: Option<&Song>, update: Option<
             let resp = ui.interact(r, ui.id().with(("recent", i)), Sense::click());
             let ok = rec.song.is_some();
             let hot = ok && resp.hovered();
-            // A card of glass: the picture on top, the name and a line below
+            // A solid card, in front of the sun: the picture on top, the name and a line below
             p.rect_filled(
                 r,
                 14.0,
                 if hot {
-                    Color32::from_rgba_premultiplied(14, 14, 16, 14)
+                    mix(SPACE, PANEL, 0.55)
                 } else {
-                    Color32::from_rgba_premultiplied(7, 7, 8, 7)
+                    mix(SPACE, PANEL, 0.35)
                 },
             );
             p.rect_stroke(
@@ -369,7 +369,7 @@ pub fn home(ui: &mut Ui, recent: &[Recent], last: Option<&Song>, update: Option<
                 egui::StrokeKind::Inside,
             );
             let pic = Rect::from_min_max(r.min + vec2(6.0, 6.0), pos2(r.right() - 6.0, r.bottom() - 52.0));
-            p.rect_filled(pic, 10.0, Color32::from_black_alpha(140));
+            p.rect_filled(pic, 10.0, SPACE);
             match &rec.song {
                 Some(song) => preview(&p.with_clip_rect(pic), pic.shrink(8.0), song, if hot { t * 0.3 } else { 0.0 }),
                 None => {
