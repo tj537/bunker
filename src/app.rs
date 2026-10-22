@@ -213,6 +213,8 @@ pub struct SolarumApp {
     pub recent_cache: Vec<crate::home::Recent>,
     /// The groove from last time (the start begins with an empty sky; Continue brings it back)
     last_session: Option<Song>,
+    /// What the start screen's solar system shows when there's nothing from last time
+    demo: Song,
     /// The file the project was last saved to or opened from – Save writes there
     project: Option<PathBuf>,
     /// When the computer (the auto mode) was switched on or off – for its animation
@@ -404,6 +406,7 @@ impl SolarumApp {
             recent: Vec::new(),
             recent_cache: Vec::new(),
             last_session: None,
+            demo: Song::default(),
             project: None,
             cmd: String::new(),
             metronome: false,
@@ -2911,18 +2914,13 @@ impl SolarumApp {
             let name = self.fav_name(i);
             if filled {
                 if current && live.playing {
-                    widgets::glow_rect(&p, r, 8.0, ACID, 0.12 + live.flash(0) * 0.25);
+                    widgets::glow_rect(&p, r, 8.0, ACID, 0.04 + live.flash(0) * 0.08);
                 }
                 p.rect_filled(
                     r,
                     8.0,
-                    if current {
-                        mix(PANEL_HI, ACID, 0.14)
-                    } else if hot {
-                        mix(PANEL_HI, TEXT, 0.1)
-                    } else {
-                        mix(PANEL_HI, TEXT, 0.05)
-                    },
+                    // The same dark glass as the pads; the lit one only gets a lime line
+                    if hot { mix(PANEL, PANEL_HI, 0.6) } else { mix(PANEL, BG, 0.4) },
                 );
                 // Waiting for the next bar: the border blinks
                 let border = if queued {
@@ -2930,7 +2928,11 @@ impl SolarumApp {
                 } else if current {
                     ACID
                 } else {
-                    alpha(TEXT, if hot { 0.4 } else { 0.22 })
+                    if hot {
+                        alpha(TEXT, 0.35)
+                    } else {
+                        LINE
+                    }
                 };
                 p.rect_stroke(
                     r,
@@ -2971,11 +2973,11 @@ impl SolarumApp {
                     p.text(r.left_bottom() + vec2(7.0, -5.0), Align2::LEFT_BOTTOM, label, bold(10.0), name_col);
                 }
             } else {
-                p.rect_filled(r, 8.0, Color32::from_black_alpha(if hot { 40 } else { 60 }));
+                p.rect_filled(r, 8.0, Color32::from_black_alpha(if hot { 35 } else { 25 }));
                 p.rect_stroke(
                     r,
                     8.0,
-                    stroke(1.0, alpha(TEXT, if hot { 0.35 } else { 0.14 })),
+                    stroke(1.0, if hot { alpha(TEXT, 0.3) } else { LINE }),
                     egui::StrokeKind::Inside,
                 );
                 let label = if cw > 54.0 {
@@ -3385,7 +3387,7 @@ impl SolarumApp {
             egui::CentralPanel::default()
                 .frame(frame(Color32::TRANSPARENT, 0.0))
                 .show(ctx, |ui| {
-                    act = crate::home::home(ui, &self.recent_cache, self.last_session.as_ref(), update.as_deref());
+                    act = crate::home::home(ui, &self.recent_cache, self.last_session.as_ref(), &self.demo, update.as_deref());
                 });
             if let Some(a) = act {
                 self.home_action(a, now);
