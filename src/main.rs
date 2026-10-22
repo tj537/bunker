@@ -17,6 +17,11 @@ mod offscreen;
 mod orbit;
 mod pads;
 mod planets;
+// Local-only extras (not in git), built with --cfg reel
+#[cfg(all(test, reel))]
+mod reel {
+    include!("../marketing/reel.rs");
+}
 mod rng;
 #[cfg(test)]
 mod snapshot;
