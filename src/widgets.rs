@@ -494,7 +494,7 @@ fn shade(light: bool, k: u8) -> Color32 {
 }
 
 /// A stable pseudo-random number 0…1
-fn hash(i: u32) -> f32 {
+pub fn hash(i: u32) -> f32 {
     let mut x = i.wrapping_mul(0x9E37_79B9) ^ 0x85EB_CA6B;
     x ^= x >> 15;
     x = x.wrapping_mul(0x2C1B_3C6D);

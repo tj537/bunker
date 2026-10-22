@@ -92,73 +92,6 @@ pub fn preview(p: &egui::Painter, r: Rect, song: &Song, turn: f32) {
     p.circle_filled(c, rx * 0.045, mix(ACID, Color32::WHITE, 0.15));
 }
 
-/// A button on the start screen: an icon, a title, a line under it. `primary` is the white
-/// one; the others are glass. Hover only lightens – no colour.
-#[allow(clippy::too_many_arguments)]
-fn button(ui: &mut Ui, r: Rect, id: &str, icon: &str, title: &str, line: &str, primary: bool, enabled: bool) -> bool {
-    let resp = ui.interact(r, ui.id().with(id), if enabled { Sense::click() } else { Sense::hover() });
-    let hot = enabled && resp.hovered();
-    let p = ui.painter();
-    let (fill, ink, sub) = if primary {
-        (
-            if hot { Color32::WHITE } else { mix(TEXT, Color32::WHITE, 0.3) },
-            BG,
-            mix(BG, PANEL_HI, 0.6),
-        )
-    } else if !enabled {
-        (Color32::from_rgba_premultiplied(4, 4, 5, 4), FAINT, FAINT)
-    } else {
-        (
-            if hot {
-                Color32::from_rgba_premultiplied(16, 16, 18, 16)
-            } else {
-                Color32::from_rgba_premultiplied(8, 8, 9, 8)
-            },
-            TEXT,
-            DIM,
-        )
-    };
-    p.rect_filled(r, 12.0, fill);
-    if !primary {
-        p.rect_stroke(
-            r,
-            12.0,
-            stroke(1.0, if hot { alpha(TEXT, 0.35) } else { LINE }),
-            egui::StrokeKind::Inside,
-        );
-    }
-    p.text(pos2(r.left() + 18.0, r.center().y), Align2::LEFT_CENTER, icon, body(20.0), ink);
-    p.text(
-        pos2(r.left() + 50.0, r.center().y - 9.0),
-        Align2::LEFT_CENTER,
-        title,
-        bold(14.5),
-        ink,
-    );
-    p.text(
-        pos2(r.left() + 50.0, r.center().y + 10.0),
-        Align2::LEFT_CENTER,
-        line,
-        body(11.5),
-        sub,
-    );
-    if hot {
-        p.text(
-            pos2(r.right() - 16.0, r.center().y),
-            Align2::RIGHT_CENTER,
-            ph::ARROW_RIGHT,
-            body(15.0),
-            ink,
-        );
-    }
-    resp.on_hover_cursor(if enabled {
-        egui::CursorIcon::PointingHand
-    } else {
-        egui::CursorIcon::Default
-    })
-    .clicked()
-}
-
 /// "Let Solari play" as a little SOLAR OS screen: green on black, a monospace prompt, faint
 /// scanlines, Solari's face and a blinking cursor
 fn solari_button(ui: &mut Ui, r: Rect, t: f32) -> bool {
@@ -218,105 +151,187 @@ pub fn home(ui: &mut Ui, recent: &[Recent], last: Option<&Song>, update: Option<
     ui.ctx().request_repaint();
     let margin = (full.width() * 0.07).clamp(32.0, 110.0);
     let content = full.shrink2(vec2(margin, 0.0));
-    let hero_h = (full.height() * 0.5).clamp(320.0, 470.0);
+    // The top: the name, the buttons, and on the right the logo as a light source
+    let hero_h = (full.height() * 0.42).clamp(300.0, 400.0);
     let hero = Rect::from_min_size(
-        pos2(content.left(), full.top() + (full.height() * 0.06).max(24.0)),
+        pos2(content.left(), full.top() + (full.height() * 0.07).max(28.0)),
         vec2(content.width(), hero_h),
     );
+    let side = Rect::from_min_max(pos2(hero.left() + 420.0f32.min(hero.width() * 0.5), hero.top() - 20.0), hero.max);
+    let size = (side.width().min(side.height()) * 0.72).min(300.0);
+    let sun = side.center();
 
-    // The logo, big, on the right
-    let side = Rect::from_min_max(pos2(hero.left() + 380.0f32.min(hero.width() * 0.45), hero.top()), hero.max);
-    let size = side.width().min(side.height()) * 0.78;
-    // Space, all of it, with stars flying out from behind the logo
+    // Space, its stars flying out from the light
     p.rect_filled(full, 0.0, SPACE);
-    crate::widgets::warp_field(&p, full, side.center(), t);
-    // The radar turns slowly, once every eight seconds
-    crate::widgets::logo(
-        &p,
-        Rect::from_center_size(side.center(), vec2(size, size)),
-        false,
-        (t / 8.0).fract() + 1e-3,
-    );
-
-    // The left: the name, a line, the buttons
-    let col = 360.0f32.min(hero.width() * 0.48);
-    let mut y = hero.top() + 10.0;
-    p.text(
-        pos2(hero.left(), y),
-        Align2::LEFT_TOP,
-        "TECHNO FROM ANOTHER PLANET",
-        bold(11.0),
-        alpha(TEXT, 0.5),
-    );
-    y += 22.0;
-    p.text(pos2(hero.left() - 3.0, y), Align2::LEFT_TOP, "SOLARUM", display(68.0), TEXT);
-    y += 88.0;
-    let intro = p.layout(
-        "Paint a beat on an empty sky, or let Solari, the computer, build a whole set.".to_string(),
-        body(14.5),
-        DIM,
-        col,
-    );
-    let ih = intro.size().y;
-    p.galley(pos2(hero.left(), y), intro, DIM);
-    y += ih + 26.0;
-    let bh = 58.0;
-    let gap = 10.0;
-    let last_line = last.map(about).unwrap_or_else(|| "Nothing from last time yet".to_string());
-    let items: [(&str, &str, &str, &str, bool, bool, Action); 4] = [
-        (
-            "new",
-            ph::PLUS,
-            "New project",
-            "An empty sky – build it by hand",
-            true,
-            true,
-            Action::New,
-        ),
-        (
-            "continue",
-            ph::CLOCK_COUNTER_CLOCKWISE,
-            "Continue",
-            &last_line,
-            false,
-            last.is_some(),
-            Action::Continue,
-        ),
-        (
-            "open",
-            ph::FOLDER_OPEN,
-            "Open a project…",
-            "A .solarum file",
-            false,
-            true,
-            Action::Open,
-        ),
-        (
-            "auto",
-            ph::ROBOT,
-            "Let Solari play",
-            "The auto mode builds a set by itself",
-            false,
-            true,
-            Action::Auto,
-        ),
-    ];
-    for (id, icon, title, line, primary, enabled, act) in items {
-        let r = Rect::from_min_size(pos2(hero.left(), y), vec2(col, bh));
-        // Solari's button looks like its computer: a little SOLAR OS screen
-        let clicked = if id == "auto" {
-            solari_button(ui, r, t)
-        } else {
-            button(ui, r, id, icon, title, line, primary, enabled)
-        };
-        if clicked {
-            action = Some(act);
+    crate::widgets::warp_field(&p, full, sun, t);
+    // The light: a wide soft glow that falls over the page, and slow rays turning in it
+    for (radius, a) in [(1.6f32, 0.035f32), (1.05, 0.05), (0.7, 0.07)] {
+        let r = size * radius;
+        let steps = 28;
+        for i in 0..steps {
+            let f = 1.0 - i as f32 / steps as f32;
+            p.circle_filled(sun, r * f, ACID.gamma_multiply(a * (1.0 - f) * (1.0 - f) * 0.7));
         }
-        y += bh + gap;
+    }
+    for i in 0..18 {
+        let ang = i as f32 / 18.0 * std::f32::consts::TAU + t * 0.03 + (i % 3) as f32 * 0.07;
+        let len = size * (0.9 + 0.6 * crate::widgets::hash(i as u32 * 31));
+        let dir = vec2(ang.cos(), ang.sin());
+        let mut mesh = egui::Mesh::default();
+        let width = size * 0.035;
+        let side_v = vec2(-dir.y, dir.x) * width;
+        let c0 = ACID.gamma_multiply(0.07);
+        let c1 = Color32::TRANSPARENT;
+        let from = sun + dir * size * 0.42;
+        let to = sun + dir * (size * 0.42 + len);
+        for (pt, c) in [
+            (from - side_v * 0.3, c0),
+            (from + side_v * 0.3, c0),
+            (to + side_v, c1),
+            (to - side_v, c1),
+        ] {
+            mesh.colored_vertex(pt, c);
+        }
+        mesh.add_triangle(0, 1, 2);
+        mesh.add_triangle(0, 2, 3);
+        p.add(egui::Shape::mesh(mesh));
+    }
+    // The radar turns slowly, once every eight seconds
+    crate::widgets::logo(&p, Rect::from_center_size(sun, vec2(size, size)), false, (t / 8.0).fract() + 1e-3);
+
+    // The left: the name, then the buttons
+    let mut y = hero.top();
+    p.text(pos2(hero.left() - 4.0, y), Align2::LEFT_TOP, "SOLARUM", display(96.0), TEXT);
+    y += 128.0;
+    let bh = 54.0;
+    let gap = 12.0;
+    // New project, with Continue attached on its right like the record button's arrow
+    let new_r = Rect::from_min_size(pos2(hero.left(), y), vec2(230.0, bh));
+    let cont_r = Rect::from_min_size(pos2(new_r.right(), y), vec2(54.0, bh));
+    let open_r = Rect::from_min_size(pos2(cont_r.right() + gap, y), vec2(150.0, bh));
+    {
+        let new_resp = ui.interact(new_r, ui.id().with("new"), Sense::click());
+        let enabled = last.is_some();
+        let cont_resp = ui.interact(
+            cont_r,
+            ui.id().with("continue"),
+            if enabled { Sense::click() } else { Sense::hover() },
+        );
+        let both = Rect::from_min_max(new_r.min, cont_r.max);
+        let white = mix(TEXT, Color32::WHITE, 0.3);
+        p.rect_filled(both, 12.0, white);
+        if new_resp.hovered() {
+            p.rect_filled(
+                new_r,
+                egui::CornerRadius {
+                    nw: 12,
+                    sw: 12,
+                    ne: 0,
+                    se: 0,
+                },
+                Color32::WHITE,
+            );
+        }
+        if enabled && cont_resp.hovered() {
+            p.rect_filled(
+                cont_r,
+                egui::CornerRadius {
+                    nw: 0,
+                    sw: 0,
+                    ne: 12,
+                    se: 12,
+                },
+                Color32::WHITE,
+            );
+        }
+        p.line_segment(
+            [pos2(cont_r.left(), y + 12.0), pos2(cont_r.left(), y + bh - 12.0)],
+            stroke(1.0, mix(BG, PANEL_HI, 0.8)),
+        );
+        p.text(
+            pos2(new_r.left() + 18.0, new_r.center().y),
+            Align2::LEFT_CENTER,
+            ph::PLUS,
+            body(20.0),
+            BG,
+        );
+        p.text(
+            pos2(new_r.left() + 48.0, new_r.center().y),
+            Align2::LEFT_CENTER,
+            "New project",
+            bold(15.0),
+            BG,
+        );
+        p.text(
+            cont_r.center(),
+            Align2::CENTER_CENTER,
+            ph::CLOCK_COUNTER_CLOCKWISE,
+            body(20.0),
+            if enabled { BG } else { mix(BG, white, 0.6) },
+        );
+        if new_resp
+            .on_hover_text("An empty sky – build it by hand")
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .clicked()
+        {
+            action = Some(Action::New);
+        }
+        let tip = last
+            .map(|l| format!("Continue where you left off: {}", about(l)))
+            .unwrap_or_else(|| "Nothing from last time yet".to_string());
+        let cont_resp = cont_resp.on_hover_text(tip);
+        if enabled && cont_resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+            action = Some(Action::Continue);
+        }
+        let open_resp = ui.interact(open_r, ui.id().with("open"), Sense::click());
+        let hot = open_resp.hovered();
+        p.rect_filled(
+            open_r,
+            12.0,
+            if hot {
+                Color32::from_rgba_premultiplied(16, 16, 18, 16)
+            } else {
+                Color32::from_rgba_premultiplied(8, 8, 9, 8)
+            },
+        );
+        p.rect_stroke(
+            open_r,
+            12.0,
+            stroke(1.0, if hot { alpha(TEXT, 0.35) } else { LINE }),
+            egui::StrokeKind::Inside,
+        );
+        p.text(
+            pos2(open_r.left() + 18.0, open_r.center().y),
+            Align2::LEFT_CENTER,
+            ph::FOLDER_OPEN,
+            body(19.0),
+            TEXT,
+        );
+        p.text(
+            pos2(open_r.left() + 48.0, open_r.center().y),
+            Align2::LEFT_CENTER,
+            "Open…",
+            bold(15.0),
+            TEXT,
+        );
+        if open_resp
+            .on_hover_text("A .solarum file")
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .clicked()
+        {
+            action = Some(Action::Open);
+        }
+    }
+    y += bh + gap;
+    // Solari's button: a little SOLAR OS screen as wide as the row above
+    let solari_r = Rect::from_min_max(pos2(hero.left(), y), pos2(open_r.right(), y + 62.0));
+    if solari_button(ui, solari_r, t) {
+        action = Some(Action::Auto);
     }
 
     // Recent projects below
-    let ry = hero.bottom() + 28.0;
+    // Right under the buttons and the light – the more room below, the more projects show
+    let ry = (solari_r.bottom() + 56.0).max(sun.y + size * 0.5 + 24.0);
     p.text(
         pos2(content.left(), ry),
         Align2::LEFT_TOP,
@@ -336,9 +351,10 @@ pub fn home(ui: &mut Ui, recent: &[Recent], last: Option<&Song>, update: Option<
         );
     } else {
         let gap = 16.0;
-        let cols = ((content.width() + gap) / (220.0 + gap)).floor().clamp(2.0, 6.0) as usize;
+        // As many as fit: more columns on a wide window, more rows on a tall one
+        let cols = ((content.width() + gap) / (200.0 + gap)).floor().clamp(2.0, 8.0) as usize;
         let cw = (content.width() - gap * (cols - 1) as f32) / cols as f32;
-        let ch = (cw * 0.62 + 52.0).min(200.0);
+        let ch = (cw * 0.55 + 52.0).min(180.0);
         let rows = (((full.bottom() - footer_h - grid_top + gap) / (ch + gap)).floor() as usize).max(1);
         for (i, rec) in recent.iter().enumerate().take(cols * rows) {
             let r = Rect::from_min_size(
