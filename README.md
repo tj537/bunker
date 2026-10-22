@@ -68,7 +68,7 @@ Solarum is a techno drum machine written in Rust. Your groove is a little solar 
 
   All keys keep working, so <kbd>←</kbd> <kbd>→</kbd> take the set from break to drop.
 - **Start screen:** Solarum opens on a start screen like an app: a new project, *Continue* (where you left off), *Open…*, *Let Solari play*, your recent projects as cards with a little picture of each groove, settings and help. The logo brings it back; File → Save writes to the project's file (⌘/Ctrl + S), Save as… asks where.
-- **Files:** `.solarum` files (plain text) keep the groove and all twelve favorites with their names.
+- **Projects:** a project is one `.solarum` file (plain text): the groove and its twelve favorites with their names. *New project* starts without favorites; the top bar shows the project's name and a dot when it has changes, and leaving a project with unsaved changes asks whether to save. Old `.bunker` files open too.
 - **Settings (the gear):** volume, the sound output, the MIDI keyboard, what happens when Solarum opens (wait or play – the auto mode is always off at the start), whether a shuffle keeps the tempo, facts and tips in the terminal, the legacy Radar view and the update check (Solarum asks GitHub once at start whether there is a new version – you can switch that off). Headphones and MIDI keyboards are picked up while Solarum runs. The LIVE heading folds the live controls away.
 
 ## Under the hood
