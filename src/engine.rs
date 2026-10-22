@@ -1803,8 +1803,9 @@ impl Engine {
             };
             self.filter += (target - self.filter) * 0.002;
             self.res += (self.res_target - self.res) * 0.002;
-            // Q 1.6 at rest (as it always was), up to 7 with the resonance all the way up
-            let q = 1.6 + 5.4 * self.res * self.res;
+            // Q 1.6 at rest (as it always was), up to about 16 – a singing, whistling filter –
+            // with the resonance all the way up
+            let q = 1.6 + 14.0 * self.res.powf(1.3);
             let f = self.filter;
             if f < -0.02 {
                 let fc = 18_000.0 * 0.012f32.powf(-f);

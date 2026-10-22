@@ -70,7 +70,7 @@ src/
 
 Macros act live (energy: the layers, percussion density, hat length, bass brightness and the break zone; dark: kick length, rumble, tone; acid: filter and resonance – the auto mode sweeps it slowly; space: sends and feedback) and the generator uses Energy for density.
 
-The filter pad sends `Cmd::Filter` (position) and `Cmd::FilterRes` (resonance: Q 1.6 at rest up to 7, smoothed in the engine). Live effects are `Cmd::Fx(Fx, bool)` – held down / let go. The UI sends a change only when key or mouse state changes (`fx_sent`).
+The filter pad sends `Cmd::Filter` (position) and `Cmd::FilterRes` (resonance: Q 1.6 at rest up to about 16, smoothed in the engine). Live effects are `Cmd::Fx(Fx, bool)` – held down / let go. The UI sends a change only when key or mouse state changes (`fx_sent`).
 
 ## App state around the song
 
