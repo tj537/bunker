@@ -232,7 +232,7 @@ pub struct SolarumApp {
     recent: Vec<PathBuf>,
     pub recent_cache: Vec<crate::home::Recent>,
     /// The groove from last time (the start begins with an empty sky; Continue brings it back)
-    last_session: Option<Session>,
+    pub last_session: Option<Session>,
     /// The project as last saved or opened – the top bar shows a dot when it has changed
     saved: Option<Saved>,
     /// Leaving a project with unsaved changes (New, Open, a recent one, Solari): what waits
@@ -845,7 +845,7 @@ impl SolarumApp {
     fn home_action(&mut self, action: crate::home::Action, now: f64) {
         use crate::home::Action;
         // Leaving a project with changes that aren't saved: ask first
-        let leaves = matches!(action, Action::New | Action::Open | Action::Auto | Action::Recent(_));
+        let leaves = matches!(action, Action::New | Action::Open | Action::Auto(_) | Action::Recent(_));
         if leaves && self.dirty() && self.pending.is_none() {
             self.pending = Some(action);
             return;
@@ -864,8 +864,13 @@ impl SolarumApp {
                 self.home = false;
             }
             Action::Open => self.open_file(None, now),
-            Action::Auto => {
+            Action::Auto(vibe) => {
                 self.new_project();
+                if let Some(v) = vibe {
+                    self.song.vibe = v;
+                    let (lo, hi) = v.bpm();
+                    self.song.bpm = ((lo + hi) / 2.0).round();
+                }
                 self.home = false;
                 self.power(now);
             }
@@ -3541,10 +3546,16 @@ impl SolarumApp {
             egui::CentralPanel::default()
                 .frame(frame(Color32::TRANSPARENT, 0.0))
                 .show(ctx, |ui| {
+                    let name = self.last_session.as_ref().map(|l| {
+                        l.project
+                            .as_ref()
+                            .and_then(|p| p.file_stem())
+                            .map_or("Untitled".to_string(), |s| s.to_string_lossy().into_owned())
+                    });
                     act = crate::home::home(
                         ui,
                         &self.recent_cache,
-                        self.last_session.as_ref().map(|l| &l.song),
+                        self.last_session.as_ref().map(|l| &l.song).zip(name.as_deref()),
                         update.as_deref(),
                     );
                 });

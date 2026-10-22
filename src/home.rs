@@ -3,7 +3,7 @@
 //! a little picture of each groove, settings and help
 
 use crate::file::SolarumFile;
-use crate::song::{Song, Voice, STEPS, TRACKS};
+use crate::song::{Song, Vibe, Voice, STEPS, TRACKS};
 use crate::theme::*;
 use crate::widgets::{fit_text, glow};
 use eframe::egui::{self, pos2, vec2, Align2, Color32, Rect, Sense, Ui};
@@ -25,7 +25,8 @@ pub enum Action {
     New,
     Continue,
     Open,
-    Auto,
+    /// Let Solari play – in this vibe, or one it picks
+    Auto(Option<Vibe>),
     Recent(usize),
     Forget(usize),
     Settings,
@@ -94,7 +95,7 @@ pub fn preview(p: &egui::Painter, r: Rect, song: &Song, turn: f32) {
 
 /// "Let Solari play" as a little SOLAR OS screen: green on black, a monospace prompt, faint
 /// scanlines, Solari's face and a blinking cursor
-fn solari_button(ui: &mut Ui, r: Rect, t: f32) -> bool {
+fn solari_button(ui: &mut Ui, r: Rect, t: f32) -> egui::Response {
     let resp = ui.interact(r, ui.id().with("auto"), Sense::click());
     let hot = resp.hovered();
     let p = ui.painter().with_clip_rect(r);
@@ -120,7 +121,7 @@ fn solari_button(ui: &mut Ui, r: Rect, t: f32) -> bool {
         ACID,
     );
     let galley = p.layout_no_wrap(
-        "  The auto mode builds a set by itself".to_string(),
+        "  Pick a vibe – Solari builds a set".to_string(),
         mono(10.5),
         ACID.gamma_multiply(0.6),
     );
@@ -133,7 +134,7 @@ fn solari_button(ui: &mut Ui, r: Rect, t: f32) -> bool {
             ACID.gamma_multiply(0.8),
         );
     }
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 /// A short line about a groove: vibe, mood, tempo
@@ -143,7 +144,7 @@ fn about(song: &Song) -> String {
 }
 
 /// The start screen; returns what was clicked. `demo` is shown when there's nothing from last time.
-pub fn home(ui: &mut Ui, recent: &[Recent], last: Option<&Song>, update: Option<&str>) -> Option<Action> {
+pub fn home(ui: &mut Ui, recent: &[Recent], last: Option<(&Song, &str)>, update: Option<&str>) -> Option<Action> {
     let mut action = None;
     let full = ui.max_rect();
     let p = ui.painter().clone();
@@ -190,88 +191,58 @@ pub fn home(ui: &mut Ui, recent: &[Recent], last: Option<&Song>, update: Option<
     y += 172.0;
     let bh = 54.0;
     let gap = 12.0;
-    // New project, with Continue attached on its right like the record button's arrow
-    let new_r = Rect::from_min_size(pos2(hero.left(), y), vec2(230.0, bh));
-    let cont_r = Rect::from_min_size(pos2(new_r.right(), y), vec2(54.0, bh));
-    let open_r = Rect::from_min_size(pos2(cont_r.right() + gap, y), vec2(150.0, bh));
+    // New project and Open side by side
+    let new_r = Rect::from_min_size(pos2(hero.left(), y), vec2(250.0, bh));
+    let open_r = Rect::from_min_size(pos2(new_r.right() + gap, y), vec2(170.0, bh));
+    let row_right = open_r.right();
+    let button = |ui: &mut Ui, r: Rect, id: &str, icon: &str, title: &str, primary: bool| {
+        let resp = ui.interact(r, ui.id().with(id), Sense::click());
+        let hot = resp.hovered();
+        let (fill, ink) = if primary {
+            (if hot { Color32::WHITE } else { mix(TEXT, Color32::WHITE, 0.3) }, BG)
+        } else {
+            (
+                if hot {
+                    Color32::from_rgba_premultiplied(16, 16, 18, 16)
+                } else {
+                    Color32::from_rgba_premultiplied(8, 8, 9, 8)
+                },
+                TEXT,
+            )
+        };
+        p.rect_filled(r, 12.0, fill);
+        if !primary {
+            p.rect_stroke(
+                r,
+                12.0,
+                stroke(1.0, if hot { alpha(TEXT, 0.35) } else { LINE }),
+                egui::StrokeKind::Inside,
+            );
+        }
+        p.text(pos2(r.left() + 18.0, r.center().y), Align2::LEFT_CENTER, icon, body(20.0), ink);
+        p.text(pos2(r.left() + 48.0, r.center().y), Align2::LEFT_CENTER, title, bold(15.0), ink);
+        resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+    };
+    if button(ui, new_r, "new", ph::PLUS, "New project", true)
+        .on_hover_text("An empty sky – build it by hand")
+        .clicked()
     {
-        let new_resp = ui.interact(new_r, ui.id().with("new"), Sense::click());
-        let enabled = last.is_some();
-        let cont_resp = ui.interact(
-            cont_r,
-            ui.id().with("continue"),
-            if enabled { Sense::click() } else { Sense::hover() },
-        );
-        let both = Rect::from_min_max(new_r.min, cont_r.max);
-        let white = mix(TEXT, Color32::WHITE, 0.3);
-        p.rect_filled(both, 12.0, white);
-        if new_resp.hovered() {
-            p.rect_filled(
-                new_r,
-                egui::CornerRadius {
-                    nw: 12,
-                    sw: 12,
-                    ne: 0,
-                    se: 0,
-                },
-                Color32::WHITE,
-            );
-        }
-        if enabled && cont_resp.hovered() {
-            p.rect_filled(
-                cont_r,
-                egui::CornerRadius {
-                    nw: 0,
-                    sw: 0,
-                    ne: 12,
-                    se: 12,
-                },
-                Color32::WHITE,
-            );
-        }
-        p.line_segment(
-            [pos2(cont_r.left(), y + 12.0), pos2(cont_r.left(), y + bh - 12.0)],
-            stroke(1.0, mix(BG, PANEL_HI, 0.8)),
-        );
-        p.text(
-            pos2(new_r.left() + 18.0, new_r.center().y),
-            Align2::LEFT_CENTER,
-            ph::PLUS,
-            body(20.0),
-            BG,
-        );
-        p.text(
-            pos2(new_r.left() + 48.0, new_r.center().y),
-            Align2::LEFT_CENTER,
-            "New project",
-            bold(15.0),
-            BG,
-        );
-        p.text(
-            cont_r.center(),
-            Align2::CENTER_CENTER,
-            ph::CLOCK_COUNTER_CLOCKWISE,
-            body(20.0),
-            if enabled { BG } else { mix(BG, white, 0.6) },
-        );
-        if new_resp
-            .on_hover_text("An empty sky – build it by hand")
-            .on_hover_cursor(egui::CursorIcon::PointingHand)
-            .clicked()
-        {
-            action = Some(Action::New);
-        }
-        let tip = last
-            .map(|l| format!("Continue where you left off: {}", about(l)))
-            .unwrap_or_else(|| "Nothing from last time yet".to_string());
-        let cont_resp = cont_resp.on_hover_text(tip);
-        if enabled && cont_resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-            action = Some(Action::Continue);
-        }
-        let open_resp = ui.interact(open_r, ui.id().with("open"), Sense::click());
-        let hot = open_resp.hovered();
+        action = Some(Action::New);
+    }
+    if button(ui, open_r, "open", ph::FOLDER_OPEN, "Open…", false)
+        .on_hover_text("A .solarum file")
+        .clicked()
+    {
+        action = Some(Action::Open);
+    }
+    y += bh + gap;
+    // Back to the project that's open (or was last time) – its own button, with what it is
+    if let Some((song, name)) = last {
+        let r = Rect::from_min_max(pos2(hero.left(), y), pos2(row_right, y + bh));
+        let resp = ui.interact(r, ui.id().with("back"), Sense::click());
+        let hot = resp.hovered();
         p.rect_filled(
-            open_r,
+            r,
             12.0,
             if hot {
                 Color32::from_rgba_premultiplied(16, 16, 18, 16)
@@ -280,41 +251,80 @@ pub fn home(ui: &mut Ui, recent: &[Recent], last: Option<&Song>, update: Option<
             },
         );
         p.rect_stroke(
-            open_r,
+            r,
             12.0,
             stroke(1.0, if hot { alpha(TEXT, 0.35) } else { LINE }),
             egui::StrokeKind::Inside,
         );
         p.text(
-            pos2(open_r.left() + 18.0, open_r.center().y),
+            pos2(r.left() + 18.0, r.center().y),
             Align2::LEFT_CENTER,
-            ph::FOLDER_OPEN,
-            body(19.0),
+            ph::ARROW_LEFT,
+            body(20.0),
             TEXT,
         );
         p.text(
-            pos2(open_r.left() + 48.0, open_r.center().y),
+            pos2(r.left() + 48.0, r.center().y - 9.0),
             Align2::LEFT_CENTER,
-            "Open…",
+            format!("Back to {name}"),
             bold(15.0),
             TEXT,
         );
-        if open_resp
-            .on_hover_text("A .solarum file")
-            .on_hover_cursor(egui::CursorIcon::PointingHand)
-            .clicked()
-        {
-            action = Some(Action::Open);
+        p.text(
+            pos2(r.left() + 48.0, r.center().y + 10.0),
+            Align2::LEFT_CENTER,
+            about(song),
+            body(11.5),
+            DIM,
+        );
+        if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+            action = Some(Action::Continue);
         }
+        y += bh + gap;
     }
-    y += bh + gap;
-    // Solari's button: a little SOLAR OS screen as wide as the row above
-    let solari_r = Rect::from_min_max(pos2(hero.left(), y), pos2(open_r.right(), y + 62.0));
-    if solari_button(ui, solari_r, t) {
-        action = Some(Action::Auto);
+    // Solari's button: a little SOLAR OS screen; a click offers a few vibes to start from
+    let solari_r = Rect::from_min_max(pos2(hero.left(), y), pos2(row_right, y + 62.0));
+    let solari = solari_button(ui, solari_r, t);
+    let popup = ui.make_persistent_id("solari_vibes");
+    if solari.clicked() {
+        ui.memory_mut(|m| m.toggle_popup(popup));
     }
+    egui::popup_below_widget(ui, popup, &solari, egui::PopupCloseBehavior::CloseOnClick, |ui| {
+        ui.set_min_width(solari_r.width() - 16.0);
+        ui.label(
+            egui::RichText::new("What should Solari play?")
+                .font(egui::FontId::monospace(12.0))
+                .color(ACID),
+        );
+        ui.add_space(4.0);
+        let examples = [
+            (Some(Vibe::Hypnotic), "Hypnotic", "deep, rolling, one long trip"),
+            (Some(Vibe::Acid), "Acid", "a squelching 303 line"),
+            (Some(Vibe::Peak), "Peak time", "big room, hands up"),
+            (Some(Vibe::Dub), "Dub", "echoes, chords, space"),
+            (Some(Vibe::Melodic), "Melodic", "warm chords that move"),
+            (Some(Vibe::Hard), "Hard", "fast, loud, relentless"),
+            (None, "Surprise me", "Solari picks"),
+        ];
+        for (vibe, name, line) in examples {
+            let mut job = egui::text::LayoutJob::default();
+            let fmt = |font, color| egui::TextFormat {
+                font_id: font,
+                color,
+                ..Default::default()
+            };
+            job.append(&format!("> {name}"), 0.0, fmt(egui::FontId::monospace(13.0), ACID));
+            job.append(
+                &format!("   {line}"),
+                0.0,
+                fmt(egui::FontId::monospace(11.0), ACID.gamma_multiply(0.55)),
+            );
+            if ui.selectable_label(false, job).clicked() {
+                action = Some(Action::Auto(vibe));
+            }
+        }
+    });
 
-    // Recent projects below
     // Right under the buttons and the light – the more room below, the more projects show
     let ry = (solari_r.bottom() + 56.0).max(sun.y + size * 0.5 + 24.0);
     p.text(

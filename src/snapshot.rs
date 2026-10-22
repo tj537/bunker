@@ -211,6 +211,12 @@ mod tests {
         // Solari says hello as the computer comes on (render time is ~10 s)
         render("home", 1360.0, 860.0, |app| {
             app.home = true;
+            app.last_session = Some(crate::app::Session {
+                song: crate::gen::generate(crate::song::Vibe::Acid, &Default::default(), &mut crate::rng::Rng::new(9)),
+                slots: [None; 12],
+                names: std::array::from_fn(|_| String::new()),
+                project: Some("/Users/me/Music/friday-set.solarum".into()),
+            });
             let mut rng = crate::rng::Rng::new(4);
             for (i, (name, when, vibe)) in [
                 ("friday-set", "today", crate::song::Vibe::Peak),
