@@ -15,7 +15,7 @@ use crate::song::{Song, Step, Track, Vibe, Voice, MOODS, STEPS, TRACKS};
 use crate::theme::*;
 use crate::update::{self, Release};
 use crate::visual;
-use crate::widgets::{self, chip, concrete, glow};
+use crate::widgets::{self, chip, concrete, fit_text, glow};
 use eframe::egui::{self, pos2, vec2, Align2, Color32, Key, Rect, Sense, Ui};
 use egui_phosphor::regular as ph;
 use std::path::PathBuf;
@@ -43,23 +43,6 @@ fn keep_live_settings(mut song: Song, now: &Song) -> Song {
 /// The same groove, whatever the live settings (energy, volume …) are
 fn same_groove(a: &Song, b: &Song) -> bool {
     a.tracks == b.tracks && a.root == b.root && a.scale == b.scale && a.prog == b.prog && a.vibe == b.vibe
-}
-
-/// `text` cut with "…" so it fits into `max_w`
-fn fit_text(p: &egui::Painter, text: &str, font: egui::FontId, max_w: f32) -> String {
-    let width = |t: &str| p.layout_no_wrap(t.to_string(), font.clone(), TEXT).size().x;
-    if width(text) <= max_w {
-        return text.to_string();
-    }
-    let mut chars: Vec<char> = text.chars().collect();
-    while !chars.is_empty() {
-        chars.pop();
-        let t: String = chars.iter().collect::<String>() + "…";
-        if width(&t) <= max_w {
-            return t;
-        }
-    }
-    String::new()
 }
 
 /// How much Solarum uses an effect by itself right now: every build-up runs the gate,
@@ -223,6 +206,15 @@ pub struct SolarumApp {
     typing: bool,
     /// The window into space (last frame) – the settings float over it
     space_rect: Rect,
+    /// The start screen is up (at the start, and from the logo)
+    pub home: bool,
+    /// Projects saved or opened, newest first, and what the start screen read of them
+    recent: Vec<PathBuf>,
+    pub recent_cache: Vec<crate::home::Recent>,
+    /// The groove from last time (the start begins with an empty sky; Continue brings it back)
+    last_session: Option<Song>,
+    /// The file the project was last saved to or opened from – Save writes there
+    project: Option<PathBuf>,
     /// When the computer (the auto mode) was switched on or off – for its animation
     pub power_at: f64,
     pub on_start: OnStart,
@@ -287,7 +279,18 @@ impl SolarumApp {
         app.song.auto = false;
         app.log = crate::log::Log::new();
         app.log.push("Empty sky. Paint planets on the orbits, or switch me on below.", 0.0);
+        // The start screen with the recent projects
+        app.recent = cc
+            .storage
+            .and_then(|s| eframe::get_value::<Vec<String>>(s, "recent"))
+            .unwrap_or_default()
+            .into_iter()
+            .map(PathBuf::from)
+            .collect();
+        app.recent_cache = crate::home::load_recent(&app.recent);
+        app.home = true;
         if last.tracks.iter().any(|t| t.steps.iter().any(|s| s.on)) {
+            app.last_session = Some(last);
             app.log.push("Your last groove is one undo away (Cmd/Ctrl + Z).", 0.0);
         }
         app.sound_open = true;
@@ -397,6 +400,11 @@ impl SolarumApp {
             sound_open: false,
             face_window: false,
             power_at: -10.0,
+            home: false,
+            recent: Vec::new(),
+            recent_cache: Vec::new(),
+            last_session: None,
+            project: None,
             cmd: String::new(),
             metronome: false,
             live_open: true,
@@ -812,7 +820,64 @@ impl SolarumApp {
     }
 
     /// Save or open a .solarum file
-    fn save_file(&mut self, now: f64) {
+    /// Back to the start screen (the recent projects read again)
+    fn open_home(&mut self) {
+        self.recent_cache = crate::home::load_recent(&self.recent);
+        self.home = true;
+    }
+
+    fn home_action(&mut self, action: crate::home::Action, now: f64) {
+        use crate::home::Action;
+        match action {
+            Action::New => {
+                self.clear(now);
+                self.project = None;
+                self.home = false;
+                self.say("A new project: an empty sky. Paint planets, or switch Solari on", now);
+            }
+            Action::Continue => {
+                if let Some(song) = self.last_session.take() {
+                    self.song = keep_live_settings(song, &self.song);
+                    self.song.auto = false;
+                    self.say("Back where you left off", now);
+                }
+                self.home = false;
+            }
+            Action::Open => self.open_file(None, now),
+            Action::Auto => {
+                self.home = false;
+                self.power(now);
+            }
+            Action::Recent(i) => {
+                if let Some(path) = self.recent.get(i).cloned() {
+                    self.open_file(Some(path), now);
+                }
+            }
+            Action::Forget(i) => {
+                if i < self.recent.len() {
+                    self.recent.remove(i);
+                    self.recent_cache = crate::home::load_recent(&self.recent);
+                }
+            }
+            Action::Settings => self.settings = true,
+            Action::Help => self.help = true,
+        }
+    }
+
+    /// A project saved or opened goes to the top of the recent list
+    fn remember(&mut self, path: &std::path::Path) {
+        self.recent.retain(|p| p != path);
+        self.recent.insert(0, path.to_path_buf());
+        self.recent.truncate(12);
+        self.project = Some(path.to_path_buf());
+    }
+
+    /// Save: to the project's file if it has one (`as_new`: always ask where)
+    fn save_file(&mut self, as_new: bool, now: f64) {
+        if let Some(path) = self.project.clone().filter(|_| !as_new) {
+            self.write_project(path, now);
+            return;
+        }
         let name = format!(
             "{}-{:.0}bpm.{}",
             self.song.vibe.name().to_lowercase().replace(' ', "-"),
@@ -826,6 +891,10 @@ impl SolarumApp {
         else {
             return;
         };
+        self.write_project(path, now);
+    }
+
+    fn write_project(&mut self, path: PathBuf, now: f64) {
         let f = SolarumFile {
             song: self.song,
             scenes: self.slots.to_vec(),
@@ -833,7 +902,10 @@ impl SolarumApp {
             ..Default::default()
         };
         match f.save(&path) {
-            Ok(()) => self.say(format!("Saved {}", path.file_name().unwrap_or_default().to_string_lossy()), now),
+            Ok(()) => {
+                self.say(format!("Saved {}", path.file_name().unwrap_or_default().to_string_lossy()), now);
+                self.remember(&path);
+            }
             Err(e) => self.say(format!("Could not save: {e}"), now),
         }
     }
@@ -846,7 +918,11 @@ impl SolarumApp {
         });
         let Some(path) = path else { return };
         match SolarumFile::load(&path) {
-            Ok(f) => self.load_file(f, &path.file_name().unwrap_or_default().to_string_lossy(), now),
+            Ok(f) => {
+                self.load_file(f, &path.file_name().unwrap_or_default().to_string_lossy(), now);
+                self.remember(&path);
+                self.home = false;
+            }
             Err(e) => self.say(format!("Could not open it: {e}"), now),
         }
     }
@@ -1047,6 +1123,7 @@ impl SolarumApp {
                     Key::Z if modifiers.shift => self.redo(now),
                     Key::Z => self.undo(now),
                     Key::Y => self.redo(now),
+                    Key::S => self.save_file(modifiers.shift, now),
                     _ => {}
                 }
                 continue;
@@ -1179,12 +1256,22 @@ impl SolarumApp {
     fn top_bar(&mut self, ui: &mut Ui, now: f64) {
         ui.horizontal_centered(|ui| {
             ui.add_space(6.0);
-            ui.label(
-                egui::RichText::new("SOLARUM")
-                    .font(display(30.0))
-                    .color(TEXT)
-                    .extra_letter_spacing(2.0),
-            );
+            if ui
+                .add(
+                    egui::Label::new(
+                        egui::RichText::new("SOLARUM")
+                            .font(display(30.0))
+                            .color(TEXT)
+                            .extra_letter_spacing(2.0),
+                    )
+                    .sense(Sense::click()),
+                )
+                .on_hover_text("The start screen: new, open, recent projects")
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+            {
+                self.open_home();
+            }
             ui.label(
                 egui::RichText::new(concat!("v", env!("CARGO_PKG_VERSION")))
                     .font(body(11.0))
@@ -1219,8 +1306,10 @@ impl SolarumApp {
                 ui.menu_button(egui::RichText::new(format!("{}  File", ph::FOLDER_SIMPLE)).font(bold(13.0)), |ui| {
                     ui.set_min_width(230.0);
                     for (i, label) in [
-                        format!("{}  Save as .solarum file…", ph::FLOPPY_DISK),
-                        format!("{}  Open .solarum file…", ph::FOLDER_OPEN),
+                        format!("{}  Save   (⌘/Ctrl + S)", ph::FLOPPY_DISK),
+                        format!("{}  Save as…", ph::FLOPPY_DISK_BACK),
+                        format!("{}  Open…", ph::FOLDER_OPEN),
+                        format!("{}  Start screen", ph::HOUSE),
                     ]
                     .into_iter()
                     .enumerate()
@@ -1239,8 +1328,10 @@ impl SolarumApp {
                     );
                 });
                 match action {
-                    Some(0) => self.save_file(now),
-                    Some(1) => self.open_file(None, now),
+                    Some(0) => self.save_file(false, now),
+                    Some(1) => self.save_file(true, now),
+                    Some(2) => self.open_file(None, now),
+                    Some(3) => self.open_home(),
                     _ => {}
                 }
                 for (icon, tip, is_redo) in [
@@ -3235,6 +3326,8 @@ impl eframe::App for SolarumApp {
         eframe::set_value(storage, "radar", &self.radar);
         eframe::set_value(storage, "log_facts", &self.log.facts);
         eframe::set_value(storage, "keep_tempo", &self.keep_tempo);
+        let recent: Vec<String> = self.recent.iter().map(|p| p.display().to_string()).collect();
+        eframe::set_value(storage, "recent", &recent);
         eframe::set_value(storage, "on_start", &self.on_start);
         eframe::set_value(storage, "seen_help", &true);
     }
@@ -3246,7 +3339,9 @@ impl SolarumApp {
         let now = ctx.input(|i| i.time);
         let dt = ctx.input(|i| i.stable_dt).min(0.1);
         let live = self.sync(ctx, now, dt);
-        self.keys(ctx, now);
+        if !self.home {
+            self.keys(ctx, now);
+        }
         let state = self.log_state();
         self.log.tick(state, now, &self.song);
 
@@ -3280,6 +3375,26 @@ impl SolarumApp {
             self.face_viewport(ctx, &live, now);
         }
         let frame = |fill: Color32, margin: f32| egui::Frame::new().fill(fill).inner_margin(margin);
+        if self.home {
+            concrete(&ctx.layer_painter(egui::LayerId::background()), ctx.screen_rect());
+            let update = self
+                .new_version
+                .as_ref()
+                .map(|r| format!("{}  Version {} is out", ph::ARROW_CIRCLE_UP, r.version));
+            let mut act = None;
+            egui::CentralPanel::default()
+                .frame(frame(Color32::TRANSPARENT, 0.0))
+                .show(ctx, |ui| {
+                    act = crate::home::home(ui, &self.recent_cache, self.last_session.as_ref(), update.as_deref());
+                });
+            if let Some(a) = act {
+                self.home_action(a, now);
+            }
+            self.settings_window(ctx);
+            self.help_window(ctx);
+            self.finish_frame(now);
+            return;
+        }
         if self.visual {
             egui::CentralPanel::default().frame(frame(SPACE, 0.0)).show(ctx, |ui| {
                 let rect = ui.max_rect();
@@ -3648,6 +3763,29 @@ mod tests {
         assert!(app.log.lines().last().is_some_and(|l| l.contains("try help")));
         app.command("off", 9.0);
         assert!(!app.song.auto && app.sound_open);
+    }
+
+    #[test]
+    fn saved_and_opened_projects_lead_the_recent_list() {
+        let mut app = SolarumApp::headless(Song::default(), View::Planets, false);
+        for name in ["a", "b", "a", "c"] {
+            app.remember(std::path::Path::new(&format!("/tmp/{name}.solarum")));
+        }
+        let names: Vec<String> = app
+            .recent
+            .iter()
+            .map(|p| p.file_stem().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, ["c", "a", "b"], "newest first, no doubles");
+        assert_eq!(
+            app.project.as_deref(),
+            Some(std::path::Path::new("/tmp/c.solarum")),
+            "Save writes there now"
+        );
+        for i in 0..20 {
+            app.remember(std::path::Path::new(&format!("/tmp/{i}.solarum")));
+        }
+        assert_eq!(app.recent.len(), 12);
     }
 
     #[test]

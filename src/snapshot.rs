@@ -209,6 +209,28 @@ mod tests {
             });
         });
         // Solari says hello as the computer comes on (render time is ~10 s)
+        render("home", 1360.0, 860.0, |app| {
+            app.home = true;
+            let mut rng = crate::rng::Rng::new(4);
+            for (i, (name, when, vibe)) in [
+                ("friday-set", "today", crate::song::Vibe::Peak),
+                ("acid-morning", "yesterday", crate::song::Vibe::Acid),
+                ("dub-sketch", "3 days ago", crate::song::Vibe::Dub),
+                ("hard-one", "12 days ago", crate::song::Vibe::Hard),
+                ("lost-file", "missing", crate::song::Vibe::Minimal),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let song = (i < 4).then(|| crate::gen::generate(vibe, &Default::default(), &mut rng));
+                app.recent_cache.push(crate::home::Recent {
+                    path: format!("/Users/me/Music/{name}.solarum").into(),
+                    name: name.into(),
+                    when: when.into(),
+                    song,
+                });
+            }
+        });
         render("bunk", 1100.0, 700.0, |app| {
             app.song.auto = true;
             app.power_at = 8.2;

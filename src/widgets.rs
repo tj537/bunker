@@ -582,3 +582,20 @@ pub fn bar_slider(ui: &mut Ui, value: &mut f32, width: f32, color: Color32) -> R
     }
     resp.on_hover_cursor(egui::CursorIcon::ResizeHorizontal)
 }
+
+/// `text` cut with "…" so it fits into `max_w`
+pub fn fit_text(p: &egui::Painter, text: &str, font: egui::FontId, max_w: f32) -> String {
+    let width = |t: &str| p.layout_no_wrap(t.to_string(), font.clone(), TEXT).size().x;
+    if width(text) <= max_w {
+        return text.to_string();
+    }
+    let mut chars: Vec<char> = text.chars().collect();
+    while !chars.is_empty() {
+        chars.pop();
+        let t: String = chars.iter().collect::<String>() + "…";
+        if width(&t) <= max_w {
+            return t;
+        }
+    }
+    String::new()
+}

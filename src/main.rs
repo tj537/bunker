@@ -9,6 +9,7 @@ mod face;
 mod file;
 mod form;
 mod gen;
+mod home;
 mod log;
 mod midi;
 #[cfg(test)]
