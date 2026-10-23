@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Download the latest version
+    url: https://github.com/tj537/solarum/releases/latest
+    about: Maybe it's already fixed – try the newest release first.
+  - name: How to contribute
+    url: https://github.com/tj537/solarum/blob/main/CONTRIBUTING.md
+    about: Build, test and send a pull request.
+  - name: Report a security problem
+    url: https://github.com/tj537/solarum/security/advisories/new
+    about: Please report security problems privately, not as a public issue.

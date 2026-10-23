@@ -1,0 +1,56 @@
+name: Bug report
+description: Something doesn't work, sounds wrong or looks broken.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time! Solarum is still in development, so every report helps.
+        No need to be technical – just tell us what happened in your own words.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+      placeholder: I clicked SHUFFLE while the auto mode was on, and the kick stopped playing …
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How can we make it happen again?
+      description: Step by step, if you know. "It happens sometimes" is fine too.
+      placeholder: |
+        1. Open Solarum
+        2. Pick the Acid vibe
+        3. …
+  - type: input
+    id: version
+    attributes:
+      label: Solarum version
+      description: Shown in the settings (the gear), or the release you downloaded.
+      placeholder: "0.9.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Computer
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Windows
+        - Linux (built from source)
+        - Other / not sure
+    validations:
+      required: true
+  - type: input
+    id: os-version
+    attributes:
+      label: System version
+      placeholder: macOS 15.1, Windows 11 …
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots, recordings, sound
+      description: Drag images, a short screen recording or a WAV in here – it helps a lot. Audio interface or MIDI keyboard, if it's about sound or MIDI.
