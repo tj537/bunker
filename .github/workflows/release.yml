@@ -49,12 +49,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build solarum.exe
         run: cargo build --release
-      - name: Zip Solarum.exe
+      - name: Zip Solarum.exe with its licenses
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item target/release/solarum.exe dist/Solarum.exe
-          Compress-Archive -Path dist/Solarum.exe -DestinationPath dist/Bunker-windows-x64.zip
+          Copy-Item LICENSE dist/LICENSE.txt
+          Copy-Item THIRD-PARTY-LICENSES.txt dist/THIRD-PARTY-LICENSES.txt
+          Compress-Archive -Path dist/Solarum.exe, dist/LICENSE.txt, dist/THIRD-PARTY-LICENSES.txt -DestinationPath dist/Bunker-windows-x64.zip
       - uses: actions/upload-artifact@v5
         with:
           name: windows

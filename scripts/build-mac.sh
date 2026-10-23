@@ -33,6 +33,8 @@ fi
 
 echo "==> Assembling app bundle"
 cp assets/icon.icns "$APP/Contents/Resources/AppIcon.icns"
+# The licenses ship with the app (MIT for Solarum, every crate, font and icon it bundles)
+cp LICENSE THIRD-PARTY-LICENSES.txt "$APP/Contents/Resources/"
 sed "s/__VERSION__/$VERSION/g" packaging/macos/Info.plist > "$APP/Contents/Info.plist"
 
 # Local ad-hoc signature (no Apple account needed) so macOS accepts the bundle as a whole
