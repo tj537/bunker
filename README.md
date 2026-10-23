@@ -5,13 +5,13 @@
 <h1 align="center">SOLARUM</h1>
 
 <p align="center">
-  <b>Techno from another planet – easy to use, beautiful to look at.</b><br>
+  <b>Techno from another planet – easy to use, beautiful to look at, free for Mac and Windows.</b><br>
   For everyone: kids, beginners, people who have never touched music software. Paint a beat on an empty solar system, or let Solari, the little robot, play a whole set for you.
 </p>
 
 <p align="center">
   <a href="https://github.com/tj537/solarum/releases/latest"><img src="https://img.shields.io/github/v/release/tj537/solarum?style=flat-square&color=c8ff3d&labelColor=17171b&label=latest" alt="Latest release"></a>
-  <img src="https://img.shields.io/badge/macOS%20%C2%B7%20Windows-17171b?style=flat-square" alt="macOS and Windows">
+  <img src="https://img.shields.io/badge/free-macOS%20%C2%B7%20Windows-17171b?style=flat-square&color=17171b&labelColor=c8ff3d" alt="Free for macOS and Windows">
   <img src="https://img.shields.io/badge/100%25%20synthesized-no%20samples-ff3b46?style=flat-square&labelColor=17171b" alt="100% synthesized">
   <img src="https://img.shields.io/badge/Rust-egui-8c7dff?style=flat-square&labelColor=17171b" alt="Rust and egui">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-45c8ff?style=flat-square&labelColor=17171b" alt="MIT license"></a>
@@ -23,9 +23,9 @@
   <a href="https://github.com/tj537/solarum/releases/latest/download/Bunker-windows-x64.zip"><img src="https://img.shields.io/badge/%E2%8A%9E%20Windows-Download-c8ff3d?style=for-the-badge&labelColor=333" alt="Download for Windows" height="44"></a>
 </p>
 
-![Solarum playing in auto mode: the planets in the middle, tracks, the mood and the auto mode's terminal on the left, the sound pads, effects and DROP on the right, favorites below](docs/images/bunker.jpg)
+![Solarum playing in auto mode: the planets in the middle, tracks, the mood and the auto mode's terminal on the left, the sound pads, effects and DROP on the right, favorites below](docs/images/solarum.jpg)
 
-Solarum is a techno drum machine written in Rust. Your groove is a little solar system: every track an orbit round the sun, every step a planet, and a beam of light sweeps round once a bar. Kick, clap, hats, bass and a 303-style synth are synthesized live: no samples, no plug-ins, no account, no tracking. It's a download of a few megabytes for macOS and Windows.
+Solarum is a techno drum machine written in Rust. Your groove is a little solar system: every track an orbit round the sun, every step a planet, and a beam of light sweeps round once a bar. Kick, clap, hats, bass and a 303-style synth are synthesized live: no samples, no plug-ins, no account, no tracking. It's free, open source and a download of a few megabytes for macOS and Windows.
 
 ## Why Solarum
 
@@ -37,7 +37,7 @@ Solarum is a techno drum machine written in Rust. Your groove is a little solar 
 
 **With an auto mode.** Switch on Solari, pick a vibe, and it builds a whole set by itself: grooves that change, breakdowns, build-ups and drops. You can jump in any time.
 
-> **Still very much under development.** Solarum is young and changing fast. Feedback, criticism, ideas and help are more than welcome – [open an issue](https://github.com/tj537/solarum/issues), start a discussion or send a pull request.
+> **Still very much under development.** Solarum is young and changing fast, so things will move around and some will break. Feedback, criticism, ideas and help are more than welcome – [report a bug](https://github.com/tj537/solarum/issues/new?template=bug_report.yml), [share an idea](https://github.com/tj537/solarum/issues/new?template=feature_request.yml) or send a pull request. See [Help make Solarum](#help-make-solarum).
 
 **You don't need to know anything about music to use it:**
 
@@ -145,10 +145,25 @@ cargo test --release
 cargo test --release render_ -- --ignored
 ```
 
-The last command writes UI screenshots and demo loops (WAV) to `target/snapshots/`. On a Mac, `./scripts/build-mac.sh --install` builds `Solarum.app` and copies it to Applications.
+The last command writes UI screenshots and demo loops (WAV) to `target/snapshots/`. On a Mac, `./scripts/build-mac.sh --install` builds `Solarum.app` and copies it to Applications. Want to change something? [CONTRIBUTING.md](CONTRIBUTING.md) has the rest.
+
+## Help make Solarum
+
+Solarum is made by one person in their free time, and it gets better with every bit of feedback. You don't need to code to help:
+
+- **Play with it and tell us what you think** – what was fun, what was confusing, what sounded off. Criticism is welcome.
+- **[Report a bug](https://github.com/tj537/solarum/issues/new?template=bug_report.yml)** – a screenshot or a short recording helps a lot.
+- **[Share an idea](https://github.com/tj537/solarum/issues/new?template=feature_request.yml)** – especially ones that make Solarum easier for beginners and kids.
+- **Send a pull request** – [CONTRIBUTING.md](CONTRIBUTING.md) explains how to build, test and what to keep in mind.
+
+Everyone is welcome here; please be kind ([Code of Conduct](CODE_OF_CONDUCT.md)). Found a security problem? See [SECURITY.md](SECURITY.md).
 
 ## Credits
 
-Built with [egui](https://github.com/emilk/egui), [cpal](https://github.com/RustAudio/cpal) and [midir](https://github.com/Boddlnagg/midir). The fonts are [Space Grotesk](https://github.com/floriankarsten/space-grotesk) and [Anton](https://github.com/googlefonts/AntonFont) (SIL Open Font License), and the icons are from [Phosphor](https://phosphoricons.com).
+Built with [egui](https://github.com/emilk/egui), [cpal](https://github.com/RustAudio/cpal) and [midir](https://github.com/Boddlnagg/midir). The fonts are [Space Grotesk](https://github.com/floriankarsten/space-grotesk) and [Anton](https://github.com/googlefonts/AntonFont) (SIL Open Font License), and the icons are from [Phosphor](https://phosphoricons.com) (MIT).
 
-Made by Tom, together with Claude. MIT licensed.
+Made by Tom, together with Claude.
+
+## License
+
+Solarum is free and open source under the [MIT license](LICENSE). The licenses of the libraries, fonts and icons it bundles are in [THIRD-PARTY-LICENSES.txt](THIRD-PARTY-LICENSES.txt), which also ships inside the app and the Windows zip.
