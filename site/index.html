@@ -280,6 +280,12 @@ footer a { color: var(--dim); text-decoration: none; margin-left: 18px; }
 footer a:hover { color: var(--text); }
 footer a.kofi { color: var(--acid); border: 1px solid color-mix(in srgb, var(--acid) 40%, transparent); border-radius: 999px; padding: 6px 14px; transition: background .2s, color .2s; }
 footer a.kofi:hover { background: var(--acid); color: var(--space); }
+@media (max-width: 760px) {
+  footer .wrap > span:last-child { width: 100%; }
+  footer .wrap > span:last-child a:first-child { margin-left: 0; }
+  footer a.kofi { display: block; margin: 22px 0 0; padding: 14px 18px; text-align: center; font-size: 16px; font-weight: 600; background: var(--acid); color: var(--space); box-shadow: 0 0 28px color-mix(in srgb, var(--acid) 35%, transparent); }
+  footer a.kofi:hover { filter: brightness(1.08); }
+}
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
