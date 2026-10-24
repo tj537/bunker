@@ -7,6 +7,8 @@
 use std::sync::mpsc::{channel, Receiver};
 
 pub const REPO_URL: &str = "https://github.com/tj537/solarum";
+/// The tip jar, linked from the settings and the website
+pub const KOFI_URL: &str = "https://ko-fi.com/tj537";
 pub const RELEASES_URL: &str = "https://github.com/tj537/solarum/releases/latest";
 const API_URL: &str = "https://api.github.com/repos/tj537/solarum/releases/latest";
 

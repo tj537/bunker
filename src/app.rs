@@ -2022,6 +2022,41 @@ impl SolarumApp {
                         note(ui, "Asks GitHub once at start – nothing else is sent.");
                     });
 
+                    // Support: a small card with a heart and the Ko-fi button
+                    egui::Frame::new()
+                        .fill(SPACE)
+                        .stroke(stroke(1.0, ACID.gamma_multiply(0.35)))
+                        .corner_radius(12.0)
+                        .inner_margin(egui::Margin::same(14))
+                        .show(ui, |ui| {
+                            ui.set_width(ui.available_width() - 10.0);
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new(ph::HEART).size(26.0).color(ACID));
+                                ui.add_space(4.0);
+                                ui.vertical(|ui| {
+                                    ui.label(egui::RichText::new("Like Solarum?").font(bold(15.0)).color(TEXT));
+                                    ui.label(
+                                        egui::RichText::new("Help keep SOLARUM alive – free for everyone, fuelled by coffee.")
+                                            .font(body(12.0))
+                                            .color(DIM),
+                                    );
+                                });
+                            });
+                            ui.add_space(8.0);
+                            let btn = egui::Button::new(
+                                egui::RichText::new(format!("{}  Support on Ko-fi", ph::COFFEE))
+                                    .font(bold(13.0))
+                                    .color(SPACE),
+                            )
+                            .fill(ACID)
+                            .corner_radius(8.0)
+                            .min_size(vec2(0.0, 30.0));
+                            if ui.add(btn).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                                ui.ctx().open_url(egui::OpenUrl::new_tab(update::KOFI_URL));
+                            }
+                        });
+                    ui.add_space(10.0);
+
                     ui.separator();
                     ui.horizontal(|ui| {
                         ui.label(

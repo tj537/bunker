@@ -278,6 +278,8 @@ footer { padding: 50px 0 calc(50px + env(safe-area-inset-bottom)); border-top: 1
 footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 20px; align-items: center; }
 footer a { color: var(--dim); text-decoration: none; margin-left: 18px; }
 footer a:hover { color: var(--text); }
+footer a.kofi { color: var(--acid); border: 1px solid color-mix(in srgb, var(--acid) 40%, transparent); border-radius: 999px; padding: 6px 14px; transition: background .2s, color .2s; }
+footer a.kofi:hover { background: var(--acid); color: var(--space); }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
@@ -536,7 +538,7 @@ footer a:hover { color: var(--text); }
 <footer>
   <div class="wrap">
     <span>Solarum · free and open source under the MIT license · made with Rust</span>
-    <span><a href="https://github.com/tj537/solarum">GitHub</a><a href="https://github.com/tj537/solarum/releases">Releases</a><a href="https://github.com/tj537/solarum/blob/main/LICENSE">License</a><a href="impressum.html">Impressum</a></span>
+    <span><a href="https://github.com/tj537/solarum">GitHub</a><a href="https://github.com/tj537/solarum/releases">Releases</a><a href="https://github.com/tj537/solarum/blob/main/LICENSE">License</a><a href="impressum.html">Impressum</a><a class="kofi" href="https://ko-fi.com/tj537">♥ Support on Ko-fi</a></span>
   </div>
 </footer>
 

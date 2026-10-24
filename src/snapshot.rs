@@ -23,6 +23,35 @@ mod tests {
         snap.save(&shapes, Path::new(&format!("target/snapshots/{name}.png")));
     }
 
+    /// The settings, scrolled down to the support card at the bottom
+    #[test]
+    #[ignore]
+    fn render_settings() {
+        use eframe::egui::{pos2, vec2, Event, MouseWheelUnit};
+        let mut snap = Offscreen::retina(1360.0, 860.0, 2.0);
+        crate::theme::install(&snap.ctx);
+        let mut app = SolarumApp::headless(Song::default(), View::Orbit, false);
+        app.settings = true;
+        let mid = pos2(680.0, 430.0);
+        let mut shapes = Vec::new();
+        for t in 0..10 {
+            let events = if t < 3 {
+                vec![]
+            } else {
+                vec![
+                    Event::PointerMoved(mid),
+                    Event::MouseWheel {
+                        unit: MouseWheelUnit::Point,
+                        delta: vec2(0.0, -400.0),
+                        modifiers: Default::default(),
+                    },
+                ]
+            };
+            shapes = snap.frame_with_events(10.0 + t as f64 * 0.016, events, |ctx| app.ui(ctx));
+        }
+        snap.save(&shapes, Path::new("target/snapshots/settings.png"));
+    }
+
     /// The face over time: frames at these seconds, a build-up (or none) in each
     fn render_face(name: &str, frames: &[(f64, Option<f32>)]) {
         let mut snap = Offscreen::retina(1360.0, 860.0, 2.0);
