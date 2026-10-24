@@ -714,8 +714,8 @@ footer a:hover { color: var(--text); }
         const lift = r.i >= 6 ? (8 + ((r.s * 7 + r.i * 3) % 5) * 5) * (R / 300) : 0;
         const [x, y] = pos(r0 + r.i * dr, r.s / 16);
         if (hidden(x, y - lift, y)) continue;
-        ctx.strokeStyle = COLORS[r.i]; ctx.globalAlpha = 0.4 * (1 - age / 0.7); ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.ellipse(x, y - lift, 3 + age * 26, (3 + age * 26) * 0.5, 0, 0, 7); ctx.stroke();
+        ctx.strokeStyle = COLORS[r.i]; ctx.globalAlpha = 0.65 * (1 - age / 0.7); ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.ellipse(x, y - lift, 4 + age * 32, (4 + age * 32) * 0.5, 0, 0, 7); ctx.stroke();
         ctx.globalAlpha = 1;
       }
     }
