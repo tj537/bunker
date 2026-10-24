@@ -145,10 +145,14 @@ h2 { font-size: clamp(42px, 7vw, 84px); margin: 14px 0 22px; }
 .stop .art svg, .stop .art canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 
 /* hatch / ship */
-.hatch .door { transform-origin: 50% 0; animation: hatch 5s ease-in-out infinite; }
-@keyframes hatch { 0%, 15% { transform: scaleY(1); } 45%, 70% { transform: scaleY(.08); } 100% { transform: scaleY(1); } }
-.hatch .glow { animation: hglow 5s ease-in-out infinite; }
-@keyframes hglow { 0%, 15% { opacity: 0; } 45%, 70% { opacity: 1; } 100% { opacity: 0; } }
+.hatch .beam, .hatch .port { animation: beam 5s ease-in-out infinite; }
+@keyframes beam { 0%, 12% { opacity: 0; } 25%, 72% { opacity: 1; } 85%, 100% { opacity: 0; } }
+.hatch .rider { animation: rider 5s ease-in-out infinite; }
+@keyframes rider { 0%, 22% { transform: translateY(0); opacity: 0; } 30% { opacity: 1; } 68% { transform: translateY(-46px); opacity: 1; } 74%, 100% { transform: translateY(-50px); opacity: 0; } }
+.hatch .cabin { animation: cabin 5s ease-in-out infinite; }
+@keyframes cabin { 0%, 68% { opacity: .35; } 78%, 92% { opacity: 1; } 100% { opacity: .35; } }
+.hatch .lights circle { animation: blink 1.2s steps(1) infinite; }
+.hatch .lights circle:nth-child(2) { animation-delay: .4s; } .hatch .lights circle:nth-child(3) { animation-delay: .8s; }
 .ship { animation: bob 4s ease-in-out infinite; }
 @keyframes bob { 50% { transform: translateY(-6px); } }
 
@@ -172,6 +176,7 @@ h2 { font-size: clamp(42px, 7vw, 84px); margin: 14px 0 22px; }
   background: #0b0c12;
 }
 .window.in { transform: none; }
+@media (max-width: 560px) { .window-wrap { margin: 36px calc(8px - var(--gutter)) 0; } .window { border-radius: 12px; transform: rotateX(18deg); } .window .bar { padding: 8px 10px; } .window .bar i { width: 8px; height: 8px; } }
 .window .bar { display: flex; gap: 7px; padding: 11px 14px; background: #15161e; border-bottom: 1px solid #23242f; }
 .window .bar i { width: 11px; height: 11px; border-radius: 50%; background: #3a3b48; }
 .window .bar i:nth-child(1) { background: var(--red); } .window .bar i:nth-child(2) { background: var(--rim); } .window .bar i:nth-child(3) { background: var(--acid); }
@@ -313,20 +318,21 @@ footer a:hover { color: var(--text); }
         <div class="art">
           <svg class="hatch" viewBox="0 0 300 190" aria-hidden="true">
             <defs>
-              <radialGradient id="hg" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#c8ff3d" stop-opacity=".9"/><stop offset="1" stop-color="#c8ff3d" stop-opacity="0"/></radialGradient>
+              <linearGradient id="hg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c8ff3d" stop-opacity=".55"/><stop offset="1" stop-color="#c8ff3d" stop-opacity="0"/></linearGradient>
+              <linearGradient id="dome" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#45c8ff" stop-opacity=".35"/><stop offset="1" stop-color="#45c8ff" stop-opacity=".05"/></linearGradient>
             </defs>
             <g class="ship">
               <ellipse cx="150" cy="104" rx="118" ry="34" fill="#171a26" stroke="#2f3244"/>
               <path d="M70 100 Q150 22 230 100" fill="#1e2231" stroke="#363a50"/>
               <circle cx="112" cy="84" r="7" fill="#0b0c12" stroke="#45c8ff"/>
               <circle cx="188" cy="84" r="7" fill="#0b0c12" stroke="#45c8ff"/>
-              <g transform="translate(150 98)">
-                <rect x="-22" y="-34" width="44" height="40" rx="8" fill="#c8ff3d" opacity=".95"/>
-                <rect class="door" x="-22" y="-34" width="44" height="40" rx="8" fill="#2a2e40" stroke="#454a64"/>
-              </g>
-              <ellipse class="glow" cx="150" cy="150" rx="60" ry="40" fill="url(#hg)" opacity="0"/>
+              <path d="M122 76 Q150 44 178 76 Z" fill="url(#dome)" stroke="#45c8ff" stroke-opacity=".5"/>
+              <circle class="cabin" cx="150" cy="68" r="5" fill="#c8ff3d"/>
+              <path class="beam" d="M138 134 L162 134 L196 190 L104 190 Z" fill="url(#hg)" opacity="0"/>
+              <ellipse class="port" cx="150" cy="134" rx="14" ry="3.5" fill="#c8ff3d" opacity="0"/>
+              <circle class="rider" cx="150" cy="180" r="4" fill="#c8ff3d" opacity="0"/>
               <g fill="#ff4d5e"><circle cx="58" cy="108" r="3"/><circle cx="242" cy="108" r="3"/></g>
-              <g fill="#c8ff3d"><circle cx="100" cy="122" r="2.5"/><circle cx="150" cy="128" r="2.5"/><circle cx="200" cy="122" r="2.5"/></g>
+              <g class="lights" fill="#c8ff3d"><circle cx="100" cy="122" r="2.5"/><circle cx="150" cy="128" r="2.5"/><circle cx="200" cy="122" r="2.5"/></g>
             </g>
           </svg>
         </div>
@@ -698,10 +704,6 @@ footer a:hover { color: var(--text); }
         ctx.fillStyle = col; ctx.globalAlpha = 0.55 + 0.45 * lit;
         ctx.beginPath(); ctx.arc(p.x, y, size, 0, 7); ctx.fill();
         ctx.globalAlpha = 1;
-        if (p.i === 0 && opts.hero) { // accents wear a ring like Saturn
-          ctx.strokeStyle = col; ctx.lineWidth = 1.2;
-          ctx.beginPath(); ctx.ellipse(p.x, y, size * 2, size * 0.6, -0.3, 0, 7); ctx.stroke();
-        }
       }
       if (!sunDrawn) drawSun();
 
@@ -712,8 +714,8 @@ footer a:hover { color: var(--text); }
         const lift = r.i >= 6 ? (8 + ((r.s * 7 + r.i * 3) % 5) * 5) * (R / 300) : 0;
         const [x, y] = pos(r0 + r.i * dr, r.s / 16);
         if (hidden(x, y - lift, y)) continue;
-        ctx.strokeStyle = COLORS[r.i]; ctx.globalAlpha = 1 - age / 0.7; ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.ellipse(x, y - lift, 4 + age * 40, (4 + age * 40) * 0.5, 0, 0, 7); ctx.stroke();
+        ctx.strokeStyle = COLORS[r.i]; ctx.globalAlpha = 0.4 * (1 - age / 0.7); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.ellipse(x, y - lift, 3 + age * 26, (3 + age * 26) * 0.5, 0, 0, 7); ctx.stroke();
         ctx.globalAlpha = 1;
       }
     }
