@@ -3,7 +3,7 @@
 #
 #   ./scripts/build-mac.sh            build only
 #   ./scripts/build-mac.sh --install  build, replace /Applications/Solarum.app and remove the build copy
-#   ./scripts/build-mac.sh --zip      build and pack dist/Bunker-macos-universal.zip for a release
+#   ./scripts/build-mac.sh --zip      build and pack dist/Solarum-macos-universal.zip for a release
 #   NATIVE=1 ./scripts/build-mac.sh   only for this Mac's CPU (faster while developing)
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -43,7 +43,7 @@ echo "==> Done: $APP"
 
 if [[ "${1:-}" == "--zip" ]]; then
     # Fixed file name, so the README's "latest download" link always works
-    ZIP="dist/Bunker-macos-universal.zip"
+    ZIP="dist/Solarum-macos-universal.zip"
     rm -f "$ZIP"
     ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
     echo "==> Packed: $ZIP"

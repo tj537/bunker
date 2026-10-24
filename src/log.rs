@@ -1,5 +1,5 @@
 //! The log under the mood: what Solarum says (every caption), where the auto mode is and when
-//! the drop comes, and now and then a line from the bunker – typed in like on an old terminal
+//! the drop comes, and now and then a line from the ship – typed in like on an old terminal
 
 use crate::engine::{Shared, NO_BREAK};
 use crate::rng::Rng;

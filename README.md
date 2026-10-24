@@ -19,9 +19,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/tj537/solarum/releases/latest/download/Bunker-macos-universal.zip"><img src="https://img.shields.io/badge/%EF%A3%BF%20macOS-Download-ff3b46?style=for-the-badge" alt="Download for macOS" height="44"></a>
+  <a href="https://github.com/tj537/solarum/releases/latest/download/Solarum-macos-universal.zip"><img src="https://img.shields.io/badge/%EF%A3%BF%20macOS-Download-ff3b46?style=for-the-badge" alt="Download for macOS" height="44"></a>
   &nbsp;
-  <a href="https://github.com/tj537/solarum/releases/latest/download/Bunker-windows-x64.zip"><img src="https://img.shields.io/badge/%E2%8A%9E%20Windows-Download-c8ff3d?style=for-the-badge&labelColor=333" alt="Download for Windows" height="44"></a>
+  <a href="https://github.com/tj537/solarum/releases/latest/download/Solarum-windows-x64.zip"><img src="https://img.shields.io/badge/%E2%8A%9E%20Windows-Download-c8ff3d?style=for-the-badge&labelColor=333" alt="Download for Windows" height="44"></a>
 </p>
 
 <p align="center">
@@ -168,14 +168,14 @@ Solarum doesn't carry Apple's or Microsoft's paid signature yet, so your compute
 
 **macOS 11 or newer** (Apple Silicon and Intel)
 
-1. [Download Solarum for Mac](https://github.com/tj537/solarum/releases/latest/download/Bunker-macos-universal.zip) and double-click the zip to unpack it.
+1. [Download Solarum for Mac](https://github.com/tj537/solarum/releases/latest/download/Solarum-macos-universal.zip) and double-click the zip to unpack it.
 2. Drag Solarum into your Applications folder.
 3. Double-click it. When macOS says it can't check the app, click *Done*.
 4. Open *System Settings → Privacy & Security*, scroll down and click *Open Anyway* next to Solarum, then confirm.
 
 **Windows 10 or 11** (64-bit)
 
-1. [Download Solarum for Windows](https://github.com/tj537/solarum/releases/latest/download/Bunker-windows-x64.zip), right-click the zip and choose *Extract All…*.
+1. [Download Solarum for Windows](https://github.com/tj537/solarum/releases/latest/download/Solarum-windows-x64.zip), right-click the zip and choose *Extract All…*.
 2. Open the folder and double-click `Solarum.exe` – no installer, no admin rights needed.
 3. If Windows shows *"Windows protected your PC"*, click *More info → Run anyway*.
 

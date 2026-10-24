@@ -48,6 +48,25 @@ fn main() -> eframe::Result {
         viewport,
         ..Default::default()
     };
-    // (The storage keeps its old name, "Bunker", so saved grooves and settings survive the rename)
-    eframe::run_native("Bunker", options, Box::new(|cc| Ok(Box::new(app::SolarumApp::new(cc)))))
+    move_old_storage();
+    eframe::run_native("Solarum", options, Box::new(|cc| Ok(Box::new(app::SolarumApp::new(cc)))))
+}
+
+/// Saved grooves and settings used to live under the old name, "Bunker": move them over once
+fn move_old_storage() {
+    let (Some(old), Some(new)) = (eframe::storage_dir("Bunker"), eframe::storage_dir("Solarum")) else {
+        return;
+    };
+    if !old.exists() || new.exists() {
+        return;
+    }
+    if let Some(parent) = new.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if std::fs::rename(&old, &new).is_ok() {
+        // On Windows the data sits one folder deeper (…\Bunker\data); drop the empty folder left behind
+        if let Some(parent) = old.parent().filter(|p| p.ends_with("Bunker")) {
+            let _ = std::fs::remove_dir(parent);
+        }
+    }
 }

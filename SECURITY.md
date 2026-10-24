@@ -22,4 +22,4 @@ Every release comes with a `SHA256SUMS.txt`. To check a download on macOS or Lin
 shasum -a 256 -c SHA256SUMS.txt --ignore-missing
 ```
 
-On Windows (PowerShell), compare the output of `Get-FileHash Bunker-windows-x64.zip` with the line in `SHA256SUMS.txt`.
+On Windows (PowerShell), compare the output of `Get-FileHash Solarum-windows-x64.zip` with the line in `SHA256SUMS.txt`.

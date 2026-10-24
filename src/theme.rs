@@ -1,4 +1,4 @@
-//! Colours, fonts and the egui style: bunker concrete around, deep space in the middle,
+//! Colours, fonts and the egui style: concrete around, deep space in the middle,
 //! neon track colours.
 
 use crate::song::Voice;

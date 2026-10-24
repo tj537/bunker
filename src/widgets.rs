@@ -84,7 +84,7 @@ pub fn stops(ui: &mut Ui, values: &[u8], picked: u8, width: f32, color: Color32)
 /// A screen set into the concrete: a dark well, a thick bezel with a screw in each corner;
 /// returns the screen's rect inside it
 /// (`bezel_w`: how thick the frame is)
-pub fn bunker_frame(p: &egui::Painter, outer: Rect, radius: f32, bezel_w: f32) -> Rect {
+pub fn bezel_frame(p: &egui::Painter, outer: Rect, radius: f32, bezel_w: f32) -> Rect {
     p.rect_filled(outer.expand(2.0), radius + 2.0, Color32::from_black_alpha(110));
     let bezel = outer.shrink(2.0);
     p.rect_filled(bezel, radius, mix(PANEL, BG, 0.45));

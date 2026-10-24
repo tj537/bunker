@@ -146,7 +146,7 @@ pub struct SolarumApp {
     hit_age: [f32; TRACKS],
     step_seen: u64,
     step_time: f64,
-    /// What Solarum says, where the auto mode is, lines from the bunker (under the mood)
+    /// What Solarum says, where the auto mode is, lines from the ship (under the mood)
     pub log: crate::log::Log,
     filter: f32,
     /// The filter pad's resonance (springs back with it)
@@ -1739,7 +1739,7 @@ impl SolarumApp {
                 self.shuffle(self.song.vibe, now);
                 const QUIPS: [&str; 4] = [
                     "Rolled. Smells like fresh techno.",
-                    "New groove. Same bunker.",
+                    "New groove. Same orbit.",
                     "Shook the dice. They landed on four to the floor.",
                     "There. Tell me if it slaps.",
                 ];
@@ -2557,7 +2557,7 @@ impl SolarumApp {
         // Set into the concrete: a dark well, a thick bezel with four screws, the screen inside
         let h_all = ui.available_height().max(if on { 160.0 } else { 80.0 });
         let (outer, _) = ui.allocate_exact_size(vec2(w, h_all), Sense::hover());
-        widgets::bunker_frame(ui.painter(), outer, 13.0, 4.0);
+        widgets::bezel_frame(ui.painter(), outer, 13.0, 4.0);
         let screen = outer.shrink(6.0);
         let mut inner = ui.new_child(egui::UiBuilder::new().max_rect(screen));
         let ui = &mut inner;
@@ -3068,7 +3068,7 @@ impl SolarumApp {
             let fill = Rect::from_min_size(r.min, vec2(r.width() * b, r.height()));
             p.rect_filled(fill, 14.0, mix(PANEL, RED, 0.6));
         }
-        // Warning stripes, like on a bunker door – they run while it builds up
+        // Warning stripes, like on a hangar door – they run while it builds up
         {
             let clip = ui.painter_at(r.shrink(2.0));
             let run = building.map_or(0.0, |_| (now * 60.0 % 24.0) as f32);
@@ -3505,7 +3505,7 @@ impl SolarumApp {
         }
         if save {
             let name = format!(
-                "bunker-{}-{:.0}bpm.wav",
+                "solarum-{}-{:.0}bpm.wav",
                 self.song.vibe.name().to_lowercase().replace(' ', "-"),
                 self.song.bpm
             );
@@ -3717,7 +3717,7 @@ impl SolarumApp {
             let song_h = if self.song_form.is_some() { 34.0 } else { 0.0 };
             let frame = Rect::from_min_max(area.min, pos2(area.right(), area.bottom() - scenes_h - song_h - 6.0));
             // A window into deep space, set into the concrete like the computer: stars drifting past
-            let rect = widgets::bunker_frame(ui.painter(), frame, 24.0, 12.0);
+            let rect = widgets::bezel_frame(ui.painter(), frame, 24.0, 12.0);
             {
                 let p = ui.painter_at(rect);
                 p.rect_filled(rect, 16.0, SPACE);
@@ -4125,7 +4125,7 @@ mod tests {
     }
 
     #[test]
-    fn bunker_file_loads_everything() {
+    fn solarum_file_loads_everything() {
         let mut app = SolarumApp::headless(Song::default(), View::Orbit, false);
         let mut f = SolarumFile {
             song: gen::generate(Vibe::Electro, &Default::default(), &mut Rng::new(3)),

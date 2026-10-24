@@ -12,7 +12,7 @@ Techno drum machine: orbit sequencer, pads, bass & acid, auto mode, live effects
 | `cargo test --release render_ -- --ignored` | screenshots to `target/snapshots/*.png` and demo loops to `target/snapshots/sounds/*.wav` – look at (and listen to) them after UI or sound changes |
 | `cargo test --release print_levels -- --ignored --nocapture` | loudness of every track alone |
 | `./scripts/build-mac.sh --install` | builds `dist/Solarum.app` (universal), replaces `/Applications/Solarum.app` and removes the build copy; `NATIVE=1` builds for this Mac only |
-| `./scripts/build-mac.sh --zip` | builds `dist/Bunker-macos-universal.zip` (release asset) |
+| `./scripts/build-mac.sh --zip` | builds `dist/Solarum-macos-universal.zip` (release asset) |
 
 Commit only when `cargo test` exits 0.
 
@@ -33,7 +33,7 @@ Commit only when `cargo test` exits 0.
 
 ## Releases
 
-Asset names never change (`Bunker-macos-universal.zip`, `Bunker-windows-x64.zip`) so `releases/latest/download/…` links keep working. They keep the old name from before the rename to Solarum (the zips hold `Solarum.app` / `Solarum.exe`); the app also keeps its storage under "Bunker" (`main.rs`) so nothing saved gets lost.
+Asset names never change (`Solarum-macos-universal.zip`, `Solarum-windows-x64.zip`) so `releases/latest/download/…` links keep working. Releases up to 0.9.0 also carry the old `Bunker-…` names. Saved settings moved from the old "Bunker" storage folder to "Solarum"; `main.rs` moves them over once on the first start.
 
 1. Raise `version` in `Cargo.toml`, commit.
 2. Write `.github/release-notes/vX.Y.Z.md` (English).
