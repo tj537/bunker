@@ -1,0 +1,777 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Solarum – techno from another planet</title>
+<meta name="description" content="Solarum is a free techno drum machine for Mac and Windows. Board the ship, paint a beat on a little solar system, or let Solari, the robot, play a whole set for you.">
+<meta name="theme-color" content="#05060d">
+<meta property="og:title" content="Solarum – techno from another planet">
+<meta property="og:description" content="A free techno drum machine for Mac and Windows. Easy, beautiful, for everyone.">
+<meta property="og:image" content="https://tj537.github.io/solarum/solarum.jpg">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.png">
+<style>
+@font-face { font-family: "Anton"; src: url(fonts/Anton-Regular.ttf) format("truetype"); font-display: swap; }
+@font-face { font-family: "Space Grotesk"; src: url(fonts/SpaceGrotesk-Medium.ttf) format("truetype"); font-weight: 500; font-display: swap; }
+@font-face { font-family: "Space Grotesk"; src: url(fonts/SpaceGrotesk-Bold.ttf) format("truetype"); font-weight: 700; font-display: swap; }
+
+:root {
+  --space: #05060d;
+  --panel: #101119;
+  --panel-hi: #181a24;
+  --line: #262836;
+  --text: #f0f0f3;
+  --dim: #b4b4bb;
+  --faint: #82828a;
+  --acid: #c8ff3d;
+  --red: #ff3b46;
+  --kick: #ff4d5e; --clap: #ff9a3c; --rim: #ffd84a; --hat: #59f0b8;
+  --ohat: #45c8ff; --ride: #8c7dff; --bass: #d36bff;
+  --gutter: clamp(16px, 5vw, 48px);
+  --max: 1160px;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--space); color: var(--text);
+  font: 500 17px/1.6 "Space Grotesk", system-ui, sans-serif;
+  overflow-x: hidden;
+}
+a { color: inherit; }
+img { max-width: 100%; display: block; }
+kbd {
+  font: 700 0.8em "Space Grotesk", sans-serif; padding: 2px 7px; border-radius: 6px;
+  background: var(--panel-hi); border: 1px solid var(--line); border-bottom-width: 2px;
+}
+.wrap { width: 100%; max-width: var(--max); margin: 0 auto; padding: 0 var(--gutter); }
+.display { font-family: "Anton", Impact, sans-serif; font-weight: 400; letter-spacing: 0.02em; text-transform: uppercase; line-height: 1; }
+.eyebrow { font: 700 13px/1 "Space Grotesk", sans-serif; letter-spacing: 0.22em; text-transform: uppercase; color: var(--acid); }
+
+/* ---------- nav ---------- */
+nav {
+  position: fixed; inset: 0 0 auto 0; z-index: 20;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 14px var(--gutter); padding-top: max(14px, env(safe-area-inset-top));
+  transition: background .3s, backdrop-filter .3s, border-color .3s;
+  border-bottom: 1px solid transparent;
+}
+nav.solid { background: rgba(5,6,13,.78); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-color: var(--line); }
+.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+.brand img { width: 30px; height: 30px; }
+.brand span { font-family: "Anton", sans-serif; font-size: 22px; letter-spacing: .06em; }
+nav .links { display: flex; gap: 26px; align-items: center; }
+nav .links a { text-decoration: none; color: var(--dim); font-size: 15px; transition: color .2s; }
+nav .links a:hover { color: var(--text); }
+nav .links a.cta { color: var(--space); background: var(--acid); padding: 8px 16px; border-radius: 999px; font-weight: 700; }
+@media (max-width: 760px) { nav .links a:not(.cta) { display: none; } }
+
+/* ---------- hero ---------- */
+.hero { position: relative; min-height: 100svh; display: flex; align-items: center; overflow: hidden; }
+#sky { position: absolute; inset: 0; width: 100%; height: 100%; }
+.hero::after {
+  content: ""; position: absolute; inset: auto 0 0 0; height: 30%;
+  background: linear-gradient(transparent, var(--space)); pointer-events: none;
+}
+.hero .wrap { position: relative; z-index: 2; padding-top: 90px; padding-bottom: 60px; }
+.hero h1 { font-size: clamp(64px, 15vw, 190px); margin: 18px 0 10px; text-shadow: 0 0 60px rgba(200,255,61,.25); }
+.hero h1 .o { color: var(--acid); }
+.hero p.lead { font-size: clamp(18px, 2.4vw, 24px); color: var(--dim); max-width: 34ch; margin: 0 0 32px; }
+.hero p.lead b { color: var(--text); }
+
+.dl-row { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+.btn {
+  display: inline-flex; align-items: center; gap: 12px; text-decoration: none; cursor: pointer;
+  padding: 15px 24px; border-radius: 16px; border: 0; font: 700 17px/1.1 "Space Grotesk", sans-serif;
+  transition: transform .2s, box-shadow .2s, background .2s; position: relative;
+}
+.btn small { display: block; font-weight: 500; font-size: 12.5px; opacity: .72; margin-top: 3px; }
+.btn svg { width: 26px; height: 26px; flex: none; }
+.btn:hover { transform: translateY(-2px); }
+.btn.mac { background: var(--red); color: #fff; box-shadow: 0 10px 40px -10px rgba(255,59,70,.6); }
+.btn.win { background: var(--acid); color: #10120a; box-shadow: 0 10px 40px -10px rgba(200,255,61,.5); }
+.btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
+.btn.ghost:hover { border-color: var(--faint); }
+.btn.primary::before {
+  content: "for this computer"; position: absolute; top: -10px; right: 12px;
+  font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase;
+  background: var(--space); color: var(--text); border: 1px solid currentColor; padding: 2px 8px; border-radius: 999px;
+}
+.meta { margin-top: 18px; color: var(--faint); font-size: 14px; display: flex; flex-wrap: wrap; gap: 6px 18px; }
+.meta span::before { content: "●"; color: var(--acid); margin-right: 7px; font-size: 9px; vertical-align: 2px; }
+.mobile-note { display: none; margin-top: 18px; padding: 12px 16px; border-radius: 12px; background: rgba(255,255,255,.05); border: 1px solid var(--line); color: var(--dim); font-size: 14.5px; max-width: 460px; }
+.mobile-note button { margin-top: 8px; font: 700 14px "Space Grotesk", sans-serif; color: var(--acid); background: none; border: 0; padding: 0; cursor: pointer; }
+body.is-mobile .mobile-note { display: block; }
+
+.scroll-hint { position: absolute; left: 50%; bottom: 26px; z-index: 3; transform: translateX(-50%); color: var(--faint); font-size: 12px; letter-spacing: .2em; text-transform: uppercase; text-align: center; text-decoration: none; }
+.scroll-hint i { display: block; width: 1px; height: 38px; margin: 8px auto 0; background: linear-gradient(var(--acid), transparent); animation: drip 2s infinite; }
+@keyframes drip { 0% { transform: scaleY(0); transform-origin: top; } 50% { transform: scaleY(1); transform-origin: top; } 51% { transform-origin: bottom; } 100% { transform: scaleY(0); transform-origin: bottom; } }
+@media (max-height: 700px) { .scroll-hint { display: none; } }
+@media (max-width: 759px) {
+  .hero { align-items: flex-end; }
+  .hero .wrap { padding-top: calc(64vw + 70px); padding-bottom: 90px; }
+  .btn.primary::before { display: none; }
+  .dl-row .btn { width: 100%; }
+}
+@media (min-width: 760px) {
+  .hero::before { content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none; background: linear-gradient(90deg, rgba(5,6,13,.85), rgba(5,6,13,.4) 45%, transparent 65%); }
+}
+
+/* ---------- sections ---------- */
+section { position: relative; padding: clamp(80px, 12vw, 150px) 0; }
+h2 { font-size: clamp(42px, 7vw, 84px); margin: 14px 0 22px; }
+.sub { color: var(--dim); font-size: clamp(17px, 2vw, 20px); max-width: 60ch; margin: 0; }
+
+.reveal { opacity: 0; transform: translateY(36px); transition: opacity .9s cubic-bezier(.2,.7,.2,1), transform .9s cubic-bezier(.2,.7,.2,1); }
+.reveal.in { opacity: 1; transform: none; }
+.d1 { transition-delay: .1s; } .d2 { transition-delay: .2s; } .d3 { transition-delay: .3s; }
+
+/* journey */
+.journey { display: grid; gap: 22px; margin-top: 60px; grid-template-columns: repeat(3, 1fr); }
+@media (max-width: 900px) { .journey { grid-template-columns: 1fr; } }
+.stop {
+  position: relative; padding: 28px; border-radius: 24px; overflow: hidden;
+  background: linear-gradient(180deg, var(--panel-hi), var(--panel)); border: 1px solid var(--line);
+}
+.stop .num { font-family: "Anton", sans-serif; font-size: 15px; letter-spacing: .14em; color: var(--faint); }
+.stop h3 { font-family: "Anton", sans-serif; font-weight: 400; font-size: 32px; text-transform: uppercase; letter-spacing: .02em; margin: 6px 0 10px; }
+.stop p { color: var(--dim); margin: 0; font-size: 16px; }
+.stop .art { height: 190px; margin: -6px -6px 18px; border-radius: 16px; background: radial-gradient(ellipse at 50% 60%, #12142a, #07080f 70%); position: relative; overflow: hidden; }
+.stop .art svg, .stop .art canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+/* hatch / ship */
+.hatch .door { transform-origin: 50% 0; animation: hatch 5s ease-in-out infinite; }
+@keyframes hatch { 0%, 15% { transform: scaleY(1); } 45%, 70% { transform: scaleY(.08); } 100% { transform: scaleY(1); } }
+.hatch .glow { animation: hglow 5s ease-in-out infinite; }
+@keyframes hglow { 0%, 15% { opacity: 0; } 45%, 70% { opacity: 1; } 100% { opacity: 0; } }
+.ship { animation: bob 4s ease-in-out infinite; }
+@keyframes bob { 50% { transform: translateY(-6px); } }
+
+/* solari */
+.solari .arm { transform-origin: 28px 51px; animation: wave .6s ease-in-out infinite alternate; }
+@keyframes wave { from { transform: rotate(-38deg); } to { transform: rotate(10deg); } }
+.solari .tip { animation: blink 1.2s steps(1) infinite; }
+@keyframes blink { 60% { opacity: .3; } }
+.solari .eye { transform-box: fill-box; transform-origin: center; animation: eye 4s infinite; }
+@keyframes eye { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(.12); } }
+.solari .core { animation: core 1s ease-in-out infinite; }
+@keyframes core { 50% { opacity: .35; } }
+.solari-float { animation: bob 3s ease-in-out infinite; }
+
+/* screenshot */
+.window-wrap { perspective: 1600px; margin-top: 56px; }
+.window {
+  border-radius: 18px; overflow: hidden; border: 1px solid #2c2e3c;
+  box-shadow: 0 50px 120px -30px rgba(200,255,61,.22), 0 30px 80px -20px rgba(0,0,0,.8);
+  transform: rotateX(18deg) scale(.94); transition: transform 1.2s cubic-bezier(.2,.7,.2,1);
+  background: #0b0c12;
+}
+.window.in { transform: none; }
+.window .bar { display: flex; gap: 7px; padding: 11px 14px; background: #15161e; border-bottom: 1px solid #23242f; }
+.window .bar i { width: 11px; height: 11px; border-radius: 50%; background: #3a3b48; }
+.window .bar i:nth-child(1) { background: var(--red); } .window .bar i:nth-child(2) { background: var(--rim); } .window .bar i:nth-child(3) { background: var(--acid); }
+.callouts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin-top: 34px; }
+@media (max-width: 800px) { .callouts { grid-template-columns: 1fr 1fr; } }
+.callouts div { border-top: 2px solid var(--c, var(--acid)); padding-top: 12px; color: var(--dim); font-size: 15px; }
+.callouts b { display: block; color: var(--text); font-size: 16px; }
+
+/* solari section */
+.solari-grid { display: grid; grid-template-columns: 1fr 1.1fr; gap: clamp(30px, 6vw, 80px); align-items: center; }
+@media (max-width: 900px) { .solari-grid { grid-template-columns: 1fr; } }
+.points { list-style: none; padding: 0; margin: 28px 0 0; display: grid; gap: 14px; }
+.points li { display: flex; gap: 14px; color: var(--dim); }
+.points li::before { content: ""; flex: none; width: 10px; height: 10px; margin-top: 8px; border-radius: 50%; background: var(--c, var(--acid)); box-shadow: 0 0 12px var(--c, var(--acid)); }
+.points b { color: var(--text); }
+
+.terminal {
+  border-radius: 20px; background: #070a05; border: 1px solid #2a3313; overflow: hidden;
+  box-shadow: 0 0 0 6px #10130b, 0 40px 100px -30px rgba(200,255,61,.25);
+  font: 500 15px/1.65 ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: var(--acid);
+}
+.terminal .tbar { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; background: #10150a; border-bottom: 1px solid #2a3313; font: 700 12px "Space Grotesk", sans-serif; letter-spacing: .18em; }
+.terminal .tbar span:last-child { color: #6d8a22; }
+.terminal .screen { position: relative; padding: 18px 18px 20px; height: 360px; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; }
+@media (max-width: 560px) { .terminal .screen { height: 280px; font-size: 14px; } }
+.terminal .screen::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(transparent 0 2px, rgba(0,0,0,.18) 2px 3px); }
+.terminal .ln { white-space: pre-wrap; word-break: break-word; text-shadow: 0 0 8px rgba(200,255,61,.45); }
+.terminal .ln.you { color: #fff; text-shadow: none; }
+.terminal .ln.you::before { content: "> "; color: var(--acid); }
+.terminal .ln.dim { color: #7f9a3a; text-shadow: none; }
+.terminal .ln.hot { color: var(--red); text-shadow: 0 0 8px rgba(255,59,70,.5); }
+.terminal .cursor { display: inline-block; width: .6em; height: 1.1em; vertical-align: -3px; background: var(--acid); animation: blink 1s steps(1) infinite; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px; border-top: 1px solid #2a3313; background: #0b0f07; }
+.chips button { font: 500 13px ui-monospace, Menlo, monospace; color: var(--acid); background: transparent; border: 1px solid #3a4719; border-radius: 999px; padding: 5px 12px; cursor: pointer; transition: background .2s; }
+.chips button:hover { background: #1b2410; }
+
+/* features */
+.features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 56px; }
+@media (max-width: 900px) { .features { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 560px) { .features { grid-template-columns: 1fr; } }
+.feat { padding: 24px; border-radius: 20px; background: var(--panel); border: 1px solid var(--line); transition: transform .3s, border-color .3s; }
+.feat:hover { transform: translateY(-4px); border-color: var(--c); }
+.feat .ic { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; background: color-mix(in srgb, var(--c) 16%, transparent); color: var(--c); margin-bottom: 16px; }
+.feat .ic svg { width: 24px; height: 24px; }
+.feat h3 { margin: 0 0 6px; font-size: 19px; }
+.feat p { margin: 0; color: var(--dim); font-size: 15.5px; }
+
+/* download */
+#download { background: radial-gradient(ellipse 80% 60% at 50% 0%, #11140a, transparent 70%); }
+.tabs { display: inline-flex; gap: 4px; padding: 5px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); margin-top: 40px; }
+.tabs button { font: 700 15px "Space Grotesk", sans-serif; color: var(--dim); background: none; border: 0; padding: 10px 22px; border-radius: 999px; cursor: pointer; transition: background .25s, color .25s; }
+.tabs button[aria-selected="true"] { background: var(--text); color: var(--space); }
+.guide { display: none; margin-top: 28px; }
+.guide.on { display: grid; grid-template-columns: 340px 1fr; gap: clamp(24px, 4vw, 56px); align-items: start; animation: fade .5s; }
+@media (max-width: 900px) { .guide.on { grid-template-columns: 1fr; } }
+@keyframes fade { from { opacity: 0; transform: translateY(10px); } }
+.dl-card { padding: 28px; border-radius: 24px; background: var(--panel); border: 1px solid var(--line); }
+.dl-card .btn { width: 100%; justify-content: center; }
+.dl-card ul { list-style: none; padding: 0; margin: 20px 0 0; color: var(--dim); font-size: 14.5px; display: grid; gap: 6px; }
+.dl-card ul li::before { content: "✓"; color: var(--acid); margin-right: 8px; }
+.steps { list-style: none; padding: 0; margin: 0; counter-reset: s; display: grid; gap: 4px; }
+.steps li { counter-increment: s; position: relative; padding: 0 0 26px 62px; }
+.steps li::before {
+  content: counter(s); position: absolute; left: 0; top: -4px; width: 42px; height: 42px; border-radius: 50%;
+  display: grid; place-items: center; font-family: "Anton", sans-serif; font-size: 19px;
+  background: var(--panel-hi); border: 1px solid var(--line); color: var(--acid);
+}
+.steps li:not(:last-child)::after { content: ""; position: absolute; left: 21px; top: 44px; bottom: 4px; width: 1px; background: var(--line); }
+.steps b { display: block; font-size: 18px; margin-bottom: 2px; }
+.steps span { color: var(--dim); font-size: 15.5px; }
+.steps em { font-style: normal; color: var(--text); background: var(--panel-hi); border: 1px solid var(--line); padding: 1px 7px; border-radius: 6px; white-space: nowrap; }
+.tip { margin-top: 6px; padding: 16px 18px; border-radius: 14px; border: 1px dashed var(--line); color: var(--dim); font-size: 14.5px; }
+.tip code { color: var(--acid); font-size: 13.5px; word-break: break-all; }
+
+/* help */
+.help { display: grid; grid-template-columns: 1.3fr 1fr; gap: 40px; align-items: center; padding: clamp(28px, 5vw, 56px); border-radius: 32px; background: linear-gradient(135deg, #1a0f14, #0d0e18 60%); border: 1px solid var(--line); overflow: hidden; position: relative; }
+@media (max-width: 900px) { .help { grid-template-columns: 1fr; } }
+.help h2 { font-size: clamp(36px, 5vw, 60px); }
+.help .btns { display: flex; flex-wrap: wrap; gap: 12px; }
+
+footer { padding: 50px 0 calc(50px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); color: var(--faint); font-size: 14px; }
+footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 20px; align-items: center; }
+footer a { color: var(--dim); text-decoration: none; margin-left: 18px; }
+footer a:hover { color: var(--text); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+  .reveal { opacity: 1; transform: none; }
+  .window { transform: none; }
+}
+</style>
+</head>
+<body>
+
+<nav id="nav">
+  <a class="brand" href="#top"><img src="icon.svg" alt=""><span>SOLARUM</span></a>
+  <div class="links">
+    <a href="#journey">The trip</a>
+    <a href="#solari">Solari</a>
+    <a href="#features">Features</a>
+    <a href="https://github.com/tj537/solarum">GitHub</a>
+    <a class="cta" href="#download">Download</a>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <canvas id="sky" aria-hidden="true"></canvas>
+  <div class="wrap">
+    <div class="eyebrow reveal">Free · Mac &amp; Windows · in development</div>
+    <h1 class="display reveal d1">S<span class="o">o</span>larum</h1>
+    <p class="lead reveal d2"><b>Techno from another planet.</b> Board the ship, fly into a little solar system and make beats by touching planets. Easy, beautiful, for everyone.</p>
+    <div class="dl-row reveal d3">
+      <a class="btn mac" id="btn-mac" href="https://github.com/tj537/solarum/releases/latest/download/Bunker-macos-universal.zip">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.4 12.6c0-2.6 2.1-3.8 2.2-3.9-1.2-1.8-3.1-2-3.7-2-1.6-.2-3.1.9-3.9.9-.8 0-2-.9-3.4-.9-1.7 0-3.3 1-4.2 2.6-1.8 3.1-.5 7.7 1.3 10.2.8 1.2 1.8 2.6 3.1 2.6 1.2-.1 1.7-.8 3.2-.8s1.9.8 3.2.8c1.3 0 2.2-1.2 3-2.4.9-1.4 1.3-2.7 1.3-2.8 0 0-2.6-1-2.1-4.3zM13.9 5c.7-.8 1.1-1.9 1-3-1 0-2.1.7-2.8 1.5-.6.7-1.2 1.8-1 2.9 1.1.1 2.1-.6 2.8-1.4z"/></svg>
+        <span>Download for Mac<small>macOS 11+ · Apple Silicon &amp; Intel</small></span>
+      </a>
+      <a class="btn win" id="btn-win" href="https://github.com/tj537/solarum/releases/latest/download/Bunker-windows-x64.zip">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.5l7.4-1v7.1H3V5.5zm0 13l7.4 1v-7H3v6zm8.3 1.1L21 21v-8.4h-9.7v7zm0-15.2v7.2H21V3l-9.7 1.4z"/></svg>
+        <span>Download for Windows<small>Windows 10 / 11 · 64-bit</small></span>
+      </a>
+    </div>
+    <div class="meta reveal d3"><span id="ver">Latest release</span><span>No account, no tracking</span><span>A few megabytes</span></div>
+    <div class="mobile-note reveal d3">
+      Solarum runs on Mac and Windows computers. Open this page on your computer to download it.
+      <br><button id="share" type="button">Send myself the link →</button>
+    </div>
+  </div>
+  <a class="scroll-hint" href="#journey">Board<i></i></a>
+</header>
+
+<section id="journey">
+  <div class="wrap">
+    <div class="eyebrow reveal">The trip</div>
+    <h2 class="display reveal">Board the ship.<br>Play the stars.</h2>
+    <p class="sub reveal">No timeline, no mixer, no menus full of words you don't know. Solarum is a spaceship, and your beat is the solar system outside the window.</p>
+
+    <div class="journey">
+      <article class="stop reveal">
+        <div class="art">
+          <svg class="hatch" viewBox="0 0 300 190" aria-hidden="true">
+            <defs>
+              <radialGradient id="hg" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#c8ff3d" stop-opacity=".9"/><stop offset="1" stop-color="#c8ff3d" stop-opacity="0"/></radialGradient>
+            </defs>
+            <g class="ship">
+              <ellipse cx="150" cy="104" rx="118" ry="34" fill="#171a26" stroke="#2f3244"/>
+              <path d="M70 100 Q150 22 230 100" fill="#1e2231" stroke="#363a50"/>
+              <circle cx="112" cy="84" r="7" fill="#0b0c12" stroke="#45c8ff"/>
+              <circle cx="188" cy="84" r="7" fill="#0b0c12" stroke="#45c8ff"/>
+              <g transform="translate(150 98)">
+                <rect x="-22" y="-34" width="44" height="40" rx="8" fill="#c8ff3d" opacity=".95"/>
+                <rect class="door" x="-22" y="-34" width="44" height="40" rx="8" fill="#2a2e40" stroke="#454a64"/>
+              </g>
+              <ellipse class="glow" cx="150" cy="150" rx="60" ry="40" fill="url(#hg)" opacity="0"/>
+              <g fill="#ff4d5e"><circle cx="58" cy="108" r="3"/><circle cx="242" cy="108" r="3"/></g>
+              <g fill="#c8ff3d"><circle cx="100" cy="122" r="2.5"/><circle cx="150" cy="128" r="2.5"/><circle cx="200" cy="122" r="2.5"/></g>
+            </g>
+          </svg>
+        </div>
+        <div class="num">01</div>
+        <h3>Board</h3>
+        <p>Open Solarum and you're in the cockpit: start a new project, pick up where you left off, or let Solari fly.</p>
+      </article>
+
+      <article class="stop reveal d1">
+        <div class="art"><canvas id="mini" aria-hidden="true"></canvas></div>
+        <div class="num">02</div>
+        <h3>Fly into the system</h3>
+        <p>Every sound is an orbit round the sun, every beat a planet. A beam of light sweeps round once a bar and lights them up. Touch the sky and a planet appears. The sun is the play button.</p>
+      </article>
+
+      <article class="stop reveal d2">
+        <div class="art">
+          <svg class="solari" viewBox="-110 -95 220 190" aria-hidden="true">
+            <g class="solari-float" fill="none" stroke="#c8ff3d" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="0" y1="-39" x2="0" y2="-62"/>
+              <circle class="tip" cx="0" cy="-62" r="6" fill="#c8ff3d"/>
+              <rect x="-50" y="-39" width="100" height="78" rx="16"/>
+              <rect x="-61" y="-13" width="10" height="26" rx="3" fill="#c8ff3d" stroke="none" opacity=".7"/>
+              <rect x="51" y="-13" width="10" height="26" rx="3" fill="#c8ff3d" stroke="none" opacity=".7"/>
+              <rect class="eye" x="-28.5" y="-17" width="15" height="18" rx="4" fill="#c8ff3d" stroke="none"/>
+              <rect class="eye" x="13.5" y="-17" width="15" height="18" rx="4" fill="#c8ff3d" stroke="none"/>
+              <path d="M-17.8 17 A20 20 0 0 0 17.8 17"/>
+              <line x1="0" y1="39" x2="0" y2="45"/>
+              <rect x="-28" y="45" width="56" height="34" rx="8"/>
+              <circle class="core" cx="0" cy="62" r="5" fill="#c8ff3d" stroke="none"/>
+              <g class="arm"><line x1="28" y1="51" x2="62" y2="51"/><circle cx="68" cy="51" r="6"/></g>
+              <line x1="-28" y1="51" x2="-48" y2="77"/><circle cx="-51" cy="82" r="6"/>
+            </g>
+          </svg>
+        </div>
+        <div class="num">03</div>
+        <h3>Let Solari help</h3>
+        <p>The little robot on board rolls a fresh rhythm whenever you ask, and can take the controls to play a whole set: build-ups, breakdowns, drops.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section id="look" style="padding-top:0">
+  <div class="wrap">
+    <div class="eyebrow reveal">Inside the ship</div>
+    <h2 class="display reveal">Your beat is a solar system.</h2>
+    <p class="sub reveal">Every sound has its own colour. Bass and synth planets float on stalks, the higher the note, the higher they float. Drag them and they sing.</p>
+    <div class="window-wrap">
+      <div class="window" id="shot">
+        <div class="bar"><i></i><i></i><i></i></div>
+        <img src="solarum.jpg" width="2000" height="1264" loading="lazy" alt="Solarum in auto mode: the planets in the middle, tracks and Solari's terminal on the left, sound pads, effects and the DROP button on the right, favorites below">
+      </div>
+    </div>
+    <div class="callouts">
+      <div class="reveal" style="--c:var(--kick)"><b>Planets</b>Click the sky to place a beat, drag to paint.</div>
+      <div class="reveal d1" style="--c:var(--acid)"><b>The sun</b>Press it to play. It shines in the colour of the energy.</div>
+      <div class="reveal d2" style="--c:var(--ohat)"><b>Energy</b>One fader from quiet break to full drop.</div>
+      <div class="reveal d3" style="--c:var(--ride)"><b>Favorites</b>Keep grooves and turn them into a whole song.</div>
+    </div>
+  </div>
+</section>
+
+<section id="solari">
+  <div class="wrap solari-grid">
+    <div>
+      <div class="eyebrow reveal">Your co-pilot</div>
+      <h2 class="display reveal">Meet Solari.</h2>
+      <p class="sub reveal">Switch on SOLAR OS, the little computer on board, and Solari waves and takes over. Jump in any time, or just listen.</p>
+      <ul class="points">
+        <li class="reveal" style="--c:var(--acid)"><span><b>New rhythms, any time.</b> Pick a vibe and press SHUFFLE: a fresh groove that follows the rules of techno, always clearly different from the last one.</span></li>
+        <li class="reveal d1" style="--c:var(--red)"><span><b>Whole sets on its own.</b> Solari plays an endless set like a DJ: grooves that change, breakdowns, build-ups and drops, every cycle a little hotter.</span></li>
+        <li class="reveal d2" style="--c:var(--ohat)"><span><b>Words instead of theory.</b> Pick a mood like <i>Dark</i>, <i>Euphoric</i> or <i>Dreamy</i> and the chords come with it. You don't need to know anything about music.</span></li>
+        <li class="reveal d3" style="--c:var(--ride)"><span><b>Just type.</b> <code>acid</code>, <code>drop</code>, <code>mood dark</code>, <code>bpm 135</code>, or ask for a <code>joke</code>.</span></li>
+      </ul>
+    </div>
+    <div class="reveal d1">
+      <div class="terminal" aria-label="A demo of the SOLAR OS terminal">
+        <div class="tbar"><span>SOLAR OS</span><span>SET · OFF</span></div>
+        <div class="screen" id="screen"></div>
+        <div class="chips" id="chips">
+          <button type="button">shuffle</button><button type="button">vibe acid</button><button type="button">drop</button><button type="button">mood dark</button><button type="button">joke</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="features" style="padding-top:0">
+  <div class="wrap">
+    <div class="eyebrow reveal">On board</div>
+    <h2 class="display reveal">Everything you need.<br>Nothing you don't.</h2>
+    <div class="features">
+      <div class="feat reveal" style="--c:var(--kick)"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/></svg></div><h3>Ten vibes</h3><p>Dub, Minimal, Melodic, Hypnotic, Electro, Peak time, Acid, Rave, Industrial, Hard. Each with its own tempo, sounds and rules.</p></div>
+      <div class="feat reveal d1" style="--c:var(--clap)"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 18V8M9 18V4M14 18v-7M19 18V6"/></svg></div><h3>34 synthesized sounds</h3><p>Kicks, claps, hats, rides, five basses and a 303-style synth. No samples, everything made live.</p></div>
+      <div class="feat reveal d2" style="--c:var(--rim)"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M5 9l7-6 7 6"/></svg></div><h3>Energy &amp; DROP</h3><p>One fader is the whole arrangement. Press DROP for a two-bar build-up, a breath of silence, then everything hits.</p></div>
+      <div class="feat reveal" style="--c:var(--hat)"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h3l2-6 4 12 3-9 2 3h4"/></svg></div><h3>Live effects</h3><p>Stutter, echo, wash, crush, gate, tape stop and a filter pad. Hold a button, let go to come back.</p></div>
+      <div class="feat reveal d1" style="--c:var(--red)"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5" fill="currentColor"/></svg></div><h3>Record your set</h3><p>One button records everything you hear and saves it as a WAV, ready to share.</p></div>
+      <div class="feat reveal d2" style="--c:var(--ohat)"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 6.6L21 9l-5 4.4L17.5 21 12 17l-5.5 4L8 13.4 3 9l6.6-.4z"/></svg></div><h3>Visualizers</h3><p>LIGHTS and FACE for the big screen or a projector: shockwaves, star fields and a head that screams on the drop.</p></div>
+      <div class="feat reveal" style="--c:var(--ride)"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 14l-4-4 4-4M5 10h10a4 4 0 010 8h-2"/></svg></div><h3>Nothing to break</h3><p>Every change can be undone, nothing goes off-beat, and your work is saved automatically.</p></div>
+      <div class="feat reveal d1" style="--c:var(--bass)"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 6v7M11 6v7M15 6v7M19 6v7"/></svg></div><h3>MIDI keyboards</h3><p>Plug one in and play the sounds and transpose the bassline live, even while Solarum runs.</p></div>
+      <div class="feat reveal d2" style="--c:var(--acid)"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4v6c0 4-3.5 7-8 8-4.5-1-8-4-8-8V7z"/></svg></div><h3>Free &amp; private</h3><p>Open source under MIT. No account, no tracking, no ads. A download of a few megabytes.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="download">
+  <div class="wrap">
+    <div class="eyebrow reveal">Get on board</div>
+    <h2 class="display reveal">Download &amp; first launch.</h2>
+    <p class="sub reveal">Solarum is so new it doesn't carry Apple's or Microsoft's paid stamp yet, so your computer asks once before the first start. Here's how, step by step. After that it opens like any other app.</p>
+
+    <div class="tabs reveal" role="tablist">
+      <button type="button" role="tab" id="tab-mac" aria-selected="true" aria-controls="g-mac">Mac</button>
+      <button type="button" role="tab" id="tab-win" aria-selected="false" aria-controls="g-win">Windows</button>
+    </div>
+
+    <div class="guide on" id="g-mac" role="tabpanel" aria-labelledby="tab-mac">
+      <div class="dl-card">
+        <a class="btn mac" href="https://github.com/tj537/solarum/releases/latest/download/Bunker-macos-universal.zip">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.4 12.6c0-2.6 2.1-3.8 2.2-3.9-1.2-1.8-3.1-2-3.7-2-1.6-.2-3.1.9-3.9.9-.8 0-2-.9-3.4-.9-1.7 0-3.3 1-4.2 2.6-1.8 3.1-.5 7.7 1.3 10.2.8 1.2 1.8 2.6 3.1 2.6 1.2-.1 1.7-.8 3.2-.8s1.9.8 3.2.8c1.3 0 2.2-1.2 3-2.4.9-1.4 1.3-2.7 1.3-2.8 0 0-2.6-1-2.1-4.3zM13.9 5c.7-.8 1.1-1.9 1-3-1 0-2.1.7-2.8 1.5-.6.7-1.2 1.8-1 2.9 1.1.1 2.1-.6 2.8-1.4z"/></svg>
+          <span>Download for Mac<small class="size-mac">Bunker-macos-universal.zip</small></span>
+        </a>
+        <ul><li>macOS 11 Big Sur or newer</li><li>Apple Silicon and Intel</li><li>No installer, no account</li></ul>
+      </div>
+      <ol class="steps">
+        <li><b>Download and unzip</b><span>Click the button. The file is called <em>Bunker-macos-universal.zip</em> (Solarum's old name). Double-click it in Downloads and <em>Solarum</em> appears.</span></li>
+        <li><b>Move it to Applications</b><span>Drag Solarum into your Applications folder.</span></li>
+        <li><b>Open it once</b><span>Double-click Solarum. macOS says it can't check the app for malicious software. Click <em>Done</em> (or <em>OK</em>), nothing is broken.</span></li>
+        <li><b>Allow it</b><span>Open <em>System Settings</em> → <em>Privacy &amp; Security</em>, scroll down to the message about Solarum and click <em>Open Anyway</em>. Confirm with your password or Touch ID.</span></li>
+        <li><b>Take off</b><span>Solarum starts. From now on it opens with a normal double-click.</span></li>
+      </ol>
+    </div>
+
+    <div class="guide" id="g-win" role="tabpanel" aria-labelledby="tab-win">
+      <div class="dl-card">
+        <a class="btn win" href="https://github.com/tj537/solarum/releases/latest/download/Bunker-windows-x64.zip">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.5l7.4-1v7.1H3V5.5zm0 13l7.4 1v-7H3v6zm8.3 1.1L21 21v-8.4h-9.7v7zm0-15.2v7.2H21V3l-9.7 1.4z"/></svg>
+          <span>Download for Windows<small class="size-win">Bunker-windows-x64.zip</small></span>
+        </a>
+        <ul><li>Windows 10 or 11, 64-bit</li><li>No installer, no admin rights</li><li>No account</li></ul>
+      </div>
+      <ol class="steps">
+        <li><b>Download</b><span>Click the button. The file is called <em>Bunker-windows-x64.zip</em> (Solarum's old name).</span></li>
+        <li><b>Unzip it</b><span>Right-click the file in Downloads and choose <em>Extract All…</em> → <em>Extract</em>. Move the folder wherever you like, for example to your Desktop.</span></li>
+        <li><b>Start Solarum</b><span>Open the folder and double-click <em>Solarum.exe</em>.</span></li>
+        <li><b>If Windows asks</b><span>A blue window may say <i>"Windows protected your PC"</i>. Click <em>More info</em>, then <em>Run anyway</em>.</span></li>
+        <li><b>Take off</b><span>That's it, Windows only asks once. Right-click Solarum.exe → <em>Pin to Start</em> to find it again quickly.</span></li>
+      </ol>
+    </div>
+
+    <div class="tip reveal" style="margin-top:34px">
+      Every release lists a <code>SHA256SUMS.txt</code> to check your download. Older versions and release notes are on the <a href="https://github.com/tj537/solarum/releases">releases page</a>. Want to build it yourself? You need <a href="https://rustup.rs">Rust</a>, then <code>cargo run --release</code>.
+    </div>
+  </div>
+</section>
+
+<section style="padding-top:0">
+  <div class="wrap">
+    <div class="help reveal">
+      <div>
+        <div class="eyebrow" style="color:var(--red)">Still being built</div>
+        <h2 class="display">Help build the ship.</h2>
+        <p class="sub">Solarum is young and changes fast, so things will move around and some will break. Feedback, ideas and help are more than welcome.</p>
+      </div>
+      <div class="btns">
+        <a class="btn ghost" href="https://github.com/tj537/solarum/issues/new?template=bug_report.yml">Report a bug</a>
+        <a class="btn ghost" href="https://github.com/tj537/solarum/issues/new?template=feature_request.yml">Share an idea</a>
+        <a class="btn win" href="https://github.com/tj537/solarum">★ Star on GitHub</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>Solarum · free and open source under the MIT license · made with Rust</span>
+    <span><a href="https://github.com/tj537/solarum">GitHub</a><a href="https://github.com/tj537/solarum/releases">Releases</a><a href="https://github.com/tj537/solarum/blob/main/LICENSE">License</a></span>
+  </div>
+</footer>
+
+<script>
+(() => {
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const COLORS = ["#ff4d5e", "#ff9a3c", "#ffd84a", "#59f0b8", "#45c8ff", "#8c7dff", "#d36bff", "#c8ff3d"];
+  // One bar of a techno groove per track (16 steps), innermost orbit first
+  const PATTERN = [
+    "x...x...x...x...", // kick
+    "....x.......x...", // clap
+    "..x.....x.x.....", // rim
+    "x.x.x.x.x.x.x.x.", // hat
+    "..x...x...x...x.", // open hat
+    "x..x..x..x..x...", // ride
+    ".xx..xx..x.x.xx.", // bass
+    "x..x..x.x..x..x.", // synth
+  ];
+  const BPM = 128, BAR = 4 * 60 / BPM;
+
+  // ---------- OS detection ----------
+  const ua = navigator.userAgent, plat = navigator.userAgentData?.platform || navigator.platform || "";
+  const mobile = /Android|iPhone|iPad|iPod/i.test(ua) || (/Mac/.test(plat) && navigator.maxTouchPoints > 1);
+  const isWin = /Win/i.test(plat) || /Windows/i.test(ua);
+  if (mobile) document.body.classList.add("is-mobile");
+  else document.getElementById(isWin ? "btn-win" : "btn-mac").classList.add("primary");
+  if (isWin && !mobile) selectTab("win");
+
+  document.getElementById("share").addEventListener("click", async e => {
+    const data = { title: "Solarum", text: "Techno from another planet – free for Mac and Windows", url: location.href };
+    try { if (navigator.share) await navigator.share(data); else { await navigator.clipboard.writeText(location.href); e.target.textContent = "Link copied ✓"; } } catch (_) {}
+  });
+
+  // ---------- tabs ----------
+  function selectTab(os) {
+    for (const k of ["mac", "win"]) {
+      document.getElementById("tab-" + k).setAttribute("aria-selected", k === os);
+      document.getElementById("g-" + k).classList.toggle("on", k === os);
+    }
+  }
+  document.getElementById("tab-mac").onclick = () => selectTab("mac");
+  document.getElementById("tab-win").onclick = () => selectTab("win");
+
+  // ---------- latest release ----------
+  fetch("https://api.github.com/repos/tj537/solarum/releases/latest")
+    .then(r => r.ok ? r.json() : Promise.reject())
+    .then(rel => {
+      const date = new Date(rel.published_at).toLocaleDateString("en", { day: "numeric", month: "short", year: "numeric" });
+      document.getElementById("ver").textContent = `Version ${rel.tag_name.replace(/^v/, "")} · ${date}`;
+      for (const a of rel.assets || []) {
+        const mb = (a.size / 1048576).toFixed(1) + " MB";
+        if (a.name.includes("macos")) document.querySelectorAll(".size-mac").forEach(e => e.textContent = `${rel.tag_name} · ${mb}`);
+        if (a.name.includes("windows")) document.querySelectorAll(".size-win").forEach(e => e.textContent = `${rel.tag_name} · ${mb}`);
+      }
+    })
+    .catch(() => {});
+
+  // ---------- nav + reveal ----------
+  const nav = document.getElementById("nav");
+  const onScroll = () => nav.classList.toggle("solid", scrollY > 40);
+  addEventListener("scroll", onScroll, { passive: true }); onScroll();
+  const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); } }), { threshold: 0.15 });
+  document.querySelectorAll(".reveal, .window").forEach(el => io.observe(el));
+
+  // ---------- the solar system ----------
+  function system(canvas, opts) {
+    const ctx = canvas.getContext("2d");
+    const stars = [], rings = [];
+    let w = 0, h = 0, dpr = 1, lastStep = -1, visible = true;
+    const fly = opts.stars ? 260 : 0;
+    for (let i = 0; i < fly; i++) stars.push({ x: Math.random() * 2 - 1, y: Math.random() * 2 - 1, z: Math.random() });
+
+    function resize() {
+      dpr = Math.min(devicePixelRatio || 1, 2);
+      w = canvas.clientWidth; h = canvas.clientHeight;
+      canvas.width = w * dpr; canvas.height = h * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    resize(); addEventListener("resize", resize);
+    new IntersectionObserver(es => visible = es[0].isIntersecting).observe(canvas);
+
+    function geometry() {
+      const narrow = w < 760;
+      const cx = opts.hero ? (narrow ? w * 0.5 : w * 0.7) : w / 2;
+      const cy = opts.hero ? (narrow ? 40 + w * 0.42 : h * 0.52) : h * 0.52;
+      const R = opts.hero ? (narrow ? w * 0.47 : Math.min(w * 0.36, h * 0.85)) : Math.min(w * 0.46, h * 0.9);
+      return { cx, cy, R, tilt: opts.hero ? 0.42 : 0.4 };
+    }
+
+    function frame(ms) {
+      requestAnimationFrame(frame);
+      if (!visible) return;
+      const t = reduce ? 1.2 : ms / 1000;
+      const { cx, cy, R, tilt } = geometry();
+      const phase = (t % BAR) / BAR;               // 0..1 round the bar
+      const step = Math.floor(phase * 16);
+      const beat = (t % (BAR / 4)) / (BAR / 4);
+      const kick = Math.max(0, 1 - beat * 3);
+
+      ctx.clearRect(0, 0, w, h);
+      if (opts.hero) {
+        const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(w, h));
+        g.addColorStop(0, "#0d1020"); g.addColorStop(0.5, "#070812"); g.addColorStop(1, "#05060d");
+        ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+      }
+
+      // stars rushing past: we're flying into the system
+      const speed = (reduce ? 0 : 0.06 + 0.12 * kick) / 60;
+      for (const s of stars) {
+        s.z -= speed; if (s.z <= 0.02) { s.z = 1; s.x = Math.random() * 2 - 1; s.y = Math.random() * 2 - 1; }
+        const px = w / 2 + s.x / s.z * w * 0.5, py = h / 2 + s.y / s.z * h * 0.5;
+        if (px < 0 || px > w || py < 0 || py > h) continue;
+        const a = Math.min(1, (1 - s.z) * 1.4), r = (1 - s.z) * 1.8 + 0.2;
+        ctx.fillStyle = `rgba(220,225,255,${a * 0.8})`;
+        ctx.beginPath(); ctx.arc(px, py, r, 0, 7); ctx.fill();
+      }
+
+      const angle = a => a * Math.PI * 2 - Math.PI / 2;
+      const pos = (r, a) => [cx + Math.cos(angle(a)) * r, cy + Math.sin(angle(a)) * r * tilt];
+      const r0 = R * 0.24, dr = (R - r0) / 7;
+
+      // orbits
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 8; i++) {
+        ctx.strokeStyle = COLORS[i] + "30";
+        ctx.beginPath(); ctx.ellipse(cx, cy, r0 + i * dr, (r0 + i * dr) * tilt, 0, 0, 7); ctx.stroke();
+      }
+
+      // the beam: a soft wedge trailing the playhead
+      const trail = 0.12, steps = 24;
+      for (let k = 0; k < steps; k++) {
+        const a1 = phase - trail * k / steps, a2 = phase - trail * (k + 1) / steps;
+        const [x1, y1] = pos(R * 1.05, a1), [x2, y2] = pos(R * 1.05, a2);
+        ctx.fillStyle = `rgba(200,255,61,${0.16 * (1 - k / steps)})`;
+        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(x1, y1); ctx.lineTo(x2, y2); ctx.closePath(); ctx.fill();
+      }
+      const [bx, by] = pos(R * 1.05, phase);
+      ctx.strokeStyle = "rgba(200,255,61,.75)"; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(bx, by); ctx.stroke();
+
+      // a new step: send out rings from the planets the beam just reached
+      if (step !== lastStep) {
+        lastStep = step;
+        PATTERN.forEach((p, i) => { if (p[step] === "x") rings.push({ i, s: step, t }); });
+      }
+
+      // planets, back to front
+      const planets = [];
+      PATTERN.forEach((p, i) => {
+        for (let s = 0; s < 16; s++) if (p[s] === "x") {
+          const lift = i >= 6 ? (8 + ((s * 7 + i * 3) % 5) * 5) * (R / 300) : 0;
+          const [x, y] = pos(r0 + i * dr, s / 16);
+          planets.push({ x, y, lift, i, s });
+        }
+      });
+      planets.sort((a, b) => a.y - b.y);
+
+      // sun behind the front half
+      const drawSun = () => {
+        const sr = R * 0.12 * (1 + 0.08 * kick);
+        const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, sr * 4);
+        g.addColorStop(0, "rgba(200,255,61,.55)"); g.addColorStop(0.3, "rgba(200,255,61,.16)"); g.addColorStop(1, "rgba(200,255,61,0)");
+        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, sr * 4, 0, 7); ctx.fill();
+        for (const [k, c] of [[1.9, "#2a3609"], [1.6, "#47590e"], [1.3, "#6b8614"]]) { ctx.fillStyle = c; ctx.globalAlpha = 0.55; ctx.beginPath(); ctx.arc(cx, cy, sr * k, 0, 7); ctx.fill(); }
+        ctx.globalAlpha = 1; ctx.fillStyle = "#cdff4e"; ctx.beginPath(); ctx.arc(cx, cy, sr, 0, 7); ctx.fill();
+      };
+      let sunDrawn = false;
+      for (const p of planets) {
+        if (!sunDrawn && p.y > cy) { drawSun(); sunDrawn = true; }
+        const since = ((phase - p.s / 16) + 1) % 1;       // how long ago the beam passed
+        const lit = Math.max(0, 1 - since * 5);
+        const size = (opts.hero ? 4.2 : 3.4) * (R / 300) * (0.9 + (p.y - cy) / (R * tilt) * 0.18) + 2.2 + lit * 2.5;
+        const col = COLORS[p.i];
+        if (p.lift) {
+          ctx.strokeStyle = col + "70"; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x, p.y - p.lift); ctx.stroke();
+          ctx.fillStyle = col + "50"; ctx.beginPath(); ctx.ellipse(p.x, p.y, 2.5, 1.2, 0, 0, 7); ctx.fill();
+        }
+        const y = p.y - p.lift;
+        if (lit > 0) {
+          const g = ctx.createRadialGradient(p.x, y, 0, p.x, y, size * 4);
+          g.addColorStop(0, col + "aa"); g.addColorStop(1, col + "00");
+          ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, y, size * 4, 0, 7); ctx.fill();
+        }
+        ctx.fillStyle = col; ctx.globalAlpha = 0.55 + 0.45 * lit;
+        ctx.beginPath(); ctx.arc(p.x, y, size, 0, 7); ctx.fill();
+        ctx.globalAlpha = 1;
+        if (p.i === 0 && opts.hero) { // accents wear a ring like Saturn
+          ctx.strokeStyle = col; ctx.lineWidth = 1.2;
+          ctx.beginPath(); ctx.ellipse(p.x, y, size * 2, size * 0.6, -0.3, 0, 7); ctx.stroke();
+        }
+      }
+      if (!sunDrawn) drawSun();
+
+      // rings rippling out from planets the beam hit
+      for (let k = rings.length - 1; k >= 0; k--) {
+        const r = rings[k], age = t - r.t;
+        if (age > 0.7) { rings.splice(k, 1); continue; }
+        const lift = r.i >= 6 ? (8 + ((r.s * 7 + r.i * 3) % 5) * 5) * (R / 300) : 0;
+        const [x, y] = pos(r0 + r.i * dr, r.s / 16);
+        ctx.strokeStyle = COLORS[r.i]; ctx.globalAlpha = 1 - age / 0.7; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.ellipse(x, y - lift, 4 + age * 40, (4 + age * 40) * 0.5, 0, 0, 7); ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+    }
+    requestAnimationFrame(frame);
+  }
+  system(document.getElementById("sky"), { hero: true, stars: true });
+  system(document.getElementById("mini"), { hero: false, stars: false });
+
+  // ---------- SOLAR OS terminal ----------
+  const screen = document.getElementById("screen");
+  const SCRIPT = [
+    ["dim", "SOLAR OS 0.9 · booting…"],
+    ["", "Hi! I'm Solari. I'll take it from here."],
+    ["you", "vibe acid"],
+    ["", "Acid at 132 BPM. Rolling a groove…"],
+    ["", "kick · clap · hats · a squelchy 303 line"],
+    ["you", "mood dark"],
+    ["", "Dark it is: Am · F · Dm · Em"],
+    ["dim", "bar 24 · breakdown in 8"],
+    ["", "Stripping it back. Filter closing…"],
+    ["hot", "BUILD-UP ▲ gate chopping harder"],
+    ["hot", "DROP ●"],
+    ["you", "joke"],
+    ["", "Why did the kick drum leave the party? It couldn't find the one."],
+  ];
+  const REPLIES = {
+    "shuffle": ["New groove: clearly different, a bit busier."],
+    "vibe acid": ["Acid at 132 BPM. The 303 is squelching."],
+    "drop": ["Build-up: 2 bars…", "!DROP ●"],
+    "mood dark": ["Dark it is: Am · F · Dm · Em"],
+    "joke": ["I'd tell you a joke about 4/4, but it's too predictable."],
+  };
+  let queue = SCRIPT.slice(), busy = false, timer;
+  const MAX = 11;
+  function line(cls, text) {
+    const el = document.createElement("div");
+    el.className = "ln " + cls;
+    screen.appendChild(el);
+    while (screen.children.length > MAX) screen.firstChild.remove();
+    return el;
+  }
+  function typeOut(cls, text, done) {
+    const el = line(cls, ""), cur = document.createElement("span");
+    cur.className = "cursor";
+    let i = 0;
+    const tick = () => {
+      el.textContent = text.slice(0, ++i); el.appendChild(cur);
+      if (i < text.length) setTimeout(tick, cls === "you" ? 70 : 22);
+      else { cur.remove(); done(); }
+    };
+    if (reduce) { el.textContent = text; done(); } else tick();
+  }
+  function next() {
+    if (!queue.length) queue = SCRIPT.slice(1);
+    const [cls, text] = queue.shift();
+    busy = true;
+    typeOut(cls, text, () => { busy = false; timer = setTimeout(next, cls === "you" ? 450 : 1100); });
+  }
+  let started = false;
+  new IntersectionObserver(es => { if (es[0].isIntersecting && !started) { started = true; next(); } }).observe(screen);
+  document.getElementById("chips").addEventListener("click", e => {
+    const cmd = e.target.closest("button")?.textContent;
+    if (!cmd || busy) return;
+    clearTimeout(timer);
+    queue = [["you", cmd], ...REPLIES[cmd].map(r => r[0] === "!" ? ["hot", r.slice(1)] : ["", r]), ...queue];
+    started = true; next();
+  });
+})();
+</script>
+</body>
+</html>

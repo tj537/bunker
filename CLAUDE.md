@@ -27,6 +27,10 @@ Commit only when `cargo test` exits 0.
 - **Visual checks:** verify UI with the offscreen renderer (`src/offscreen.rs`, tests in `src/snapshot.rs`, `SolarumApp::headless` + `fake_live`). Don't take screenshots of the user's desktop.
 - **Sound checks:** render the demo loops and check `print_levels`; nothing may clip (tests assert peak ≤ 1).
 
+## Website
+
+`site/` is the static page at https://tj537.github.io/solarum/ (one `index.html`, fonts, screenshot, icon); `.github/workflows/pages.yml` publishes it on every push to `main` that touches `site/`. Preview it with the `site` entry in `.claude/launch.json`. Update it with new features and when the first-launch steps change.
+
 ## Releases
 
 Asset names never change (`Bunker-macos-universal.zip`, `Bunker-windows-x64.zip`) so `releases/latest/download/…` links keep working. They keep the old name from before the rename to Solarum (the zips hold `Solarum.app` / `Solarum.exe`); the app also keeps its storage under "Bunker" (`main.rs`) so nothing saved gets lost.

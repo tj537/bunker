@@ -7,6 +7,7 @@
 <p align="center">
   <b>Techno from another planet – easy to use, beautiful to look at, free for Mac and Windows.</b><br>
   For everyone: kids, beginners, people who have never touched music software. Paint a beat on an empty solar system, or let Solari, the little robot, play a whole set for you.
+  <br><a href="https://tj537.github.io/solarum/"><b>tj537.github.io/solarum</b></a>
 </p>
 
 <p align="center">
