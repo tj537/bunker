@@ -115,6 +115,7 @@ body.is-mobile nav .links .share-btn { display: inline-flex; }
 body.is-mobile .mobile-note { display: block; }
 body.is-mobile .hero .dl-row { display: none; }
 #download .mobile-note { margin: 0 0 30px; }
+body.is-mobile #download :is(.sub, .tabs, .guide, .tip) { display: none !important; }
 body.is-mobile .hero .wrap { display: flex; flex-direction: column; }
 body.is-mobile .hero .meta { order: 2; }
 
@@ -295,7 +296,7 @@ footer a:hover { color: var(--text); }
     <a href="#features">Features</a>
     <a class="gh" href="https://github.com/tj537/solarum" aria-label="Solarum on GitHub"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 00-3.6 22.4c.6.1.8-.3.8-.6v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.2 1.2a11 11 0 015.8 0c2.2-1.5 3.2-1.2 3.2-1.2.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.2c0 .3.2.7.8.6A11.5 11.5 0 0012 .5z"/></svg><span>GitHub</span></a>
     <a class="cta" href="#download">Download</a>
-    <button class="cta share-btn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 8l5-5 5 5M5 14v5a2 2 0 002 2h10a2 2 0 002-2v-5"/></svg>Send link</button>
+    <button class="cta share-btn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 8l5-5 5 5M5 14v5a2 2 0 002 2h10a2 2 0 002-2v-5"/></svg>Share link</button>
   </div>
 </nav>
 
@@ -318,7 +319,7 @@ footer a:hover { color: var(--text); }
     <div class="meta reveal d3"><span id="ver">Latest release</span><span>No account, no tracking</span><span>A few megabytes</span><span>Linux, iPad &amp; Android tablets planned</span><a class="ghlink" href="https://github.com/tj537/solarum">Open source on GitHub ↗</a></div>
     <div class="mobile-note reveal d3">
       <b>Solarum is made for Mac and Windows computers.</b> Send yourself the link and download it there in a minute.
-      <button class="btn share-btn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 8l5-5 5 5M5 14v5a2 2 0 002 2h10a2 2 0 002-2v-5"/></svg><span class="lbl">Send me the link</span></button>
+      <button class="btn share-btn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 8l5-5 5 5M5 14v5a2 2 0 002 2h10a2 2 0 002-2v-5"/></svg><span class="lbl">Share link</span></button>
       <span class="alt">or <a class="mail-link" href="mailto:?subject=Solarum&amp;body=https%3A%2F%2Ftj537.github.io%2Fsolarum%2F">email it to yourself</a></span>
     </div>
   </div>
@@ -465,7 +466,7 @@ footer a:hover { color: var(--text); }
     <h2 class="display reveal">Download &amp; first launch.</h2>
     <div class="reveal"><div class="mobile-note">
       <b>Solarum is made for Mac and Windows computers.</b> Send yourself the link and download it there in a minute.
-      <button class="btn share-btn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 8l5-5 5 5M5 14v5a2 2 0 002 2h10a2 2 0 002-2v-5"/></svg><span class="lbl">Send me the link</span></button>
+      <button class="btn share-btn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 8l5-5 5 5M5 14v5a2 2 0 002 2h10a2 2 0 002-2v-5"/></svg><span class="lbl">Share link</span></button>
       <span class="alt">or <a class="mail-link" href="mailto:?subject=Solarum&amp;body=https%3A%2F%2Ftj537.github.io%2Fsolarum%2F">email it to yourself</a></span>
     </div></div>
     <p class="sub reveal">Solarum is so new it doesn't carry Apple's or Microsoft's paid stamp yet, so your computer asks once before the first start. Here's how, step by step. After that it opens like any other app.</p>
