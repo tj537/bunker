@@ -25,6 +25,10 @@
 </p>
 
 <p align="center">
+  🪐 <b><a href="https://tj537.github.io/solarum/">Visit the website: tj537.github.io/solarum</a></b>
+</p>
+
+<p align="center">
   <a href="#install">Install</a> ·
   <a href="#what-it-does">What it does</a> ·
   <a href="#keys">Keys</a> ·
