@@ -65,8 +65,10 @@ nav.solid { background: rgba(5,6,13,.78); backdrop-filter: blur(14px); -webkit-b
 nav .links { display: flex; gap: 26px; align-items: center; }
 nav .links a { text-decoration: none; color: var(--dim); font-size: 15px; transition: color .2s; }
 nav .links a:hover { color: var(--text); }
+nav .links a.gh { display: inline-flex; align-items: center; gap: 7px; }
+nav .links a.gh svg { width: 20px; height: 20px; }
 nav .links a.cta { color: var(--space); background: var(--acid); padding: 8px 16px; border-radius: 999px; font-weight: 700; }
-@media (max-width: 760px) { nav .links a:not(.cta) { display: none; } }
+@media (max-width: 760px) { nav .links { gap: 16px; } nav .links a:not(.cta):not(.gh), nav .links a.gh span { display: none; } nav .links a.gh svg { width: 24px; height: 24px; } }
 
 /* ---------- hero ---------- */
 .hero { position: relative; min-height: 100svh; display: flex; align-items: center; overflow: hidden; }
@@ -77,7 +79,6 @@ nav .links a.cta { color: var(--space); background: var(--acid); padding: 8px 16
 }
 .hero .wrap { position: relative; z-index: 2; padding-top: 90px; padding-bottom: 60px; }
 .hero h1 { font-size: clamp(64px, 15vw, 190px); margin: 18px 0 10px; text-shadow: 0 0 60px rgba(200,255,61,.25); }
-.hero h1 .o { color: var(--acid); }
 .hero p.lead { font-size: clamp(18px, 2.4vw, 24px); color: var(--dim); max-width: 34ch; margin: 0 0 32px; }
 .hero p.lead b { color: var(--text); }
 
@@ -100,8 +101,9 @@ nav .links a.cta { color: var(--space); background: var(--acid); padding: 8px 16
   background: var(--space); color: var(--text); border: 1px solid currentColor; padding: 2px 8px; border-radius: 999px;
 }
 .meta { margin-top: 18px; color: var(--faint); font-size: 14px; display: flex; flex-wrap: wrap; gap: 6px 18px; }
+.meta .ghlink { color: var(--dim); text-decoration: underline; text-underline-offset: 3px; }
 .meta span::before { content: "●"; color: var(--acid); margin-right: 7px; font-size: 9px; vertical-align: 2px; }
-.mobile-note { display: none; margin-top: 18px; padding: 12px 16px; border-radius: 12px; background: rgba(255,255,255,.05); border: 1px solid var(--line); color: var(--dim); font-size: 14.5px; max-width: 460px; }
+.mobile-note { display: none; margin-top: 18px; padding: 12px 16px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); color: var(--dim); font-size: 14.5px; max-width: 460px; }
 .mobile-note button { margin-top: 8px; font: 700 14px "Space Grotesk", sans-serif; color: var(--acid); background: none; border: 0; padding: 0; cursor: pointer; }
 body.is-mobile .mobile-note { display: block; }
 
@@ -113,6 +115,7 @@ body.is-mobile .mobile-note { display: block; }
   .hero { align-items: flex-end; }
   .hero .wrap { padding-top: calc(64vw + 70px); padding-bottom: 90px; }
   .btn.primary::before { display: none; }
+  .scroll-hint { display: none; }
   .dl-row .btn { width: 100%; }
 }
 @media (min-width: 760px) {
@@ -269,7 +272,7 @@ footer a:hover { color: var(--text); }
     <a href="#journey">The trip</a>
     <a href="#solari">Solari</a>
     <a href="#features">Features</a>
-    <a href="https://github.com/tj537/solarum">GitHub</a>
+    <a class="gh" href="https://github.com/tj537/solarum" aria-label="Solarum on GitHub"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 00-3.6 22.4c.6.1.8-.3.8-.6v-2c-3.2.7-3.9-1.4-3.9-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.3-1.3-5.3-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.2 1.2a11 11 0 015.8 0c2.2-1.5 3.2-1.2 3.2-1.2.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.4-2.7 5.4-5.3 5.7.4.4.8 1.1.8 2.2v3.2c0 .3.2.7.8.6A11.5 11.5 0 0012 .5z"/></svg><span>GitHub</span></a>
     <a class="cta" href="#download">Download</a>
   </div>
 </nav>
@@ -278,7 +281,7 @@ footer a:hover { color: var(--text); }
   <canvas id="sky" aria-hidden="true"></canvas>
   <div class="wrap">
     <div class="eyebrow reveal">Free · Mac &amp; Windows · in development</div>
-    <h1 class="display reveal d1">S<span class="o">o</span>larum</h1>
+    <h1 class="display reveal d1">Solarum</h1>
     <p class="lead reveal d2"><b>Techno from another planet.</b> Board the ship, fly into a little solar system and make beats by touching planets. Easy, beautiful, for everyone.</p>
     <div class="dl-row reveal d3">
       <a class="btn mac" id="btn-mac" href="https://github.com/tj537/solarum/releases/latest/download/Bunker-macos-universal.zip">
@@ -290,7 +293,7 @@ footer a:hover { color: var(--text); }
         <span>Download for Windows<small>Windows 10 / 11 · 64-bit</small></span>
       </a>
     </div>
-    <div class="meta reveal d3"><span id="ver">Latest release</span><span>No account, no tracking</span><span>A few megabytes</span></div>
+    <div class="meta reveal d3"><span id="ver">Latest release</span><span>No account, no tracking</span><span>A few megabytes</span><a class="ghlink" href="https://github.com/tj537/solarum">Open source on GitHub ↗</a></div>
     <div class="mobile-note reveal d3">
       Solarum runs on Mac and Windows computers. Open this page on your computer to download it.
       <br><button id="share" type="button">Send myself the link →</button>
@@ -659,6 +662,8 @@ footer a:hover { color: var(--text); }
       });
       planets.sort((a, b) => a.y - b.y);
 
+      // a planet in the back half that the sun covers doesn't light up or send out rings
+      const hidden = (x, y, py) => py < cy && Math.hypot(x - cx, y - cy) < R * 0.12 * 1.9;
       // sun behind the front half
       const drawSun = () => {
         const sr = R * 0.12 * (1 + 0.08 * kick);
@@ -681,7 +686,7 @@ footer a:hover { color: var(--text); }
           ctx.fillStyle = col + "50"; ctx.beginPath(); ctx.ellipse(p.x, p.y, 2.5, 1.2, 0, 0, 7); ctx.fill();
         }
         const y = p.y - p.lift;
-        if (lit > 0) {
+        if (lit > 0 && !hidden(p.x, y, p.y)) {
           const g = ctx.createRadialGradient(p.x, y, 0, p.x, y, size * 4);
           g.addColorStop(0, col + "aa"); g.addColorStop(1, col + "00");
           ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, y, size * 4, 0, 7); ctx.fill();
@@ -702,6 +707,7 @@ footer a:hover { color: var(--text); }
         if (age > 0.7) { rings.splice(k, 1); continue; }
         const lift = r.i >= 6 ? (8 + ((r.s * 7 + r.i * 3) % 5) * 5) * (R / 300) : 0;
         const [x, y] = pos(r0 + r.i * dr, r.s / 16);
+        if (hidden(x, y - lift, y)) continue;
         ctx.strokeStyle = COLORS[r.i]; ctx.globalAlpha = 1 - age / 0.7; ctx.lineWidth = 1.5;
         ctx.beginPath(); ctx.ellipse(x, y - lift, 4 + age * 40, (4 + age * 40) * 0.5, 0, 0, 7); ctx.stroke();
         ctx.globalAlpha = 1;
