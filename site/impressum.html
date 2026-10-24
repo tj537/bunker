@@ -30,7 +30,9 @@ p { margin: 0 0 12px; }
   <p>Tom Fischer<br>Fritz-Keck-Straße 10<br>89568 Hermaringen<br>Deutschland</p>
 
   <h2>Kontakt</h2>
-  <p>E-Mail: [E-Mail folgt]</p>
+  <p>E-Mail: <span id="mail">solarum.beats [at] proton [dot] me</span></p>
+  <script>// put the address together here so simple bots don't find it in the HTML
+    { const m = ["solarum.beats", "proton.me"].join("@"), a = document.createElement("a"); a.href = "mailto:" + m; a.textContent = m; document.getElementById("mail").replaceChildren(a); }</script>
 
   <h2>Verantwortlich für den Inhalt</h2>
   <p>Tom Fischer, Anschrift wie oben</p>
