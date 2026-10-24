@@ -413,6 +413,11 @@ pub const HELLOS: [&str; 4] = [
 /// Solari, the little robot on the computer's screen: a head with an antenna that blinks,
 /// eyes that blink, a smile, and an arm that waves. `t` is seconds since it appeared.
 pub fn robot(p: &egui::Painter, c: Pos2, s: f32, t: f32, ink: Color32) {
+    robot_waving(p, c, s, t, ink, 1.0);
+}
+
+/// Solari with the right arm waving by `wave` (0: it hangs like the left one, 1: a full wave)
+pub fn robot_waving(p: &egui::Painter, c: Pos2, s: f32, t: f32, ink: Color32, wave: f32) {
     let line = stroke(2.0, ink);
     // Body and head
     let body = Rect::from_center_size(c + vec2(0.0, 0.62 * s), vec2(0.56 * s, 0.34 * s));
@@ -450,8 +455,10 @@ pub fn robot(p: &egui::Painter, c: Pos2, s: f32, t: f32, ink: Color32) {
     p.add(egui::Shape::line(smile, line));
     // The right arm waves, the left one hangs
     let shoulder_r = body.right_top() + vec2(0.0, 0.06 * s);
-    let wave = -1.0 - 0.45 * (t * 7.0).sin();
-    let hand_r = shoulder_r + vec2(wave.cos().abs(), wave.sin()) * 0.38 * s;
+    let a = -1.0 - 0.45 * (t * 7.0).sin();
+    let up = shoulder_r + vec2(a.cos().abs(), a.sin()) * 0.38 * s;
+    let down = shoulder_r + vec2(0.2 * s, 0.26 * s);
+    let hand_r = down + (up - down) * wave.clamp(0.0, 1.0);
     p.line_segment([shoulder_r, hand_r], line);
     p.circle_stroke(hand_r, 0.06 * s, line);
     let shoulder_l = body.left_top() + vec2(0.0, 0.06 * s);
