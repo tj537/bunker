@@ -41,7 +41,7 @@ body {
   overflow-x: hidden;
 }
 a { color: inherit; }
-img { max-width: 100%; display: block; }
+img { max-width: 100%; height: auto; display: block; }
 kbd {
   font: 700 0.8em "Space Grotesk", sans-serif; padding: 2px 7px; border-radius: 6px;
   background: var(--panel-hi); border: 1px solid var(--line); border-bottom-width: 2px;
@@ -626,12 +626,15 @@ footer a:hover { color: var(--text); }
       const pos = (r, a) => [cx + Math.cos(angle(a)) * r, cy + Math.sin(angle(a)) * r * tilt];
       const r0 = R * 0.24, dr = (R - r0) / 7;
 
-      // orbits
-      ctx.lineWidth = 1;
-      for (let i = 0; i < 8; i++) {
-        ctx.strokeStyle = COLORS[i] + "30";
-        ctx.beginPath(); ctx.ellipse(cx, cy, r0 + i * dr, (r0 + i * dr) * tilt, 0, 0, 7); ctx.stroke();
-      }
+      // orbits in two halves: the back half goes behind the sun, the front half in front of it
+      const orbits = front => {
+        ctx.lineWidth = 1;
+        for (let i = 0; i < 8; i++) {
+          ctx.strokeStyle = COLORS[i] + (front ? "48" : "30");
+          ctx.beginPath(); ctx.ellipse(cx, cy, r0 + i * dr, (r0 + i * dr) * tilt, 0, front ? 0 : Math.PI, front ? Math.PI : Math.PI * 2); ctx.stroke();
+        }
+      };
+      orbits(false);
 
       // the beam: a soft wedge trailing the playhead
       const trail = 0.12, steps = 24;
@@ -672,6 +675,7 @@ footer a:hover { color: var(--text); }
         ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, sr * 4, 0, 7); ctx.fill();
         for (const [k, c] of [[1.9, "#2a3609"], [1.6, "#47590e"], [1.3, "#6b8614"]]) { ctx.fillStyle = c; ctx.globalAlpha = 0.55; ctx.beginPath(); ctx.arc(cx, cy, sr * k, 0, 7); ctx.fill(); }
         ctx.globalAlpha = 1; ctx.fillStyle = "#cdff4e"; ctx.beginPath(); ctx.arc(cx, cy, sr, 0, 7); ctx.fill();
+        orbits(true);
       };
       let sunDrawn = false;
       for (const p of planets) {
